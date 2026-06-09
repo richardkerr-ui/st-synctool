@@ -1,6 +1,7 @@
 import sys, os
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QPalette, QColor
+from core.preflight import run_preflight
 from gui.main_window import MainWindow
 from gui import theme
 
@@ -11,6 +12,8 @@ def _qcolor(hex_str):
 
 
 def main():
+    run_preflight()
+
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     app = QApplication(sys.argv)
     app.setApplicationName("ST SyncTool")
