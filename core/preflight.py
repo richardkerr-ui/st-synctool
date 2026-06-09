@@ -30,7 +30,7 @@ def check_rclone() -> None:
 
 
 def ensure_remote(remote: str = "gdrive") -> None:
-    from utils.gdrive_oauth import get_oauth_credentials
+    from core.oauth_config import get_oauth_credentials
 
     existing = subprocess.run(
         ["rclone", "listremotes"], capture_output=True, text=True,
