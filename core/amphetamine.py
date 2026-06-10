@@ -33,7 +33,6 @@ def check_and_prompt(parent_widget=None):
     if is_installed(): return True
     if parent_widget:
         from PyQt6.QtWidgets import QMessageBox
-        from PyQt6.QtCore import Qt
         msg = QMessageBox(parent_widget)
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle("Amphetamine Required")
@@ -42,6 +41,5 @@ def check_and_prompt(parent_widget=None):
             "Amphetamine prevents your Mac from sleeping during transfers.<br><br>"
             f'<a href="{AMPHETAMINE_APP_STORE}">Download from Mac App Store</a>'
         )
-        msg.setTextFormat(Qt.TextFormat.RichText)
         msg.exec()
     return False

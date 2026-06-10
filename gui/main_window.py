@@ -18,8 +18,20 @@ from core.demo import (
     ensure_demo_merge_folders,
 )
 from gui                  import theme
-from core.setup_checks    import check_rclone_auth, CheckStatus
+from core.setup_checks    import check_rclone_auth, CheckStatus, create_gdrive_remote
 from core.oauth_config    import get_active_remote, get_remote_account_email
+
+
+class _ReconnectWorker(QThread):
+    finished = pyqtSignal(object)  # CheckResult
+
+    def __init__(self, remote: str):
+        super().__init__()
+        self.remote = remote
+
+    def run(self):
+        result = create_gdrive_remote(self.remote)
+        self.finished.emit(result)
 
 
 class _AccountLabelWorker(QThread):
@@ -157,13 +169,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _build_auth_banner(self) -> QWidget:
-        """
-        Coral-bordered banner for auth/connection issues.
-
-        Coral matches theme.STATE_COLORS['BOTH_CHANGED'] — our 'decision
-        needed' color. An expired OAuth token is functionally equivalent:
-        Drive transfers will fail until the user acts.
-        """
         banner = QWidget()
         banner.setObjectName("authBanner")
         banner.setStyleSheet(f"""
@@ -183,10 +188,15 @@ class MainWindow(QMainWindow):
         self._banner_label.setWordWrap(True)
         layout.addWidget(self._banner_label, stretch=1)
 
-        fix_btn = QPushButton("Open Setup")
-        fix_btn.setStyleSheet(theme.primary_button_style())
-        fix_btn.clicked.connect(self._launch_wizard)
-        layout.addWidget(fix_btn)
+        self._reconnect_btn = QPushButton("Reconnect Drive")
+        self._reconnect_btn.setStyleSheet(theme.primary_button_style())
+        self._reconnect_btn.clicked.connect(self._reconnect_drive)
+        layout.addWidget(self._reconnect_btn)
+
+        setup_btn = QPushButton("Open Setup")
+        setup_btn.setStyleSheet(theme.primary_button_style())
+        setup_btn.clicked.connect(self._launch_wizard)
+        layout.addWidget(setup_btn)
 
         banner.hide()
         return banner
@@ -217,14 +227,39 @@ class MainWindow(QMainWindow):
             self._update_account_label(remote)
         else:
             self._account_label.setText("")
+            _empty = "empty token" in result.message.lower()
+            if _empty:
+                _msg = (
+                    "Google Drive token is empty or incomplete. "
+                    "Click <b>Reconnect Drive</b> to re-authenticate."
+                )
+            else:
+                _msg = (
+                    "Google Drive connection issue. "
+                    "Click <b>Reconnect Drive</b> to re-authenticate, "
+                    "or <b>Open Setup</b> for full options."
+                )
             self._banner_label.setText(
                 f'<span style="color: {theme.ACCENT_CORAL}; font-weight: bold;">[!]</span>'
-                f'&nbsp;&nbsp;<b>Google Drive connection issue:</b> {result.message}'
-                f'&nbsp;&nbsp;<span style="color: {theme.MUTED_TEXT};">'
-                f'Transfers to/from Drive will fail until this is fixed.</span>'
+                f'&nbsp;&nbsp;{_msg}'
             )
             self._auth_banner.show()
             self.status_bar.showMessage("Drive auth issue — see banner")
+
+    def _reconnect_drive(self):
+        remote = get_active_remote()
+        self._reconnect_btn.setEnabled(False)
+        self._banner_label.setText(
+            "Opening browser for Google Drive authentication "
+            "— sign in with your Signal Theory account, then grant access."
+        )
+        self._reconnect_worker = _ReconnectWorker(remote)
+        self._reconnect_worker.finished.connect(self._on_reconnect_done)
+        self._reconnect_worker.start()
+
+    def _on_reconnect_done(self, result):
+        self._reconnect_btn.setEnabled(True)
+        self._check_auth_health()
 
     def _update_account_label(self, remote: str):
         self._account_label.setText(remote)

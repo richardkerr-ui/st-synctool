@@ -17,33 +17,45 @@ Four things, each in its own tab:
 
 ## Installation (macOS)
 
-### Quick setup
+### One-command install (recommended)
 
-**Step 1 — Install Xcode Command Line Tools** (one-time system requirement, shows a dialog):
+Run this in Terminal — it handles Xcode CLT, Homebrew, Python, rclone, cloning the repo, and Google Drive auth in one shot:
 
 ```bash
-xcode-select --install
+bash <(curl -fsSL https://raw.githubusercontent.com/richardkerr-ui/st-synctool/main/install.sh)
 ```
 
-**Step 2 — Run the setup script** from the repo directory:
+After it completes, launch the app with:
+
+```bash
+~/Applications/st-synctool/run.sh
+```
+
+Re-running the command on a machine where the app is already installed does a `git pull` and skips any steps that are already complete.
+
+---
+
+### Manual install (fallback)
+
+If you prefer to clone manually:
+
+**Step 1** — Clone the repo. GitHub no longer accepts passwords for Git operations. If this is a private repo, create a [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with `repo` scope and use it in place of your password, or embed it in the URL: `https://<token>@github.com/...`
+
+**Step 2** — Run setup from the repo directory:
 
 ```bash
 bash setup.sh
 ```
 
-This installs Homebrew, Python, rclone, and all Python dependencies automatically.
-
-**Step 3 — Launch the app:**
+**Step 3** — Follow the rclone setup section below, then launch:
 
 ```bash
 ./run.sh
 ```
 
-That's it. After the first setup, only `./run.sh` is needed to launch.
-
 ---
 
-### What the setup script installs
+### What the install script installs
 
 | Tool | Purpose |
 |------|---------|
