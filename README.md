@@ -258,6 +258,22 @@ A verification report at `~/Documents/STSyncTool/logs/verify_<timestamp>.txt` wi
 - **Sources** — each source has a label (used as the destination subfolder name to prevent collisions), a path, and an enable toggle. Add as many as needed.
 - **Destinations** — same pattern. Files land at `{dest}/{source_label}/{files}`.
 
+### Volume auto-detection
+
+When a removable media card is plugged in, the Offload tab detects it and shows a non-modal banner:
+
+> **New volume 'A001' detected** (64.0 GB, exFAT, contains DCIM) — Add as source?  `[Add]` `[Dismiss]`
+
+Clicking **Add** appends a pre-populated source row with the volume name as the label and the mount path already filled in. Clicking **Dismiss** silences that card for its current mount session (ejecting and replugging it will offer it again).
+
+**This is detect-and-suggest, not detect-and-start.** Nothing copies until the user clicks "Start Offload." The source card is never written to during detection.
+
+The feature filters aggressively: only volumes that are both removable+ejectable (OS flags) AND contain a recognisable media structure at or near the root (`DCIM/`, `PRIVATE/`, `CLIP/`, `MEDIA/`, `AUDIO/`, `SOUND/`, `.RDM`/`.RDC`) are surfaced. Plain external drives, Time Machine volumes, and network mounts are ignored.
+
+Toggle **Auto-detect media cards** in the options bar to enable or disable. The preference is saved.
+
+Requires pyobjc (`pip install pyobjc-framework-AppKit`). If pyobjc is not installed the toggle is disabled and detection is silently skipped.
+
 ### Options
 
 - **Filename normalisation** — detects sequential generic naming schemes (`IMG_XXXX`, `GH0XXXXX`, `DJI_XXXX`, etc.) where ≥60% of video files match the pattern, or where two sources share overlapping filenames. If detected, offers to append the first 8 characters of the file's SHA-256 hash to the stem (`IMG_1205.mov` → `IMG_1205_a3f9b2c1.mov`). The rename is deterministic — the same file always gets the same suffix. Source card is never touched; rename happens at the destination during staging.

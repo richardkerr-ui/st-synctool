@@ -574,6 +574,8 @@ class OffloadTab(QWidget):
         self._banners: dict[str, VolumeBanner] = {}
         # mount_paths the user dismissed this session (cleared on unmount)
         self._dismissed: set[str] = set()
+        # mount_paths already offered (banner shown or accepted) this session
+        self._offered: set[str] = set()
         self._build_ui()
         self._start_volume_watcher()
 
@@ -781,16 +783,23 @@ class OffloadTab(QWidget):
     def _on_autodetect_toggled(self, state: int):
         projects.save_app_setting("volume_autodetect", bool(state))
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._autodetect_check.isChecked():
+            for info in self._watcher.scan_existing():
+                self._on_volume_mounted(info)
+
     def _on_volume_mounted(self, info: dict):
         if not self._autodetect_check.isChecked():
             return
         path = info["mount_path"]
-        if path in self._dismissed or path in self._banners:
+        if path in self._dismissed or path in self._banners or path in self._offered:
             return
         banner = VolumeBanner(info, self)
         banner.accepted.connect(self._on_banner_accepted)
         banner.dismissed.connect(self._on_banner_dismissed)
         self._banners[path] = banner
+        self._offered.add(path)
         self._banner_layout.addWidget(banner)
         self._banner_container.setVisible(True)
 
@@ -802,8 +811,9 @@ class OffloadTab(QWidget):
             banner.deleteLater()
             if not self._banners:
                 self._banner_container.setVisible(False)
-        # Clear the dismiss record so a remount shows the banner again
+        # Clear session records so a remount shows the banner again
         self._dismissed.discard(mount_path)
+        self._offered.discard(mount_path)
 
     def _on_banner_accepted(self, info: dict):
         path = info["mount_path"]

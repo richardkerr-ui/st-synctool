@@ -230,6 +230,24 @@ class VolumeWatcher(QObject):
         )
         self._available = True
 
+    def scan_existing(self) -> list[dict]:
+        """
+        Classify all currently-mounted volumes under /Volumes and return those
+        that qualify as media cards.  Used to surface cards that were plugged in
+        before the app started.
+        """
+        results = []
+        try:
+            for entry in Path("/Volumes").iterdir():
+                if not entry.is_dir():
+                    continue
+                info = _classify_volume(str(entry))
+                if info:
+                    results.append(info)
+        except Exception:
+            pass
+        return results
+
     @property
     def available(self) -> bool:
         return self._available
