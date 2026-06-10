@@ -45,6 +45,21 @@ def status_cb():
     return MagicMock()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_offload_outputs(tmp_path, monkeypatch):
+    """Keep run_offload's real-world side effects out of ~/Documents/STSyncTool/.
+
+    Any test that drives run_offload would otherwise write a chain-of-custody
+    log to OFFLOAD_LOGS_DIR and an ingest manifest into the central archive,
+    polluting the user's real output directory on every test run. Redirect the
+    log dir into the test's tmp_path and stub the archive write so the suite
+    stays hermetic. Tests that need the log assert against the path run_offload
+    returns, so the redirect is transparent to them.
+    """
+    monkeypatch.setattr("core.offload.OFFLOAD_LOGS_DIR", tmp_path / "_offload_logs")
+    monkeypatch.setattr("core.offload.save_offload_manifest", lambda *a, **k: None)
+
+
 def _make_source(tmp_path: Path, label: str = "A001") -> tuple[OffloadSource, dict]:
     src_dir = tmp_path / label
     src_dir.mkdir()
@@ -655,14 +670,11 @@ import re as _re
 
 
 class TestChainOfCustodyLog:
-    """Drives run_offload end to end and inspects the written COC log file."""
+    """Drives run_offload end to end and inspects the written COC log file.
 
-    @pytest.fixture(autouse=True)
-    def _isolate_side_effects(self, tmp_path, monkeypatch):
-        # Keep the log out of the real ~/Documents/STSyncTool/offload_logs/ and
-        # skip the schema-1.1 archive write so the test stays hermetic.
-        monkeypatch.setattr("core.offload.OFFLOAD_LOGS_DIR", tmp_path / "_logs")
-        monkeypatch.setattr("core.offload.save_offload_manifest", lambda *a, **k: None)
+    Output isolation is handled by the module-level _isolate_offload_outputs
+    autouse fixture.
+    """
 
     def _run(self, sources, dests, config=None):
         cfg = config or _default_config()
