@@ -97,13 +97,23 @@ def three_way_diff(base, yours, server) -> list:
     if not rename_map:
         return results
 
-    collapsed_paths = set()
+    # Two-pass collapse: first identify which original paths will be suppressed,
+    # then build the final list.  A single-pass approach fails when the renamed-to
+    # path sorts after the renamed-from path and the original has already been
+    # added to the output before the collapse fires.
+    collapsed_paths: set[str] = set()
+    for result in results:
+        if result.path in rename_map:
+            entry = rename_map[result.path]
+            if result.state in (DiffState.SERVER_ONLY, DiffState.DELETED_SERVER,
+                                DiffState.LOCAL_ONLY,  DiffState.DELETED_LOCAL):
+                collapsed_paths.add(entry["from"])
+
     final = []
     for result in results:
         if result.path in rename_map:
             entry = rename_map[result.path]
             orig = entry["from"]
-            # Only collapse if the original path is also being resolved (deleted or exists)
             if result.state in (DiffState.SERVER_ONLY, DiffState.DELETED_SERVER,
                                 DiffState.LOCAL_ONLY,  DiffState.DELETED_LOCAL):
                 final.append(DiffResult(
@@ -113,7 +123,6 @@ def three_way_diff(base, yours, server) -> list:
                     server_entry=result.server_entry,
                     renamed_from=orig,
                 ))
-                collapsed_paths.add(orig)
                 continue
         if result.path not in collapsed_paths:
             final.append(result)
