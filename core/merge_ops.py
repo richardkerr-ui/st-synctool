@@ -54,8 +54,9 @@ def _dest_exists_remote(server_root: str, rel_path: str) -> bool:
     return rclone_bridge.path_exists(f"{server_base}{rel_path}", extra_flags=flags)
 
 
-def _local_copy_verify(src: Path, dst: Path, log_cb=None) -> bool:
-    """Local-to-local copy with SHA-256 verification."""
+def _local_copy_verify(src: Path, dst: Path, log_cb=None):
+    """Local-to-local copy with SHA-256 verification.
+    Returns {"pre": {...}, "post": {...}, "verified": True} on success, False on failure."""
     try:
         pre  = compute_all(src, include_xxhash=False, include_md5=False)
         shutil.copy2(src, dst)
@@ -63,15 +64,16 @@ def _local_copy_verify(src: Path, dst: Path, log_cb=None) -> bool:
         if pre.get("sha256") != post.get("sha256"):
             if log_cb: log_cb(f"  Checksum mismatch after copy: {src.name}", "error")
             return False
-        return True
+        return {"pre": pre, "post": post, "verified": True}
     except Exception as e:
         if log_cb: log_cb(f"  Copy error: {e}", "error")
         return False
 
 
 def push_file(rel_path, local_root: Path, server_root: str,
-              preserve_on_overwrite: bool, log_cb=None) -> bool:
-    """Push a single local file to server (with optional preserve-on-overwrite rename)."""
+              preserve_on_overwrite: bool, log_cb=None):
+    """Push a single local file to server (with optional preserve-on-overwrite rename).
+    Returns a verify dict (truthy) on success or False on failure."""
     src = local_root / rel_path
     if not src.exists():
         if log_cb: log_cb(f"  Push skipped (source missing): {rel_path}", "warning")
@@ -84,24 +86,29 @@ def push_file(rel_path, local_root: Path, server_root: str,
 
     if _server_is_url(server_root):
         server_base, flags = gdrive_url_to_rclone(server_root)
-        ok = rclone_bridge.copyto(str(src), f"{server_base}{dest_rel}",
-                                  dst_flags=flags, log_cb=log_cb)
+        result = rclone_bridge.copyto(str(src), f"{server_base}{dest_rel}",
+                                      dst_flags=flags, log_cb=log_cb)
+        ok = {"verified": True, "method": "rclone-checksum"} if result else False
     else:
         dst_path = Path(server_root) / dest_rel
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         ok = _local_copy_verify(src, dst_path, log_cb)
 
-    if ok and log_cb:
-        log_cb(f"  Pushed: {rel_path}"
-               + (f" -> {dest_rel}" if dest_rel != rel_path else ""), "success")
-    elif not ok and log_cb:
+    if ok:
+        if dest_rel != rel_path:
+            ok["renamed_to"] = dest_rel
+        if log_cb:
+            log_cb(f"  Pushed: {rel_path}"
+                   + (f" -> {dest_rel}" if dest_rel != rel_path else ""), "success")
+    elif log_cb:
         log_cb(f"  Push failed: {rel_path}", "error")
     return ok
 
 
 def pull_file(rel_path, local_root: Path, server_root: str,
-              preserve_on_overwrite: bool, log_cb=None) -> bool:
-    """Pull a single file from server to local (with optional preserve-on-overwrite rename)."""
+              preserve_on_overwrite: bool, log_cb=None):
+    """Pull a single file from server to local (with optional preserve-on-overwrite rename).
+    Returns a verify dict (truthy) on success or False on failure."""
     dest_rel = rel_path
     if preserve_on_overwrite and _dest_exists_local(local_root, rel_path):
         dest_rel = preserve_rename(rel_path)
@@ -112,8 +119,9 @@ def pull_file(rel_path, local_root: Path, server_root: str,
 
     if _server_is_url(server_root):
         server_base, flags = gdrive_url_to_rclone(server_root)
-        ok = rclone_bridge.copyto(f"{server_base}{rel_path}", str(dst),
-                                  src_flags=flags, log_cb=log_cb)
+        result = rclone_bridge.copyto(f"{server_base}{rel_path}", str(dst),
+                                      src_flags=flags, log_cb=log_cb)
+        ok = {"verified": True, "method": "rclone-checksum"} if result else False
     else:
         src_path = Path(server_root) / rel_path
         if not src_path.exists():
@@ -121,10 +129,13 @@ def pull_file(rel_path, local_root: Path, server_root: str,
             return False
         ok = _local_copy_verify(src_path, dst, log_cb)
 
-    if ok and log_cb:
-        log_cb(f"  Pulled: {rel_path}"
-               + (f" -> {dest_rel}" if dest_rel != rel_path else ""), "success")
-    elif not ok and log_cb:
+    if ok:
+        if dest_rel != rel_path:
+            ok["renamed_to"] = dest_rel
+        if log_cb:
+            log_cb(f"  Pulled: {rel_path}"
+                   + (f" -> {dest_rel}" if dest_rel != rel_path else ""), "success")
+    elif log_cb:
         log_cb(f"  Pull failed: {rel_path}", "error")
     return ok
 

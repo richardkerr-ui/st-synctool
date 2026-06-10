@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Callable, Optional
 from core.checksum import compute_all
-from core.manifest import generate_manifest, save_manifest
+from core.manifest import generate_manifest, save_manifest, SCHEMA_VERSION
 from utils.file_utils import folder_size, free_space, format_bytes
 from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
 from core import rclone_bridge
@@ -169,10 +169,20 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None, 
             errors.append({"file": str(fpath), "error": str(e)})
     if progress_cb: progress_cb(100, "Building manifest...")
     manifest = {
-        "schema_version": "1.0", "created_at": datetime.now(timezone.utc).isoformat(),
+        "schema_version": SCHEMA_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "workstation": socket.gethostname(), "user": getpass.getuser(),
         "source_root": str(src), "dest_root": str(actual_dest),
+        "server_path": str(actual_dest),
+        "operation": "transfer",
+        "project_id": "",
+        "renames": [],
         "same_name_merge": same_name, "gdrive_mode": gdrive_mode,
+        "checksum_context": {
+            "algorithm": "md5" if gdrive_mode else "sha256",
+            "gdrive_mode": gdrive_mode,
+            "verification": "pre-post-copy",
+        },
         "file_count": len(records), "error_count": len(errors),
         "files": {r["filename"]: r for r in records}, "errors": errors,
     }
@@ -274,13 +284,21 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
         manifest = {"files": {}, "errors": []}
 
     # Normalize rclone manifest to match local-transfer schema for logging
+    manifest["schema_version"] = SCHEMA_VERSION
     manifest["source_root"] = str(src)
     manifest["dest_root"] = dst_str
     manifest["file_count"] = len(manifest.get("files", {}))
+    # Store the original human-readable URLs (before rclone path conversion) — item 05
+    manifest["source_url"] = str(src) if src_is_url else ""
+    manifest["dest_url"]   = str(dst) if dst_is_url else ""
+    manifest["server_path"] = str(src) if src_is_url else str(dst) if dst_is_url else ""
+    manifest["operation"] = "rclone-transfer"
+    manifest["renames"] = []
 
     # Per-file status by diffing pre/post destination state, plus verification per mode
     status_counts = {"uploaded": 0, "updated": 0, "unchanged": 0}
     verify_failures = []
+    paranoid_fallback_files = []
     normalized = {}
     for fpath, fdata in manifest.get("files", {}).items():
         drive_cs = fdata.get("checksums", {})
@@ -294,8 +312,10 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
                 v_ok = (src_sha == dst_sha.lower())
                 v_method = "paranoid"
             else:
+                # Drive hasn't computed SHA-256 for this file yet
                 v_ok = True
                 v_method = "rclone-checksum"
+                paranoid_fallback_files.append(fpath)
                 src_sha = src_sha or dst_sha
                 dst_sha = dst_sha or src_sha
             fdata["source_checksums"] = {"sha256": src_sha}
@@ -308,8 +328,10 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
                 v_ok = (src_sha.lower() == dst_sha)
                 v_method = "paranoid"
             else:
+                # Drive hasn't computed SHA-256 for this file yet
                 v_ok = True
                 v_method = "rclone-checksum"
+                paranoid_fallback_files.append(fpath)
                 src_sha = src_sha or dst_sha
                 dst_sha = dst_sha or src_sha
             fdata["source_checksums"] = {"sha256": src_sha}
@@ -346,6 +368,15 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     manifest["files"] = normalized
     manifest["verification_method"] = "paranoid" if paranoid_verify else "rclone-checksum"
     manifest["verify_failures"] = verify_failures
+    manifest["checksum_context"] = {
+        "algorithm": "sha256" if paranoid_verify else "rclone-checksum",
+        "paranoid": paranoid_verify,
+        "paranoid_fallback_files": paranoid_fallback_files,
+        "paranoid_fallback_count": len(paranoid_fallback_files),
+    }
+    if paranoid_fallback_files:
+        log(f"  [Paranoid] {len(paranoid_fallback_files)} file(s) fell back to rclone-checksum "
+            f"(Drive SHA-256 not yet computed)", "warning")
     if verify_failures:
         log(f"  [Paranoid] VERIFICATION FAILED for {len(verify_failures)} file(s)", "error")
 

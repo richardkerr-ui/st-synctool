@@ -6,6 +6,7 @@ class DiffState(Enum):
     UNCHANGED=auto(); LOCAL_ONLY=auto(); SERVER_ONLY=auto()
     LOCAL_CHANGED=auto(); SERVER_CHANGED=auto(); BOTH_CHANGED=auto()
     DELETED_LOCAL=auto(); DELETED_SERVER=auto(); DELETED_BOTH=auto()
+    RENAMED=auto()
 
 STATE_LABELS = {
     DiffState.UNCHANGED:      ("Unchanged",       "#6a9955"),
@@ -17,6 +18,7 @@ STATE_LABELS = {
     DiffState.DELETED_LOCAL:  ("Deleted Locally", "#d16969"),
     DiffState.DELETED_SERVER: ("Deleted Server",  "#c586c0"),
     DiffState.DELETED_BOTH:   ("Deleted Both",    "#808080"),
+    DiffState.RENAMED:        ("Renamed",         "#c586c0"),
 }
 
 @dataclass
@@ -25,6 +27,7 @@ class DiffResult:
     base_entry:   Optional[dict] = field(default=None, repr=False)
     yours_entry:  Optional[dict] = field(default=None, repr=False)
     server_entry: Optional[dict] = field(default=None, repr=False)
+    renamed_from: Optional[str]  = field(default=None)
     @property
     def label(self): return STATE_LABELS[self.state][0]
     @property
@@ -69,4 +72,33 @@ def three_way_diff(base, yours, server) -> list:
         elif b and y and not s: state=DiffState.DELETED_SERVER
         else: continue
         results.append(DiffResult(path=path,state=state,base_entry=b,yours_entry=y,server_entry=s))
-    return results
+
+    # Collapse intentional renames recorded in base manifest (item 14).
+    # A rename entry {from: X, to: Y} means Y was created by a preserve_rename during apply.
+    # Y appearing as SERVER_ONLY/DELETED_SERVER (pull rename) or LOCAL_ONLY/DELETED_LOCAL
+    # (push rename) is expected and should be marked RENAMED, not flagged as a conflict.
+    rename_map = {r["to"]: r for r in base.get("renames", []) if r.get("to") and r.get("from")}
+    if not rename_map:
+        return results
+
+    collapsed_paths = set()
+    final = []
+    for result in results:
+        if result.path in rename_map:
+            entry = rename_map[result.path]
+            orig = entry["from"]
+            # Only collapse if the original path is also being resolved (deleted or exists)
+            if result.state in (DiffState.SERVER_ONLY, DiffState.DELETED_SERVER,
+                                DiffState.LOCAL_ONLY,  DiffState.DELETED_LOCAL):
+                final.append(DiffResult(
+                    path=result.path, state=DiffState.RENAMED,
+                    base_entry=result.base_entry,
+                    yours_entry=result.yours_entry,
+                    server_entry=result.server_entry,
+                    renamed_from=orig,
+                ))
+                collapsed_paths.add(orig)
+                continue
+        if result.path not in collapsed_paths:
+            final.append(result)
+    return final

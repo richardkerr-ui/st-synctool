@@ -1,23 +1,68 @@
+import json
 import shutil
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QPushButton, QProgressBar, QFileDialog, QMessageBox, QCheckBox
+    QPushButton, QProgressBar, QFileDialog, QMessageBox, QCheckBox,
+    QComboBox, QDialog, QListWidget, QListWidgetItem, QTextEdit,
+    QDialogButtonBox,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.diff_table import DiffTable
-from core.manifest import generate_manifest, generate_manifest_fast, load_manifest, save_manifest, MANIFEST_FILENAME
+from core.manifest import (
+    generate_manifest_fast, load_manifest, save_manifest,
+    MANIFEST_FILENAME, LOCAL_MANIFEST_DIR,
+)
 from core.comparison import three_way_diff, DiffState
 from core.amphetamine import check_and_prompt, start_session, end_session
 from core import merge_ops, rclone_bridge
 from core.merge_ops import (
     ACT_PUSH, ACT_PULL, ACT_DELETE_LOCAL, ACT_DELETE_SERVER, ACT_SKIP
 )
+from core import projects as project_registry
 from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
 from gui import theme
+
+
+# ── Module-level helpers ──────────────────────────────────────────────────────
+
+def _manifest_age_days_from_iso(iso_str: str) -> int:
+    if not iso_str:
+        return 0
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        delta = datetime.now(timezone.utc) - dt
+        return max(0, delta.days)
+    except Exception:
+        return 0
+
+
+def _manifest_age_days(path: str) -> int:
+    """Days since manifest was created (reads created_at field, falls back to mtime)."""
+    try:
+        data = json.loads(Path(path).read_text())
+        return _manifest_age_days_from_iso(data.get("created_at", ""))
+    except Exception:
+        pass
+    try:
+        return int((datetime.now().timestamp() - Path(path).stat().st_mtime) / 86400)
+    except Exception:
+        return 0
+
+
+def _fmt_date(iso_str: str) -> str:
+    if not iso_str:
+        return ""
+    try:
+        return datetime.fromisoformat(iso_str).astimezone().strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return iso_str[:16]
 
 
 def _build_server_manifest(server_path: str, base_manifest=None, log_cb=None, progress_cb=None):
@@ -34,6 +79,61 @@ def _build_server_manifest(server_path: str, base_manifest=None, log_cb=None, pr
     return generate_manifest_fast(p, base_manifest=base_manifest, label="server",
                                   progress_cb=progress_cb)
 
+
+# ── Dialogs ───────────────────────────────────────────────────────────────────
+
+class ManifestBrowserDialog(QDialog):
+    """Lists archived manifests for a project (per-project subdir), sorted newest-first."""
+
+    def __init__(self, project_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Base Manifest")
+        self.setMinimumWidth(580)
+        self._selected_path = ""
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Archived manifests for: <b>{project_name}</b>"))
+        self.list_widget = QListWidget()
+        layout.addWidget(self.list_widget)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self._on_accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+        self._populate(project_name)
+
+    def _populate(self, project_name: str):
+        proj_dir = LOCAL_MANIFEST_DIR / project_name
+        if not proj_dir.exists():
+            self.list_widget.addItem(QListWidgetItem("No archived manifests found."))
+            return
+        manifests = sorted(
+            proj_dir.glob("*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for m in manifests:
+            days = _manifest_age_days(str(m))
+            age = f"{days}d old" if days > 0 else "today"
+            item = QListWidgetItem(f"{m.name}  ({age})")
+            item.setData(Qt.ItemDataRole.UserRole, str(m))
+            self.list_widget.addItem(item)
+        if manifests:
+            self.list_widget.setCurrentRow(0)
+
+    def _on_accept(self):
+        item = self.list_widget.currentItem()
+        if item:
+            path = item.data(Qt.ItemDataRole.UserRole)
+            if path and Path(path).exists():
+                self._selected_path = path
+                self.accept()
+
+    def selected_path(self) -> str:
+        return self._selected_path
+
+
+# ── Background workers ────────────────────────────────────────────────────────
 
 class ScanWorker(QObject):
     progress = pyqtSignal(int, str)
@@ -60,12 +160,13 @@ class ScanWorker(QObject):
                     self.log.emit("Auto-loaded base manifest from local folder.", "info")
                 else:
                     self.log.emit("No base manifest found — treating local as base.", "warning")
-                    base = {"files": {}}
+                    base = {"files": {}, "renames": []}
 
             # Scan local (fast — pre-filter on modtime+size vs base)
             self.log.emit("Scanning local folder...", "info")
             yours = generate_manifest_fast(
                 self.local_path, base_manifest=base, label="yours",
+                server_path=self.server_path,
                 progress_cb=lambda p, f: self.progress.emit(p // 2, f),
             )
             stats = yours.get("scan_stats", {})
@@ -96,24 +197,25 @@ class ScanWorker(QObject):
 
 
 class ApplyWorker(QObject):
-    progress = pyqtSignal(int, str)
-    log      = pyqtSignal(str, str)
-    finished = pyqtSignal(dict)
-    error    = pyqtSignal(str)
-    rescan_conflict = pyqtSignal(list)  # list of paths whose state changed during rescan
+    progress        = pyqtSignal(int, str)
+    log             = pyqtSignal(str, str)
+    finished        = pyqtSignal(dict)
+    error           = pyqtSignal(str)
+    rescan_conflict = pyqtSignal(list)
 
     def __init__(self, actions, local_path, server_path, base_manifest,
                  yours_manifest, server_manifest,
-                 preserve_on_overwrite, rescan_before_apply):
+                 preserve_on_overwrite, rescan_before_apply, conflict_count=0):
         super().__init__()
-        self.actions     = actions
-        self.local_path  = Path(local_path)
-        self.server_path = server_path
-        self.base        = base_manifest
-        self.yours       = yours_manifest
-        self.server      = server_manifest
-        self.preserve    = preserve_on_overwrite
-        self.rescan      = rescan_before_apply
+        self.actions        = actions
+        self.local_path     = Path(local_path)
+        self.server_path    = server_path
+        self.base           = base_manifest
+        self.yours          = yours_manifest
+        self.server         = server_manifest
+        self.preserve       = preserve_on_overwrite
+        self.rescan         = rescan_before_apply
+        self.conflict_count = conflict_count
 
     def run(self):
         try:
@@ -134,17 +236,17 @@ class ApplyWorker(QObject):
                 fresh_results = three_way_diff(self.base, fresh_yours, fresh_server)
                 fresh_state_by_path = {r.path: r.state.name for r in fresh_results}
 
-                # Build a snapshot of original states for the actionable paths
-                original_state_by_path = {}
-                for r in three_way_diff(self.base, self.yours, self.server):
-                    original_state_by_path[r.path] = r.state.name
+                original_state_by_path = {
+                    r.path: r.state.name
+                    for r in three_way_diff(self.base, self.yours, self.server)
+                }
 
-                conflicts = []
-                for path in self.actions:
-                    orig = original_state_by_path.get(path, "DELETED_BOTH")
-                    fresh = fresh_state_by_path.get(path, "DELETED_BOTH")
-                    if orig != fresh:
-                        conflicts.append((path, orig, fresh))
+                conflicts = [
+                    (path, original_state_by_path.get(path, "DELETED_BOTH"),
+                     fresh_state_by_path.get(path, "DELETED_BOTH"))
+                    for path in self.actions
+                    if original_state_by_path.get(path) != fresh_state_by_path.get(path, "DELETED_BOTH")
+                ]
 
                 if conflicts:
                     log(f"  {len(conflicts)} file(s) changed since initial scan — aborting apply",
@@ -155,42 +257,56 @@ class ApplyWorker(QObject):
                     return
                 log("  No drift detected — proceeding with apply", "success")
 
-            # Execute actions
-            total = max(len(self.actions), 1)
+            # Execute actions — collect rename events (item 13)
+            total   = max(len(self.actions), 1)
             results = {"success": [], "failed": [], "skipped": []}
+            renames = []
 
             for i, (rel_path, action) in enumerate(self.actions.items()):
                 self.progress.emit(int(20 + i / total * 70), f"{action}: {rel_path}")
                 if action in (ACT_SKIP, ""):
                     results["skipped"].append(rel_path)
                     continue
-                ok = False
+
+                op_result = False
                 if action == ACT_PUSH:
-                    ok = merge_ops.push_file(
+                    op_result = merge_ops.push_file(
                         rel_path, self.local_path, self.server_path,
                         preserve_on_overwrite=self.preserve, log_cb=log)
                 elif action == ACT_PULL:
-                    ok = merge_ops.pull_file(
+                    op_result = merge_ops.pull_file(
                         rel_path, self.local_path, self.server_path,
                         preserve_on_overwrite=self.preserve, log_cb=log)
                 elif action == ACT_DELETE_LOCAL:
-                    ok = merge_ops.delete_local(rel_path, self.local_path, log_cb=log)
+                    op_result = merge_ops.delete_local(rel_path, self.local_path, log_cb=log)
                 elif action == ACT_DELETE_SERVER:
-                    ok = merge_ops.delete_server(rel_path, self.server_path, log_cb=log)
+                    op_result = merge_ops.delete_server(rel_path, self.server_path, log_cb=log)
                 else:
                     log(f"  Unknown action {action!r} for {rel_path} — skipping", "warning")
                     results["skipped"].append(rel_path)
                     continue
-                (results["success"] if ok else results["failed"]).append(rel_path)
 
-            # Regenerate manifest + push to both sides
+                if op_result:
+                    results["success"].append(rel_path)
+                    if isinstance(op_result, dict) and op_result.get("renamed_to"):
+                        renames.append({
+                            "from":   rel_path,
+                            "to":     op_result["renamed_to"],
+                            "action": action,
+                        })
+                else:
+                    results["failed"].append(rel_path)
+
+            # Regenerate manifest with server_path and renames recorded
             self.progress.emit(92, "Regenerating manifest...")
             log("Regenerating manifest from new local state...", "info")
             new_manifest = generate_manifest_fast(
                 self.local_path, base_manifest=self.yours, label="post-merge",
+                server_path=self.server_path, operation="post-merge",
             )
+            new_manifest["renames"] = renames
             saved = save_manifest(new_manifest, source_dir=self.local_path,
-                                  name_hint=self.local_path.name)
+                                  name_hint=self.local_path.name, operation="post-merge")
             log(f"  Local manifest saved to {len(saved)} location(s)", "info")
 
             self.progress.emit(96, "Uploading manifest to server...")
@@ -214,27 +330,145 @@ class ApplyWorker(QObject):
                 self.error.emit(f"Server manifest upload failed: {e}")
                 return
 
+            # Record merge in project registry (item 12)
+            project_id = new_manifest.get("project_id", "")
+            if project_id:
+                archive_path = str(saved[0]) if saved else ""
+                try:
+                    project_registry.record_merge(
+                        project_id,
+                        files_changed=len(results["success"]),
+                        conflicts=self.conflict_count,
+                        preserve_renames=len(renames),
+                        manifest_path=archive_path,
+                    )
+                    if archive_path:
+                        project_registry.upsert_project(
+                            project_id,
+                            local_path=str(self.local_path),
+                            server_path=self.server_path,
+                            latest_manifest=archive_path,
+                        )
+                except Exception as e:
+                    log(f"  Could not update project registry: {e}", "warning")
+
+            results["renames"] = renames
             self.progress.emit(100, "Done")
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
 
 
+class ServerHealthWorker(QObject):
+    result = pyqtSignal(str, str)  # (status: "ok"/"warn"/"error", message)
+
+    def __init__(self, server_path: str, local_path: str):
+        super().__init__()
+        self.server_path = server_path
+        self.local_path  = local_path
+
+    def run(self):
+        try:
+            # Fetch server manifest
+            if is_gdrive_url(self.server_path):
+                remote, flags = gdrive_url_to_rclone(self.server_path)
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    ok = rclone_bridge.copyto(
+                        f"{remote}{MANIFEST_FILENAME}",
+                        str(Path(tmpdir) / MANIFEST_FILENAME),
+                        src_flags=flags,
+                    )
+                    if not ok:
+                        self.result.emit("warn", "Could not fetch server manifest via rclone.")
+                        return
+                    server_m = load_manifest(Path(tmpdir) / MANIFEST_FILENAME)
+            else:
+                server_mf = Path(self.server_path) / MANIFEST_FILENAME
+                if not server_mf.exists():
+                    self.result.emit("warn", f"No manifest at server path: {server_mf}")
+                    return
+                server_m = load_manifest(server_mf)
+
+            # Load local manifest for comparison
+            local_mf = Path(self.local_path) / MANIFEST_FILENAME if self.local_path else None
+            if not local_mf or not local_mf.exists():
+                s_days = _manifest_age_days_from_iso(server_m.get("created_at", ""))
+                self.result.emit("warn",
+                    f"Server manifest: {server_m.get('file_count','?')} files, "
+                    f"{s_days}d old — no local manifest to compare against.")
+                return
+
+            local_m = load_manifest(local_mf)
+            s_id = server_m.get("project_id", "")
+            l_id = local_m.get("project_id", "")
+            s_ts = server_m.get("created_at", "")
+            l_ts = local_m.get("created_at", "")
+            s_fc = server_m.get("file_count", "?")
+            l_fc = local_m.get("file_count", "?")
+
+            if s_id and l_id and s_id != l_id:
+                self.result.emit("error",
+                    f"Project ID mismatch — server: {s_id}, local: {l_id}. "
+                    "These manifests may belong to different projects.")
+                return
+
+            s_days = _manifest_age_days_from_iso(s_ts)
+            l_days = _manifest_age_days_from_iso(l_ts)
+
+            if s_ts == l_ts:
+                self.result.emit("ok",
+                    f"Server and local manifests are in sync "
+                    f"({s_fc} files, {s_days}d old).")
+            elif s_days < l_days:
+                self.result.emit("warn",
+                    f"Server manifest is NEWER than local "
+                    f"(server {s_days}d / local {l_days}d, "
+                    f"server {s_fc} files / local {l_fc} files). Re-scan recommended.")
+            else:
+                self.result.emit("warn",
+                    f"Server manifest differs from local "
+                    f"(server {s_days}d / local {l_days}d, "
+                    f"server {s_fc} files / local {l_fc} files).")
+        except Exception as e:
+            self.result.emit("error", f"Health check failed: {e}")
+
+
+# ── MergeTab ──────────────────────────────────────────────────────────────────
+
 class MergeTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._base_manifest   = None
-        self._yours_manifest  = None
-        self._server_manifest = None
-        self._diff_results    = []
-        self._scan_thread     = None
-        self._apply_thread    = None
+        self._base_manifest    = None
+        self._yours_manifest   = None
+        self._server_manifest  = None
+        self._diff_results     = []
+        self._scan_thread      = None
+        self._apply_thread     = None
+        self._current_project_id = None
+        self._detect_timer     = None
         self._build_ui()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
+        # ── Project quick-loader (item 15) ───────────────────────
+        proj_row = QHBoxLayout()
+        proj_row.addWidget(QLabel("Quick Load:"))
+        self.project_combo = QComboBox()
+        self.project_combo.setMinimumWidth(220)
+        self.project_combo.addItem("— select project —")
+        self.project_combo.currentIndexChanged.connect(self._on_project_selected)
+        proj_row.addWidget(self.project_combo, stretch=1)
+        refresh_btn = QPushButton("↺")
+        refresh_btn.setFixedWidth(32)
+        refresh_btn.setToolTip("Refresh project list")
+        refresh_btn.clicked.connect(self._refresh_project_combo)
+        proj_row.addWidget(refresh_btn)
+        proj_row.addStretch()
+        root.addLayout(proj_row)
+
+        # ── Path inputs ──────────────────────────────────────────
         input_group = QGroupBox("Paths")
         ig = QVBoxLayout(input_group)
 
@@ -246,12 +480,17 @@ class MergeTab(QWidget):
         self.base_input.input.setPlaceholderText(
             "Optional — auto-detects st_manifest.json in local folder"
         )
+        self.base_input.pathChanged.connect(self._update_stale_badge)
         brow.addWidget(self.base_input)
+        self.stale_label = QLabel("")
+        self.stale_label.setFixedWidth(90)
+        brow.addWidget(self.stale_label)
         ig.addLayout(brow)
 
         lrow = QHBoxLayout()
         lrow.addWidget(QLabel("Local Folder (Yours):  "))
         self.local_input = PathInputWidget("merge_local", self)
+        self.local_input.pathChanged.connect(self._on_local_path_changed)
         lrow.addWidget(self.local_input)
         ig.addLayout(lrow)
 
@@ -262,29 +501,31 @@ class MergeTab(QWidget):
             "/Volumes/NAS/project  or  https://drive.google.com/drive/folders/..."
         )
         srow.addWidget(self.server_input)
+        health_btn = QPushButton("Check")
+        health_btn.setFixedWidth(60)
+        health_btn.setToolTip("Quick-compare server manifest against local")
+        health_btn.clicked.connect(self._check_server_health)
+        srow.addWidget(health_btn)
         ig.addLayout(srow)
 
         root.addWidget(input_group)
 
-        # Options
+        # ── Options ──────────────────────────────────────────────
         opts_group = QGroupBox("Options")
         ol = QVBoxLayout(opts_group)
-
         self.preserve_chk = QCheckBox(
             "Preserve existing files on overwrite (rename incoming with date-initials suffix)"
         )
         self.preserve_chk.setChecked(True)
         ol.addWidget(self.preserve_chk)
-
         self.rescan_chk = QCheckBox(
             "Re-scan before apply (catches drift since initial scan)"
         )
         self.rescan_chk.setChecked(True)
         ol.addWidget(self.rescan_chk)
-
         root.addWidget(opts_group)
 
-        # Buttons
+        # ── Action buttons ───────────────────────────────────────
         btn_row = QHBoxLayout()
         self.scan_btn = QPushButton("  Scan && Compare")
         self.scan_btn.setFixedHeight(36)
@@ -316,12 +557,172 @@ class MergeTab(QWidget):
         self.log.setMaximumHeight(160)
         root.addWidget(self.log)
 
+        # ── Merge history panel (item 19) ────────────────────────
+        history_group = QGroupBox("Merge History")
+        hl = QVBoxLayout(history_group)
+        self.history_text = QTextEdit()
+        self.history_text.setReadOnly(True)
+        self.history_text.setMaximumHeight(110)
+        self.history_text.setStyleSheet(
+            "QTextEdit { background:#1a1a1a; color:#888; font-size:11px;"
+            "  border:1px solid #333; border-radius:4px; padding:4px; }"
+        )
+        self.history_text.setPlainText("No project loaded.")
+        hl.addWidget(self.history_text)
+        root.addWidget(history_group)
+
+        self._refresh_project_combo()
+
+    # ── Project loader (item 15) ──────────────────────────────────────────────
+
+    def _refresh_project_combo(self):
+        self.project_combo.blockSignals(True)
+        current_id = self._current_project_id
+        self.project_combo.clear()
+        self.project_combo.addItem("— select project —", userData=None)
+        restore_idx = 0
+        for i, proj in enumerate(project_registry.list_projects(), start=1):
+            self.project_combo.addItem(proj["display_name"], userData=proj["project_id"])
+            if proj["project_id"] == current_id:
+                restore_idx = i
+        self.project_combo.setCurrentIndex(restore_idx)
+        self.project_combo.blockSignals(False)
+
+    def _on_project_selected(self, index: int):
+        project_id = self.project_combo.itemData(index)
+        if not project_id:
+            return
+        proj = project_registry.get_project(project_id)
+        if not proj:
+            return
+        self.local_input.setText(proj.get("local_path", ""))
+        self.server_input.setText(proj.get("server_path", ""))
+        latest = proj.get("latest_manifest", "")
+        if latest and Path(latest).exists():
+            self.base_input.setText(latest)
+            self._update_stale_badge(latest)
+        self._current_project_id = project_id
+        self._refresh_history_panel()
+        self.log.log(f"Loaded project: {proj['display_name']}", "info")
+
+    # ── Auto-detect project on local path change (item 17) ───────────────────
+
+    def _on_local_path_changed(self, text: str):
+        if not text or len(text) < 3:
+            return
+        if self._detect_timer is None:
+            self._detect_timer = QTimer(self)
+            self._detect_timer.setSingleShot(True)
+            self._detect_timer.timeout.connect(self._auto_detect_project)
+        self._detect_timer.start(600)
+
+    def _auto_detect_project(self):
+        local = self.local_input.text()
+        if not local:
+            return
+        proj = project_registry.find_by_local_path(local)
+        if not proj:
+            return
+        if not self.server_input.text():
+            self.server_input.setText(proj.get("server_path", ""))
+        latest = proj.get("latest_manifest", "")
+        if not self.base_input.text() and latest and Path(latest).exists():
+            self.base_input.setText(latest)
+            self._update_stale_badge(latest)
+        self._current_project_id = proj["project_id"]
+        self._refresh_history_panel()
+        self.log.log(f"Auto-detected project: {proj['display_name']}", "info")
+
+    # ── Stale manifest badge (item 18) ───────────────────────────────────────
+
+    def _update_stale_badge(self, path: str = ""):
+        path = path or self.base_input.text()
+        if not path or not Path(path).exists():
+            self.stale_label.setText("")
+            return
+        days = _manifest_age_days(path)
+        if days >= 14:
+            self.stale_label.setText(f"({days}d old)")
+            self.stale_label.setStyleSheet(f"color:{theme.CORAL};font-size:11px;")
+        elif days >= 7:
+            self.stale_label.setText(f"({days}d old)")
+            self.stale_label.setStyleSheet("color:#ff9800;font-size:11px;")
+        elif days > 0:
+            self.stale_label.setText(f"({days}d old)")
+            self.stale_label.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:11px;")
+        else:
+            self.stale_label.setText("")
+
+    # ── Manifest browser dialog (item 16) ────────────────────────────────────
+
     def _browse_manifest(self):
+        local_name = Path(self.local_input.text()).name if self.local_input.text() else ""
+        proj_dir = LOCAL_MANIFEST_DIR / local_name if local_name else None
+        if proj_dir and proj_dir.exists() and any(proj_dir.glob("*.json")):
+            dlg = ManifestBrowserDialog(local_name, self)
+            if dlg.exec() and dlg.selected_path():
+                self.base_input.setText(dlg.selected_path())
+                self._update_stale_badge(dlg.selected_path())
+                return
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Base Manifest", "", "JSON Files (*.json)"
         )
         if path:
             self.base_input.setText(path)
+            self._update_stale_badge(path)
+
+    # ── Server health check (item 20) ────────────────────────────────────────
+
+    def _check_server_health(self):
+        server = self.server_input.text()
+        if not server:
+            QMessageBox.warning(self, "No Server Path", "Enter the server path first.")
+            return
+        self.log.log("Checking server manifest health...", "info")
+        self._health_thread = QThread()
+        self._health_worker = ServerHealthWorker(server, self.local_input.text())
+        self._health_worker.moveToThread(self._health_thread)
+        self._health_thread.started.connect(self._health_worker.run)
+        self._health_worker.result.connect(self._on_health_result)
+        self._health_worker.result.connect(self._health_thread.quit)
+        self._health_thread.start()
+
+    def _on_health_result(self, status: str, msg: str):
+        level = "success" if status == "ok" else "warning" if status == "warn" else "error"
+        self.log.log(f"Server health: {msg}", level)
+
+    # ── Merge history panel (item 19) ─────────────────────────────────────────
+
+    def _refresh_history_panel(self):
+        proj_id = self._current_project_id
+        if not proj_id:
+            self.history_text.setPlainText("No project loaded.")
+            return
+        proj = project_registry.get_project(proj_id)
+        if not proj:
+            self.history_text.setPlainText("Project not found in registry.")
+            return
+        history = proj.get("history", [])
+        last = _fmt_date(proj.get("last_merged_at", ""))
+        header = f"Project: {proj['display_name']}"
+        if last:
+            header += f"  |  Last merged: {last}"
+        if not history:
+            self.history_text.setPlainText(f"{header}\nNo merge history yet.")
+            return
+        lines = [header, "─" * 52]
+        for entry in reversed(history[-20:]):
+            dt    = _fmt_date(entry.get("merged_at", ""))
+            fc    = entry.get("files_changed", 0)
+            co    = entry.get("conflicts", 0)
+            pr    = entry.get("preserve_renames", 0)
+            parts = [f"{fc} file{'s' if fc != 1 else ''} changed"]
+            if co: parts.append(f"{co} conflict{'s' if co != 1 else ''}")
+            if pr: parts.append(f"{pr} rename{'s' if pr != 1 else ''}")
+            lines.append(f"{dt}  {', '.join(parts)}")
+        self.history_text.setPlainText("\n".join(lines))
+
+    # ── Scan ──────────────────────────────────────────────────────────────────
 
     def _run_scan(self):
         local  = self.local_input.text()
@@ -376,20 +777,38 @@ class MergeTab(QWidget):
         self.scan_btn.setEnabled(True)
         self.apply_btn.setEnabled(changed > 0)
 
+        # Auto-register project (item 11)
+        project_id = yours.get("project_id", "")
+        if project_id:
+            try:
+                project_registry.upsert_project(
+                    project_id,
+                    local_path=self.local_input.text(),
+                    server_path=self.server_input.text(),
+                )
+                if self._current_project_id != project_id:
+                    self._current_project_id = project_id
+                    self._refresh_project_combo()
+                    self._refresh_history_panel()
+            except Exception as e:
+                self.log.log(f"  Could not register project: {e}", "warning")
+
     def _on_scan_error(self, msg):
         end_session()
         self.scan_btn.setEnabled(True)
         self.log.log(f"Scan error: {msg}", "error")
         QMessageBox.critical(self, "Scan Error", msg)
 
+    # ── Apply ─────────────────────────────────────────────────────────────────
+
     def _apply_actions(self):
         actions = self.diff_table.get_actions()
         actionable = {p: a for p, a in actions.items() if a not in (ACT_SKIP, "")}
         if not actionable:
-            QMessageBox.information(self, "Nothing To Do",
-                                    "No actions selected.")
+            QMessageBox.information(self, "Nothing To Do", "No actions selected.")
             return
 
+        conflicts = sum(1 for r in self._diff_results if r.state.name == "BOTH_CHANGED")
         confirm = QMessageBox.question(
             self, "Confirm Apply",
             f"Apply {len(actionable)} action(s)?\n"
@@ -414,6 +833,7 @@ class MergeTab(QWidget):
             self._server_manifest,
             preserve_on_overwrite=self.preserve_chk.isChecked(),
             rescan_before_apply=self.rescan_chk.isChecked(),
+            conflict_count=conflicts,
         )
         self._apply_worker.moveToThread(self._apply_thread)
         self._apply_thread.started.connect(self._apply_worker.run)
@@ -438,14 +858,18 @@ class MergeTab(QWidget):
         end_session()
         self.apply_btn.setEnabled(True)
         self.scan_btn.setEnabled(True)
-        s = len(results.get("success", []))
-        f = len(results.get("failed", []))
+        s  = len(results.get("success", []))
+        f  = len(results.get("failed", []))
         sk = len(results.get("skipped", []))
+        pr = len(results.get("renames", []))
+        rename_note = f", {pr} preserve-rename{'s' if pr != 1 else ''}" if pr else ""
         self.log.log(
-            f"Apply complete — {s} succeeded, {f} failed, {sk} skipped.",
+            f"Apply complete — {s} succeeded, {f} failed, {sk} skipped{rename_note}.",
             "success" if f == 0 else "warning",
         )
         self.progress_bar.setValue(100)
+        self._refresh_history_panel()
+        self._refresh_project_combo()
         if f == 0:
             QMessageBox.information(self, "Apply Complete",
                                     f"{s} action(s) completed successfully.")
@@ -455,7 +879,7 @@ class MergeTab(QWidget):
 
     def _on_rescan_conflict(self, paths):
         end_session()
-        self.apply_btn.setEnabled(False)  # force re-scan
+        self.apply_btn.setEnabled(False)
         self.scan_btn.setEnabled(True)
         QMessageBox.warning(
             self, "Files Changed Since Scan",

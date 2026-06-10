@@ -30,6 +30,7 @@ STATE_COLORS = {
     "DELETED_SERVER": MUTED_TEXT,
     "DELETED_BOTH":   "#555555",
     "UNCHANGED":      MUTED_TEXT,
+    "RENAMED":        "#c586c0",
 }
 
 def app_stylesheet():

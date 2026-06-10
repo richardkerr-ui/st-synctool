@@ -1,5 +1,6 @@
 import json, re, subprocess, socket, getpass, shutil, threading
 from datetime import datetime, timezone
+from core.manifest import SCHEMA_VERSION
 
 RCLONE_BIN = "rclone"
 
@@ -132,20 +133,31 @@ def lsjson_to_manifest(remote_path, extra_flags=None, label="server"):
             if "sha1"   in h: cs["sha1"]       = h["sha1"].lower()
             if "md5"    in h: cs["md5"]        = h["md5"].lower()
             if "xxhash" in h: cs["xxhash3_64"] = h["xxhash"].lower()
+        drive_id = item.get("ID", "")
+        gdrive_url = f"https://drive.google.com/file/d/{drive_id}/view" if drive_id else ""
         files[item["Path"]] = {
             "type": "file",
             "size": item.get("Size", 0),
             "modtime": item.get("ModTime", ""),
             "checksums": cs,
+            "gdrive_url": gdrive_url,
         }
     return {
-        "schema_version": "1.0",
+        "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "label": label,
-        "root": remote_path,
+        "root": remote_path,  # display label only — use server_path for the server side
+        "server_path": remote_path,
+        "operation": "",
+        "project_id": "",
         "workstation": socket.gethostname(),
         "user": getpass.getuser(),
         "file_count": len(files),
+        "renames": [],
+        "checksum_context": {
+            "algorithm": "rclone-lsjson",
+            "source": "lsjson --hash",
+        },
         "files": files,
         "total_size_bytes": sum(v["size"] for v in files.values()),
     }
