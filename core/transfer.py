@@ -71,10 +71,13 @@ def pre_flight_checks(source, destination, is_gdrive_dest=False, log_cb=None):
                     f"Not enough space. Need {format_bytes(total)}, only {format_bytes(free)} free."
                 )
             total_disk = shutil.disk_usage(dst_path).total
-            used_after = sum(
-                f.stat().st_size for f in dst_path.rglob("*") if f.is_file()
-            ) if dst_path.exists() else 0
-            pct_after = (used_after + total) / total_disk * 100
+            if total_disk > 0:
+                used_after = sum(
+                    f.stat().st_size for f in dst_path.rglob("*") if f.is_file()
+                ) if dst_path.exists() else 0
+                pct_after = (used_after + total) / total_disk * 100
+            else:
+                pct_after = 0
             if pct_after > 90:
                 raise TransferWarning(f"Destination will be {pct_after:.1f}% full after transfer.")
         log(f"Destination free: {format_bytes(free)} — OK")

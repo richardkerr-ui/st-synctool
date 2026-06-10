@@ -248,7 +248,6 @@ def create_gdrive_remote(
     timeout: int = 300,
 ) -> CheckResult:
     _cid, _csec = get_oauth_credentials()
-    _cid, _csec = get_oauth_credentials()
     cmd = [
         "rclone", "config", "create", name, "drive",
         f"client_id={_cid}",

@@ -51,10 +51,7 @@ def _run(args, timeout=300, log_cb=None, progress_cb=None):
                     except Exception:
                         pass
         finally:
-            try:
-                stream.close()
-            except Exception:
-                pass
+            stream.close()
 
     t_out = threading.Thread(target=reader, args=(proc.stdout, stdout_chunks, False), daemon=True)
     t_err = threading.Thread(target=reader, args=(proc.stderr, stderr_chunks, True), daemon=True)

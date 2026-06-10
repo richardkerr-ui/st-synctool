@@ -15,10 +15,13 @@ Priority:
 """
 
 import json
+import logging
 import os
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+_log = logging.getLogger(__name__)
 
 
 # Signal Theory's Google Cloud OAuth client.
@@ -44,8 +47,8 @@ def get_oauth_credentials() -> Tuple[str, str]:
             csec = (data.get("client_secret") or "").strip()
             if cid and csec:
                 return cid, csec
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            _log.warning("Could not read OAuth config from %s: %s", _CONFIG_PATH, e)
 
     return _DEFAULT_CLIENT_ID, _DEFAULT_CLIENT_SECRET
 

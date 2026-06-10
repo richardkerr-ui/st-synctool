@@ -196,6 +196,8 @@ class ApplyWorker(QObject):
             self.progress.emit(96, "Uploading manifest to server...")
             try:
                 manifest_local_path = self.local_path / MANIFEST_FILENAME
+                if not manifest_local_path.exists():
+                    raise FileNotFoundError(f"Manifest not written: {manifest_local_path}")
                 if is_gdrive_url(self.server_path):
                     remote, flags = gdrive_url_to_rclone(self.server_path)
                     rclone_bridge.copyto(
@@ -208,7 +210,9 @@ class ApplyWorker(QObject):
                     shutil.copy2(manifest_local_path, dst)
                 log("  Server manifest updated", "success")
             except Exception as e:
-                log(f"  Could not update server manifest: {e}", "warning")
+                log(f"  Could not update server manifest: {e}", "error")
+                self.error.emit(f"Server manifest upload failed: {e}")
+                return
 
             self.progress.emit(100, "Done")
             self.finished.emit(results)

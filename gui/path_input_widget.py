@@ -69,4 +69,4 @@ class PathInputWidget(QWidget):
         self._combo.insertItem(0, path)
         self._combo.setCurrentIndex(0)
         while self._combo.count() > 10:
-            self._combo.removeItem(self._combo.count() - 1)
+            self._combo.removeItem(10)

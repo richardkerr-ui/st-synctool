@@ -62,10 +62,13 @@ class FixWorker(QThread):
             self.finished_with_code.emit(-1)
             return
 
-        for line in proc.stdout:
-            self.output.emit(line)
-        proc.wait()
-        self.finished_with_code.emit(proc.returncode)
+        try:
+            for line in proc.stdout:
+                self.output.emit(line)
+        finally:
+            proc.stdout.close()
+            proc.wait()
+            self.finished_with_code.emit(proc.returncode)
 
 
 class RemoteCreateWorker(QThread):
@@ -368,6 +371,7 @@ class DriveConnectPage(QWizardPage):
     def _clear_list(self):
         for worker in self._fetch_workers:
             worker.quit()
+            worker.wait(2000)
         self._fetch_workers.clear()
         self._radio_buttons.clear()
         self._email_labels.clear()

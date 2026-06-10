@@ -193,6 +193,11 @@ class MainWindow(QMainWindow):
 
     def _update_account_label(self, remote: str):
         self._account_label.setText(remote)
+        existing = getattr(self, "_account_worker", None)
+        if existing and existing.isRunning():
+            existing.result_ready.disconnect()
+            existing.quit()
+            existing.wait(1000)
         self._account_worker = _AccountLabelWorker(remote)
         self._account_worker.result_ready.connect(self._on_account_label_ready)
         self._account_worker.start()
