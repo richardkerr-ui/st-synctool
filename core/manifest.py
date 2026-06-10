@@ -133,6 +133,89 @@ def _migrate(manifest: dict) -> None:
     manifest["schema_version"] = SCHEMA_VERSION
 
 
+# KNOWN-ISSUE-FIX: load_manifest backfills pre-1.1 manifests to the current
+# schema in memory but never rewrites the file, so the archive keeps stale 1.0
+# JSON on disk indefinitely. This is an OPT-IN sweep utility — it is never
+# called automatically and the GUI does not invoke it. A human runs it (e.g.
+# `python3 -c "from core.manifest import migrate_manifests_on_disk as m; m()"`)
+# when they want on-disk consistency. Defaults to a dry run so nothing is
+# touched unless the caller explicitly asks.
+def needs_migration(path: Path) -> bool:
+    """True if the JSON manifest at `path` is below SCHEMA_VERSION.
+
+    A file that cannot be parsed as JSON returns False (it is not a manifest we
+    can safely rewrite) and is left for the caller's error handling.
+    """
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return str(data.get("schema_version", "1.0")) < SCHEMA_VERSION
+
+
+def migrate_manifest_file(path: Path, backup: bool = True) -> bool:
+    """Migrate a single on-disk manifest to SCHEMA_VERSION and rewrite it.
+
+    Returns True if the file was rewritten, False if it was already current
+    (or not a parseable manifest). When `backup` is True, the original bytes
+    are preserved alongside as `<name>.json.bak` before the rewrite.
+    """
+    path = Path(path)
+    try:
+        raw = path.read_text()
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if str(data.get("schema_version", "1.0")) >= SCHEMA_VERSION:
+        return False
+    _migrate(data)
+    if backup:
+        path.with_suffix(path.suffix + ".bak").write_text(raw)
+    path.write_text(json.dumps(data, indent=2))
+    return True
+
+
+def migrate_manifests_on_disk(archive_dir: Optional[Path] = None,
+                              dry_run: bool = True,
+                              backup: bool = True) -> dict:
+    """Sweep an archive directory and migrate every pre-1.1 manifest on disk.
+
+    Opt-in and non-destructive by default:
+      - `archive_dir` defaults to LOCAL_MANIFEST_DIR (recursed, so per-project
+        subdirs are covered). Pass an explicit dir in tests.
+      - `dry_run=True` (the default) only reports what *would* change; nothing
+        is written.
+      - `backup=True` keeps a `.json.bak` of each rewritten file.
+
+    Returns {"scanned": int, "migrated": [str, ...], "skipped": int,
+             "errors": [(str, str), ...], "dry_run": bool}.
+    Only files named `st_manifest*.json` are considered; `.bak` files are
+    ignored so re-running the sweep does not touch its own backups.
+    """
+    root = Path(archive_dir) if archive_dir is not None else LOCAL_MANIFEST_DIR
+    report = {"scanned": 0, "migrated": [], "skipped": 0,
+              "errors": [], "dry_run": dry_run}
+    if not root.exists():
+        return report
+    for p in sorted(root.rglob("st_manifest*.json")):
+        if p.suffix == ".bak" or p.name.endswith(".json.bak"):
+            continue
+        report["scanned"] += 1
+        try:
+            if not needs_migration(p):
+                report["skipped"] += 1
+                continue
+            if dry_run:
+                report["migrated"].append(str(p))
+            elif migrate_manifest_file(p, backup=backup):
+                report["migrated"].append(str(p))
+            else:
+                report["skipped"] += 1
+        except Exception as exc:  # never let one bad file abort the sweep
+            report["errors"].append((str(p), str(exc)))
+    return report
+
+
 def generate_manifest_fast(folder: Path, base_manifest=None, label="source",
                            dest_path=None, gdrive=False, progress_cb=None,
                            server_path="", operation="") -> dict:
