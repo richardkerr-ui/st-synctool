@@ -62,6 +62,14 @@ def _is_ignored(path: str) -> bool:
     parts = path.replace("\\", "/").split("/")
     return any(part in _IGNORED_DIRS or any(part.startswith(p) for p in _IGNORED_PREFIXES) for part in parts)
 
+
+# Public alias: this is the single source of truth for "files that should never
+# appear in a diff or in a generated manifest" (OS junk, our own manifest file,
+# staging/failure/thumbnail artifacts). Manifest generation imports this so the
+# ignore list is unified across comparison and manifest generation.
+def is_ignored_path(path: str) -> bool:
+    return _is_ignored(path)
+
 def _cs(entry):
     if not entry: return None
     c = entry.get("checksums", {})

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Callable
 from core.checksum import compute_all
+from core.comparison import is_ignored_path
 
 MANIFEST_FILENAME = "st_manifest.json"
 LOCAL_MANIFEST_DIR = Path.home() / "Documents" / "STSyncTool" / "manifests"
@@ -38,7 +39,13 @@ def _project_id(local_path: str, server_path: str) -> str:
 def generate_manifest(folder: Path, label="source", dest_path=None,
                       gdrive=False, progress_cb=None,
                       server_path="", operation="") -> dict:
-    files_list = [p for p in Path(folder).rglob("*") if p.is_file()]
+    # KNOWN-ISSUE-FIX: skip ignored paths (OS junk like .DS_Store, our own
+    # st_manifest.json, staging/failure/thumbnail artifacts) so they never enter
+    # a generated manifest. The merge diff already ignores these; generation did
+    # not, which let a phantom .DS_Store into a post-merge manifest and produced
+    # a spurious MISSING on Verify. Uses the unified ignore list from comparison.
+    files_list = [p for p in Path(folder).rglob("*")
+                  if p.is_file() and not is_ignored_path(p.relative_to(folder).as_posix())]
     total = len(files_list)
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -224,7 +231,10 @@ def generate_manifest_fast(folder: Path, base_manifest=None, label="source",
     assumed unchanged and reuse the base hash. Massive speedup for big projects
     where most files don't change between syncs."""
     base_files = (base_manifest or {}).get("files", {})
-    files_list = [pp for pp in Path(folder).rglob("*") if pp.is_file()]
+    # KNOWN-ISSUE-FIX: skip ignored paths (see generate_manifest) so junk never
+    # enters a generated manifest. Unified ignore list from comparison.
+    files_list = [pp for pp in Path(folder).rglob("*")
+                  if pp.is_file() and not is_ignored_path(pp.relative_to(folder).as_posix())]
     total = max(len(files_list), 1)
     manifest = {
         "schema_version": SCHEMA_VERSION,
