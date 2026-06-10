@@ -43,8 +43,8 @@ fi
 
 # ── 3. Python and rclone ──────────────────────────────────────────────────────
 echo ""
-echo "Installing Python and rclone..."
-brew install python rclone
+echo "Installing Python and rclone (this takes 1-3 minutes on a first install)..."
+brew install python rclone || { echo ""; echo "  ERROR: 'brew install python rclone' failed."; echo "  Try running it manually, then re-run this installer."; exit 1; }
 
 # ── 4. Clone or update the repo ──────────────────────────────────────────────
 echo ""
@@ -64,16 +64,17 @@ cd "$INSTALL_DIR"
 [[ ! -d .venv ]] && python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip -q
-pip install -r requirements.txt
+pip install -v -r requirements.txt || { echo ""; echo "  ERROR: pip install failed."; echo "  Try: cd $INSTALL_DIR && source .venv/bin/activate && pip install -r requirements.txt"; exit 1; }
 
 # ── 6. rclone config — skip if a valid gdrive remote already exists ───────────
 _needs_config=false
 if rclone listremotes 2>/dev/null | grep -q "^gdrive:$"; then
-    _token=$(rclone config show gdrive 2>/dev/null | grep "^token" | cut -d= -f2- | xargs)
-    if [[ -z "$_token" || "$_token" == "{}" ]]; then
+    echo "Checking existing Google Drive connection..."
+    if rclone lsd gdrive: --max-depth 1 &>/dev/null; then
+        echo "✓ Google Drive already connected"
+    else
         _needs_config=true
-        echo ""
-        echo "! gdrive remote exists but token is empty — re-running rclone config."
+        echo "! gdrive remote exists but authentication failed — re-running rclone config."
     fi
 else
     _needs_config=true
@@ -81,28 +82,36 @@ fi
 
 if [[ "$_needs_config" == "true" ]]; then
     echo ""
-    echo "Setting up Google Drive (see README.md for step-by-step instructions)..."
+    echo "Quick rclone setup guide:"
+    echo "  1. Type 'n' → new remote"
+    echo "  2. Name: gdrive"
+    echo "  3. Storage type: look for 'Google Drive', type its number"
+    echo "  4. client_id, client_secret: press Enter (use defaults)"
+    echo "  5. Scope: type 1 and press Enter (full access)"
+    echo "  6. root_folder_id, service_account_file, advanced config: press Enter"
+    echo "  7. Auto config: y (browser opens)"
+    echo "  8. Sign in with your Signal Theory Google account"
+    echo "  9. Shared drive: n"
+    echo "  10. Save: y, then q to quit"
     echo ""
     rclone config
-fi
-
-# ── 7. Validate the connection ────────────────────────────────────────────────
-echo ""
-echo "Validating Google Drive connection..."
-if rclone lsd gdrive: &>/dev/null; then
-    echo "✓ Google Drive connection verified"
-else
     echo ""
-    echo "  ERROR: Google Drive authentication failed."
-    echo "  The OAuth flow may not have completed fully."
-    echo ""
-    echo "  Run this to reconnect:"
-    echo "    rclone config reconnect gdrive:"
-    echo ""
-    echo "  Then launch the app:"
-    echo "    $INSTALL_DIR/run.sh"
-    echo ""
-    exit 1
+    echo "Validating Google Drive connection..."
+    if rclone lsd gdrive: &>/dev/null; then
+        echo "✓ Google Drive connection verified"
+    else
+        echo ""
+        echo "  ERROR: Google Drive authentication failed."
+        echo "  The OAuth flow may not have completed fully."
+        echo ""
+        echo "  Run this to reconnect:"
+        echo "    rclone config reconnect gdrive:"
+        echo ""
+        echo "  Then launch the app:"
+        echo "    $INSTALL_DIR/run.sh"
+        echo ""
+        exit 1
+    fi
 fi
 
 # ── 8. Done ───────────────────────────────────────────────────────────────────

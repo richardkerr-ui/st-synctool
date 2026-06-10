@@ -273,10 +273,28 @@ def create_gdrive_remote(
         )
 
     if result.returncode == 0:
+        # Verify the token is actually usable — config create exits 0 even on incomplete OAuth
+        try:
+            verify = subprocess.run(
+                ["rclone", "lsd", f"{name}:"],
+                capture_output=True, text=True, timeout=15,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            verify = None
+        if verify is None or verify.returncode != 0:
+            return CheckResult(
+                name="Create remote",
+                status=CheckStatus.ERROR,
+                message=(
+                    "Remote was created but Google sign-in was not completed. "
+                    "The browser window may have been closed before granting access. "
+                    "Please try again."
+                ),
+            )
         return CheckResult(
             name="Create remote",
             status=CheckStatus.OK,
-            message=f"Remote '{name}' created successfully.",
+            message=f"Remote '{name}' created and verified.",
         )
     return CheckResult(
         name="Create remote",

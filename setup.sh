@@ -1,4 +1,7 @@
 #!/bin/bash
+# Developer / manual install helper.
+# For end-user installs, use install.sh instead:
+#   bash <(curl -fsSL https://raw.githubusercontent.com/richardkerr-ui/st-synctool/main/install.sh)
 set -e
 
 echo "=== ST SyncTool Setup ==="

@@ -41,7 +41,7 @@ If you prefer to clone manually:
 
 **Step 1** — Clone the repo. GitHub no longer accepts passwords for Git operations. If this is a private repo, create a [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with `repo` scope and use it in place of your password, or embed it in the URL: `https://<token>@github.com/...`
 
-**Step 2** — Run setup from the repo directory:
+**Step 2** — From inside the cloned directory, run the setup script (installs dependencies only — does not run rclone config):
 
 ```bash
 bash setup.sh
