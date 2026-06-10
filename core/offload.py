@@ -549,10 +549,24 @@ def build_offload_manifest(
         if not (isinstance(info, dict) and "size" in info):
             continue
         checksum = info.get("checksum", "")
+        # MANIFEST-FIX: record the committed file's modtime so the persisted
+        # offload manifest is a complete schema-1.1 entry (size + modtime +
+        # checksums + hash_algorithm) and is usable as a verify and merge base.
+        # The offload ground-truth manifest carries no modtime, so stat the
+        # committed copy at the destination.
+        modtime = ""
+        try:
+            _committed = Path(dest_root) / rel
+            if _committed.is_file():
+                modtime = datetime.fromtimestamp(
+                    _committed.stat().st_mtime, tz=timezone.utc
+                ).isoformat()
+        except OSError:
+            modtime = ""
         entry = {
             "type": "file",
             "size": info["size"],
-            "modtime": "",
+            "modtime": modtime,
             "checksums": {"sha256": checksum} if checksum else {},
             "hash_algorithm": info.get("algorithm", "sha256"),
             "gdrive_url": "",
@@ -570,7 +584,9 @@ def build_offload_manifest(
         "root": str(source.path),
         "destination": str(dest_root),
         "server_path": str(dest_root),
-        "operation": "offload-ingest",
+        # MANIFEST-FIX: operation label is "offload" (was "offload-ingest") so
+        # downstream consumers and the manifest archive use the canonical verb.
+        "operation": "offload",
         "project_id": "",
         "workstation": _socket.gethostname(),
         "user": _getpass.getuser(),
@@ -604,7 +620,7 @@ def save_offload_manifest(
         manifest,
         dest_dir=dest_root,
         name_hint=source.effective_subfolder(),
-        operation="offload-ingest",
+        operation="offload",
     )
 
 
