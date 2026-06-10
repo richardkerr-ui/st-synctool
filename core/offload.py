@@ -102,6 +102,32 @@ class OffloadDest:
     enabled: bool = True
 
 
+# KNOWN-ISSUE-FIX: subfolder collision warning (Phase 5 #24). Two sources whose
+# effective subfolder name collides write into the same {dest}/{subfolder}/ at
+# every destination, so their files merge silently and commit_staging moves the
+# second source's files in alongside the first. The Phase 5 #24 intent was that
+# the per-source subfolder prevents exactly this. Surface it.
+def detect_subfolder_collisions(sources: list) -> dict:
+    """Return {subfolder_name: [source_label, ...]} for every effective subfolder
+    shared by two or more *enabled* sources. Empty dict means no collision.
+
+    The match is case-insensitive because destinations may live on
+    case-insensitive filesystems (e.g. macOS HFS+/APFS default, exFAT cards),
+    where "A001" and "a001" resolve to the same directory.
+    """
+    by_folder: dict[str, list[str]] = {}
+    for s in sources:
+        if not getattr(s, "enabled", True):
+            continue
+        key = s.effective_subfolder().casefold()
+        by_folder.setdefault(key, []).append(s.label)
+    return {
+        folder: labels
+        for folder, labels in by_folder.items()
+        if len(labels) > 1
+    }
+
+
 @dataclass
 class OffloadConfig:
     max_retries: int = MAX_RETRIES_DEFAULT
@@ -737,6 +763,18 @@ def run_offload(
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     active_sources = [s for s in sources if s.enabled]
     active_dests   = [d for d in dests   if d.enabled]
+
+    # KNOWN-ISSUE-FIX: warn when two sources resolve to the same destination
+    # subfolder (Phase 5 #24). Their files merge into one {dest}/{subfolder}/
+    # silently; the offload still proceeds (we never block), but the operator
+    # must be told the per-source separation has been defeated.
+    for folder, labels in detect_subfolder_collisions(active_sources).items():
+        log_cb(
+            f"[Offload] WARNING: sources {', '.join(labels)} share subfolder "
+            f"'{folder}'; their files will be merged into the same directory "
+            f"at every destination.",
+            "warning",
+        )
 
     # Initialise result grid
     cell_results: dict[tuple, CellResult] = {

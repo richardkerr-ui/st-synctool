@@ -25,6 +25,7 @@ from core.offload import (
     write_failure_report,
     scan_naming_patterns,
     detect_cross_source_duplicates,
+    detect_subfolder_collisions,
     build_normalization_plan,
     apply_normalization_in_staging,
     run_offload,
@@ -761,3 +762,64 @@ class TestChainOfCustodyLog:
         # And the only real file was accounted for, so the run still completes.
         assert results[0].state == CellState.DONE
         assert ".DS_Store" not in manifests["A001"]
+
+
+# ---------------------------------------------------------------------------
+# KNOWN-ISSUE-FIX: subfolder collision warning (Phase 5 #24)
+# ---------------------------------------------------------------------------
+
+class TestSubfolderCollision:
+    """detect_subfolder_collisions + the warning run_offload emits."""
+
+    def test_distinct_subfolders_no_collision(self):
+        a = OffloadSource(label="A001", path=Path("/x/a"))
+        b = OffloadSource(label="B002", path=Path("/x/b"))
+        assert detect_subfolder_collisions([a, b]) == {}
+
+    def test_same_label_collides(self):
+        a = OffloadSource(label="CARD", path=Path("/x/a"))
+        b = OffloadSource(label="CARD", path=Path("/x/b"))
+        coll = detect_subfolder_collisions([a, b])
+        assert "card" in coll
+        assert sorted(coll["card"]) == ["CARD", "CARD"]
+
+    def test_override_to_same_subfolder_collides(self):
+        a = OffloadSource(label="A001", path=Path("/x/a"), subfolder="Shoot")
+        b = OffloadSource(label="B002", path=Path("/x/b"), subfolder="Shoot")
+        coll = detect_subfolder_collisions([a, b])
+        assert coll == {"shoot": ["A001", "B002"]}
+
+    def test_collision_is_case_insensitive(self):
+        a = OffloadSource(label="A001", path=Path("/x/a"), subfolder="shoot")
+        b = OffloadSource(label="B002", path=Path("/x/b"), subfolder="SHOOT")
+        assert "shoot" in detect_subfolder_collisions([a, b])
+
+    def test_disabled_source_excluded(self):
+        a = OffloadSource(label="A001", path=Path("/x/a"), subfolder="Shoot")
+        b = OffloadSource(label="B002", path=Path("/x/b"), subfolder="Shoot", enabled=False)
+        assert detect_subfolder_collisions([a, b]) == {}
+
+    def test_run_offload_logs_warning_and_still_offloads(self, tmp_path):
+        # Two sources overridden to the same subfolder. The run must warn but
+        # still complete; the merged directory holds both sources' files.
+        a = _make_source_dir(tmp_path, "A001", {"a.mov": b"alpha"})
+        a.subfolder = "Shared"
+        b = _make_source_dir(tmp_path, "B002", {"b.mov": b"bravo"})
+        b.subfolder = "Shared"
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        log_cb = MagicMock()
+        results, _, _ = run_offload(
+            [a, b], [dst], _default_config(), MagicMock(), log_cb
+        )
+
+        warned = [
+            args[0] for args, _ in log_cb.call_args_list
+            if "share subfolder" in args[0] and "A001" in args[0] and "B002" in args[0]
+        ]
+        assert warned, "expected a subfolder-collision warning in the log"
+        assert all(r.state == CellState.DONE for r in results)
+
+        merged = dst.path / "Shared"
+        assert (merged / "a.mov").exists()
+        assert (merged / "b.mov").exists()

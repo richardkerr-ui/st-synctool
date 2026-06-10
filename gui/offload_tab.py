@@ -24,6 +24,7 @@ from gui.log_widget import LogWidget
 from core.offload import (
     OffloadSource, OffloadDest, OffloadConfig, CellResult, CellState,
     run_offload, scan_naming_patterns, detect_cross_source_duplicates,
+    detect_subfolder_collisions,
 )
 from core.thumbnail import ffmpeg_available, pillow_available
 import core.projects as projects
@@ -956,6 +957,30 @@ class OffloadTab(QWidget):
         if not active_dst:
             QMessageBox.warning(self, "Offload", "Enable at least one destination.")
             return
+
+        # KNOWN-ISSUE-FIX: warn before starting if two sources resolve to the
+        # same destination subfolder (Phase 5 #24). Their files would merge into
+        # one directory at every destination. Let the operator confirm or cancel.
+        collisions = detect_subfolder_collisions(active_src)
+        if collisions:
+            detail = "\n".join(
+                f"  • '{folder}' ← {', '.join(labels)}"
+                for folder, labels in sorted(collisions.items())
+            )
+            resp = QMessageBox.warning(
+                self,
+                "Subfolder collision",
+                "Two or more sources resolve to the same destination "
+                "subfolder, so their files will be merged into one directory "
+                "at every destination:\n\n"
+                f"{detail}\n\n"
+                "Give each source a distinct subfolder name to keep them "
+                "separate. Continue anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if resp != QMessageBox.StandardButton.Yes:
+                return
 
         # Build matrix
         src_labels = [s.label for s in active_src]
