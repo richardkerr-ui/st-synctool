@@ -233,3 +233,167 @@ def ensure_demo_folder() -> tuple[Path, Path]:
 def demo_exists() -> bool:
     """True if the demo source folder has already been created."""
     return demo_source().exists()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Merge demo — two genuinely diverged folders for the onboarding tutorial
+# ─────────────────────────────────────────────────────────────────────────────
+
+def demo_merge_local() -> Path:
+    return demo_root() / "merge_local"
+
+
+def demo_merge_server() -> Path:
+    return demo_root() / "merge_server"
+
+
+def demo_merge_manifest() -> Path:
+    """Base manifest representing the shared starting point before divergence."""
+    return demo_root() / "merge_base_manifest.json"
+
+
+# Each entry: (rel_path, base_bytes, local_bytes_or_None, server_bytes_or_None)
+# None in local/server means the file was deleted on that side.
+# Matching base bytes = unchanged on that side.
+_MERGE_FILES: list[tuple[str, bytes, bytes | None, bytes | None]] = [
+    (
+        "DCIM/A001/scene_01.txt",
+        b"Scene 1: wide exterior",
+        b"Scene 1: wide exterior [YOUR EDIT]",    # LOCAL_CHANGED
+        b"Scene 1: wide exterior",                 # unchanged on server
+    ),
+    (
+        "DCIM/A001/scene_02.txt",
+        b"Scene 2: OTS dialogue",
+        b"Scene 2: OTS dialogue",                  # unchanged locally
+        b"Scene 2: OTS dialogue [SERVER EDIT]",    # SERVER_CHANGED
+    ),
+    (
+        "DCIM/A001/scene_03.txt",
+        b"Scene 3: close-ups",
+        b"Scene 3: close-ups [YOUR REVISION]",     # BOTH_CHANGED — conflict
+        b"Scene 3: close-ups [SERVER REVISION]",   # BOTH_CHANGED — conflict
+    ),
+    (
+        "DCIM/B001/b_roll.txt",
+        b"B-roll: city street",
+        b"B-roll: city street",                    # unchanged both sides
+        b"B-roll: city street",
+    ),
+    (
+        "AUDIO/sound_report.txt",
+        b"Sound report: nominal",
+        None,                                       # DELETED_LOCAL — you deleted it
+        b"Sound report: nominal",                  # still on server
+    ),
+    (
+        "MISC/notes.txt",
+        b"Notes: all good",
+        b"Notes: all good",                         # unchanged locally
+        b"Notes: director approved",               # SERVER_CHANGED
+    ),
+]
+
+# Files that only appear in local (LOCAL_ONLY)
+_MERGE_LOCAL_ONLY: list[tuple[str, bytes]] = [
+    ("DCIM/A001/new_footage.txt", b"New clip: morning light - added locally"),
+]
+
+# Files that only appear on server (SERVER_ONLY)
+_MERGE_SERVER_ONLY: list[tuple[str, bytes]] = [
+    ("DCIM/B001/server_addition.txt", b"Drone shot - added on server"),
+]
+
+
+def _sha256_of(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_if_missing(path: Path, content: bytes) -> None:
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+
+def ensure_demo_merge_folders() -> tuple[Path, Path, Path]:
+    """
+    Create (or verify) the diverged demo folders and base manifest used by
+    the Merge tutorial.
+
+    Returns (local_path, server_path, base_manifest_path).
+    Safe to call multiple times — skips files that already exist.
+
+    Divergence summary (7 interesting diffs):
+        LOCAL_CHANGED  — scene_01.txt   (you edited it)
+        SERVER_CHANGED — scene_02.txt, notes.txt (server edited)
+        BOTH_CHANGED   — scene_03.txt   (conflict — both sides changed it)
+        LOCAL_ONLY     — new_footage.txt (you added it)
+        SERVER_ONLY    — server_addition.txt (server added it)
+        DELETED_LOCAL  — sound_report.txt (you deleted it, server still has it)
+    """
+    from datetime import datetime, timezone
+    import socket
+    import getpass
+
+    local_root  = demo_merge_local()
+    server_root = demo_merge_server()
+    manifest_path = demo_merge_manifest()
+
+    local_root.mkdir(parents=True, exist_ok=True)
+    server_root.mkdir(parents=True, exist_ok=True)
+
+    # ── Write local and server files ──────────────────────────────────────
+    for rel, _base, local_bytes, server_bytes in _MERGE_FILES:
+        if local_bytes is not None:
+            _write_if_missing(local_root / rel, local_bytes)
+        if server_bytes is not None:
+            _write_if_missing(server_root / rel, server_bytes)
+
+    for rel, content in _MERGE_LOCAL_ONLY:
+        _write_if_missing(local_root / rel, content)
+
+    for rel, content in _MERGE_SERVER_ONLY:
+        _write_if_missing(server_root / rel, content)
+
+    # ── Write base manifest (records the ORIGINAL shared state) ──────────
+    if not manifest_path.exists():
+        now = datetime.now(timezone.utc).isoformat()
+        files: dict = {}
+        total_size = 0
+
+        for rel, base_bytes, _local, _server in _MERGE_FILES:
+            size = len(base_bytes)
+            total_size += size
+            files[rel] = {
+                "type": "file",
+                "size": size,
+                "modtime": now,
+                "checksums": {"sha256": _sha256_of(base_bytes)},
+                "hash_algorithm": "sha256",
+                "gdrive_url": "",
+            }
+
+        manifest = {
+            "schema_version": "1.1",
+            "created_at": now,
+            "label": "demo_merge_base",
+            "root": str(local_root),
+            "destination": str(server_root),
+            "server_path": str(server_root),
+            "operation": "demo",
+            "project_id": "demo_merge",
+            "workstation": socket.gethostname(),
+            "user": getpass.getuser(),
+            "file_count": len(files),
+            "total_size_bytes": total_size,
+            "renames": [],
+            "checksum_context": {
+                "algorithm": "sha256",
+                "gdrive_mode": False,
+            },
+            "files": files,
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+
+    return local_root, server_root, manifest_path

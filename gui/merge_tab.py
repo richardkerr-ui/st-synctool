@@ -746,6 +746,44 @@ class MergeTab(QWidget):
     def _refresh_history_panel(self):
         pass  # History panel removed — data written to ~/Documents/STSyncTool/logs/
 
+    def load_demo_data(self):
+        """
+        Pre-populate the path fields with the diverged demo folders for the
+        onboarding tutorial, and inject representative rows into the diff table
+        so the user can see what results look like.
+
+        Safe to call multiple times — skips fields that already have real content.
+        """
+        from core.comparison import DiffState, DiffResult
+        from core.demo import ensure_demo_merge_folders
+
+        try:
+            local, server, manifest = ensure_demo_merge_folders()
+            if not self.local_input.text():
+                self.local_input.setText(str(local))
+            if not self.server_input.text():
+                self.server_input.setText(str(server))
+            if not self.base_input.text():
+                self.base_input.setText(str(manifest))
+                self._update_stale_badge(str(manifest))
+        except Exception:
+            pass
+
+        # Show illustrative rows only when the table is currently empty
+        # (i.e. no real scan has been run yet).
+        if self.diff_table.rowCount() == 0:
+            demo_results = [
+                DiffResult("DCIM/A001/scene_01.txt",     DiffState.LOCAL_CHANGED),
+                DiffResult("DCIM/A001/scene_02.txt",     DiffState.SERVER_CHANGED),
+                DiffResult("DCIM/A001/scene_03.txt",     DiffState.BOTH_CHANGED),
+                DiffResult("DCIM/A001/new_footage.txt",  DiffState.LOCAL_ONLY),
+                DiffResult("DCIM/B001/server_addition.txt", DiffState.SERVER_ONLY),
+                DiffResult("AUDIO/sound_report.txt",     DiffState.DELETED_LOCAL),
+                DiffResult("MISC/notes.txt",             DiffState.SERVER_CHANGED),
+            ]
+            self.diff_table.load_results(demo_results)
+            self.status_label.setText("7 differences found  (demo — click Scan & Compare to run for real)")
+
     # ── Scan ──────────────────────────────────────────────────────────────────
 
     def _run_scan(self):

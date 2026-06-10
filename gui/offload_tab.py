@@ -1125,3 +1125,27 @@ class OffloadTab(QWidget):
         self._offload_status_lbl.setText("Ready")
         self._thread = None
         self._worker = None
+
+    def load_demo_data(self):
+        """
+        Pre-fill the first source and destination rows with the demo folder
+        paths for the onboarding tutorial. Skips rows that already have content.
+        """
+        from core.demo import ensure_demo_folder
+
+        try:
+            src, dst = ensure_demo_folder()
+        except Exception:
+            return
+
+        if self._source_rows:
+            row = self._source_rows[0]
+            if not row._path.text().strip():
+                row._path.setText(str(src))
+                row._label.setText("CAM_A")
+
+        if self._dest_rows:
+            row = self._dest_rows[0]
+            if not row._path.text().strip():
+                row._path.setText(str(dst))
+                row._label.setText("RAID_1")

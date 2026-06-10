@@ -126,6 +126,11 @@ class DiffTable(QTableWidget):
             self.setCellWidget(row, 2, combo)
             self._action_combos[path_str] = combo
 
+        # ResizeToContents doesn't query setCellWidget() sizeHints automatically,
+        # so force a column resize after all widgets are in place.
+        self.resizeColumnToContents(1)
+        self.resizeColumnToContents(2)
+
     def get_actions(self) -> dict:
         return {p: c.currentText() for p, c in self._action_combos.items()}
 

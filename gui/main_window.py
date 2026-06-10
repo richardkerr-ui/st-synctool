@@ -13,7 +13,10 @@ from gui.verify_tab       import VerifyTab
 from gui.offload_tab      import OffloadTab
 from gui.setup_wizard     import SetupWizard, should_show_wizard
 from gui.tutorial_overlay import TutorialOverlay, tutorial_already_seen, reset_tutorial
-from core.demo import ensure_demo_folder, demo_verify_sample, demo_verify_manifest
+from core.demo import (
+    ensure_demo_folder, demo_verify_sample, demo_verify_manifest,
+    ensure_demo_merge_folders,
+)
 from gui                  import theme
 from core.setup_checks    import check_rclone_auth, CheckStatus
 from core.oauth_config    import get_active_remote, get_remote_account_email
@@ -341,24 +344,26 @@ class MainWindow(QMainWindow):
                 ),
             },
             {
-                "tab":    1,
-                "widget": lambda: mt.scan_btn,
-                "title":  "Scan & Compare",
-                "body":   (
-                    "Compares local and server file trees against the base manifest. "
-                    "Files changed on both sides are flagged for your decision; "
-                    "one-sided changes are resolved automatically."
+                "tab":     1,
+                "widget":  lambda: mt.scan_btn,
+                "title":   "Scan & Compare",
+                "body":    (
+                    "We've pre-loaded a demo project with real diverged files — "
+                    "7 differences across 5 states. Click Scan & Compare any time "
+                    "to run a live comparison against these files."
                 ),
+                "on_show": lambda: mt.load_demo_data(),
             },
             {
-                "tab":    1,
-                "widget": lambda: mt.diff_table,
-                "title":  "Diff table",
-                "body":   (
+                "tab":     1,
+                "widget":  lambda: mt.diff_table,
+                "title":   "Diff table",
+                "body":    (
                     "Each row is a file with a status: green = only you changed it, "
                     "blue = only server changed it, coral = both changed (you decide). "
                     "Toggle the checkbox to include or exclude each action."
                 ),
+                "on_show": lambda: mt.load_demo_data(),
             },
             {
                 "tab":    1,
@@ -372,13 +377,14 @@ class MainWindow(QMainWindow):
 
             # ── Offload tab ───────────────────────────────────────────────
             {
-                "tab":    2,
-                "widget": lambda: ot._preset_combo,
-                "title":  "Offload presets",
-                "body":   (
+                "tab":     2,
+                "widget":  lambda: ot._preset_combo,
+                "title":   "Offload presets",
+                "body":    (
                     "Save a named configuration of multiple sources and destinations "
                     "so a shoot day's offload is one click. Presets persist between sessions."
                 ),
+                "on_show": lambda: ot.load_demo_data(),
             },
             {
                 "tab":    2,
