@@ -13,8 +13,9 @@ from typing import List, Optional
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
-    QTextEdit, QVBoxLayout, QWidget, QWizard, QWizardPage,
+    QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel, QMessageBox,
+    QProgressBar, QPushButton, QRadioButton, QTextEdit, QVBoxLayout,
+    QWidget, QWizard, QWizardPage,
 )
 
 from core.setup_checks import (
@@ -22,7 +23,10 @@ from core.setup_checks import (
     create_gdrive_remote, run_all_checks, check_rclone_auth,
 )
 from utils.gdrive_utils import RCLONE_REMOTE
-from core.oauth_config import is_remote_using_default_rclone_creds
+from core.oauth_config import (
+    get_active_remote, is_remote_using_default_rclone_creds,
+    list_drive_remotes, get_remote_account_email, save_active_remote,
+)
 from gui import theme
 
 
@@ -75,6 +79,32 @@ class RemoteCreateWorker(QThread):
     def run(self):
         result = create_gdrive_remote(self.name, self.shared_drive)
         self.finished_with_result.emit(result)
+
+
+class AccountFetchWorker(QThread):
+    """Fetch the Google account email for a single rclone remote."""
+    result_ready = pyqtSignal(str, str)  # (remote_name, email_or_empty)
+
+    def __init__(self, remote_name: str):
+        super().__init__()
+        self.remote_name = remote_name
+
+    def run(self):
+        email = get_remote_account_email(self.remote_name) or ""
+        self.result_ready.emit(self.remote_name, email)
+
+
+class RemoteAuthCheckWorker(QThread):
+    """Check whether a single remote can authenticate successfully."""
+    result_ready = pyqtSignal(str, object)  # (remote_name, CheckResult)
+
+    def __init__(self, remote_name: str):
+        super().__init__()
+        self.remote_name = remote_name
+
+    def run(self):
+        result = check_rclone_auth(self.remote_name, timeout=15)
+        self.result_ready.emit(self.remote_name, result)
 
 
 class WelcomePage(QWizardPage):
@@ -257,112 +287,230 @@ class DriveConnectPage(QWizardPage):
     def __init__(self):
         super().__init__()
         self.setTitle("Connect to Google Drive")
-        self.setSubTitle(f"Set up the '{RCLONE_REMOTE}' rclone remote.")
+        self.setSubTitle("Choose an account or connect a new one.")
 
-        self._connected = False
+        self._validated = False
+        self._selected_remote: Optional[str] = None
+        self._radio_buttons: dict = {}   # remote_name -> QRadioButton
+        self._email_labels: dict = {}    # remote_name -> QLabel
+        self._fetch_workers: list = []
+        self._auth_worker: Optional[RemoteAuthCheckWorker] = None
+        self._button_group = QButtonGroup(self)
+        self._button_group.setExclusive(True)
 
-        layout = QVBoxLayout()
+        self._outer = QVBoxLayout()
 
-        self.info_label = QLabel(
-            "ST SyncTool needs access to your Google Drive.\n\n"
-            "When you click Connect, your browser will open and ask you to "
-            "sign in with your Signal Theory Google account. Grant access, "
-            "then return here - the wizard will continue automatically."
+        self._list_frame = QFrame()
+        self._list_frame.setStyleSheet(
+            f"QFrame {{ border: 1px solid #333; border-radius: 6px; "
+            f"background: {theme.CHARCOAL_LIGHT}; }}"
         )
-        self.info_label.setWordWrap(True)
-        layout.addWidget(self.info_label)
+        self._list_layout = QVBoxLayout(self._list_frame)
+        self._list_layout.setContentsMargins(12, 10, 12, 10)
+        self._list_layout.setSpacing(8)
+        self._outer.addWidget(self._list_frame)
 
-        self.shared_drive_check = QCheckBox(
-            "This is a Shared Drive (Team Drive) - leave unchecked for personal Drive"
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #333;")
+        self._outer.addWidget(sep)
+
+        new_row = QHBoxLayout()
+        self._new_button = QPushButton("Connect New Account")
+        self._new_button.setStyleSheet(theme.primary_button_style())
+        self._new_button.clicked.connect(self._start_new_connect)
+        new_row.addWidget(self._new_button)
+        new_row.addStretch()
+        self._outer.addLayout(new_row)
+
+        self._shared_check = QCheckBox(
+            "Shared Drive (Team Drive) — leave unchecked for personal Drive"
         )
-        self.shared_drive_check.setChecked(False)
-        layout.addWidget(self.shared_drive_check)
+        self._shared_check.setChecked(False)
+        self._outer.addWidget(self._shared_check)
 
-        self.connect_button = QPushButton("Connect to Google Drive")
-        self.connect_button.setStyleSheet(theme.primary_button_style())
-        self.connect_button.clicked.connect(self._start_connect)
-        layout.addWidget(self.connect_button)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 0)
+        self._progress.hide()
+        self._outer.addWidget(self._progress)
 
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.hide()
-        layout.addWidget(self.progress)
+        self._status_label = QLabel("")
+        self._status_label.setWordWrap(True)
+        self._outer.addWidget(self._status_label)
 
-        self.status_label = QLabel("")
-        self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
-
-        layout.addStretch()
-        self.setLayout(layout)
+        self._outer.addStretch()
+        self.setLayout(self._outer)
 
     def initializePage(self):
-        auth_result = check_rclone_auth(RCLONE_REMOTE, timeout=10)
-        if not auth_result.ok:
-            return  # leave default UI; user will click Connect
+        self._validated = False
+        self._selected_remote = None
+        self._clear_list()
 
-        using_defaults = is_remote_using_default_rclone_creds(RCLONE_REMOTE)
-        if using_defaults:
-            # Remote works, but is on rclone's shared (throttled) OAuth client.
-            # Refuse to advance until they migrate to ST's credentials.
-            self._connected = False
-            self.info_label.setText(
-                f"Connected to Google Drive as '{RCLONE_REMOTE}', but this "
-                f"remote is using rclone's shared OAuth credentials.\n\n"
-                "Google throttles those across every rclone user worldwide. "
-                "Click Reconnect to migrate to Signal Theory's own OAuth "
-                "client for full-speed transfers."
+        existing = list_drive_remotes()
+        if not existing:
+            placeholder = QLabel(
+                "No Drive connections found. Click 'Connect New Account' to get started."
             )
-            self.connect_button.setText("Reconnect (recommended)")
-            self.connect_button.setStyleSheet(theme.primary_button_style())
+            placeholder.setStyleSheet(f"color: {theme.MUTED_TEXT};")
+            placeholder.setWordWrap(True)
+            self._list_layout.addWidget(placeholder)
         else:
-            self._connected = True
-            self.info_label.setText(
-                f"Already connected to Google Drive as '{RCLONE_REMOTE}' "
-                f"with Signal Theory's OAuth credentials.\n\n"
-                f"{auth_result.message}\n\n"
-                "Click Next to continue. To re-authenticate or use a "
-                "different account, click Reconnect."
-            )
-            self.connect_button.setText("Reconnect")
+            for remote in existing:
+                self._add_remote_row(remote)
+            # Pre-select the currently active remote, or the first one
+            active = get_active_remote()
+            pre_select = active if active in self._radio_buttons else existing[0]
+            self._radio_buttons[pre_select].setChecked(True)
+            self._on_remote_selected(pre_select)
+
         self.completeChanged.emit()
 
-    def _start_connect(self):
-        self.connect_button.setEnabled(False)
-        self.progress.show()
-        self.status_label.setText(
-            "Opening browser... complete sign-in there, then come back."
-        )
+    def _clear_list(self):
+        for worker in self._fetch_workers:
+            worker.quit()
+        self._fetch_workers.clear()
+        self._radio_buttons.clear()
+        self._email_labels.clear()
+        for btn in self._button_group.buttons():
+            self._button_group.removeButton(btn)
+        while self._list_layout.count():
+            item = self._list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-        self.create_worker = RemoteCreateWorker(
-            RCLONE_REMOTE,
-            self.shared_drive_check.isChecked(),
-        )
-        self.create_worker.finished_with_result.connect(self._on_connect_done)
-        self.create_worker.start()
+    def _add_remote_row(self, remote_name: str):
+        row = QHBoxLayout()
 
-    def _on_connect_done(self, result: CheckResult):
-        self.progress.hide()
-        self.connect_button.setEnabled(True)
+        radio = QRadioButton(remote_name)
+        radio.setStyleSheet(f"color: {theme.CREAM}; font-weight: bold;")
+        radio.toggled.connect(lambda checked, r=remote_name: checked and self._on_remote_selected(r))
+        self._button_group.addButton(radio)
+        self._radio_buttons[remote_name] = radio
+        row.addWidget(radio)
+
+        email_label = QLabel("fetching account...")
+        email_label.setStyleSheet(f"color: {theme.MUTED_TEXT}; font-size: 12px;")
+        self._email_labels[remote_name] = email_label
+        row.addWidget(email_label)
+        row.addStretch()
+
+        container = QWidget()
+        container.setLayout(row)
+        self._list_layout.addWidget(container)
+
+        worker = AccountFetchWorker(remote_name)
+        worker.result_ready.connect(self._on_email_ready)
+        self._fetch_workers.append(worker)
+        worker.start()
+
+    def _on_email_ready(self, remote_name: str, email: str):
+        label = self._email_labels.get(remote_name)
+        if not label:
+            return
+        if email:
+            label.setText(f"— {email}")
+            label.setStyleSheet(f"color: {theme.MUTED_TEXT}; font-size: 12px;")
+        else:
+            label.setText("— account unknown")
+            label.setStyleSheet(f"color: {theme.ACCENT_GOLD}; font-size: 12px;")
+
+    def _on_remote_selected(self, remote_name: str):
+        if self._selected_remote == remote_name:
+            return
+        self._selected_remote = remote_name
+        self._validated = False
+        self._status_label.setText(f"Checking '{remote_name}'...")
+        self._progress.show()
+        self.completeChanged.emit()
+
+        if self._auth_worker and self._auth_worker.isRunning():
+            self._auth_worker.quit()
+
+        self._auth_worker = RemoteAuthCheckWorker(remote_name)
+        self._auth_worker.result_ready.connect(self._on_auth_check_done)
+        self._auth_worker.start()
+
+    def _on_auth_check_done(self, remote_name: str, result: CheckResult):
+        if remote_name != self._selected_remote:
+            return
+        self._progress.hide()
 
         if result.status == CheckStatus.OK:
-            self._connected = True
-            self.status_label.setText(f"OK: {result.message}")
+            using_defaults = is_remote_using_default_rclone_creds(remote_name)
+            if using_defaults:
+                self._validated = False
+                self._status_label.setText(
+                    f"'{remote_name}' uses rclone's shared OAuth client, which Google "
+                    "throttles. Click 'Connect New Account' to re-authenticate with "
+                    "Signal Theory's credentials for full-speed transfers."
+                )
+            else:
+                self._validated = True
+                self._status_label.setText(
+                    f"'{remote_name}' is connected and working. "
+                    "Click Next to continue, or connect a different account below."
+                )
+                save_active_remote(remote_name)
+                self.wizard().setProperty("chosen_remote", remote_name)
         else:
-            self._connected = False
-            self.status_label.setText(f"FAILED: {result.message}")
+            self._validated = False
+            self._status_label.setText(
+                f"[!] '{remote_name}' failed: {result.message}  "
+                "Try 'Connect New Account' to re-authenticate."
+            )
+
+        self.completeChanged.emit()
+
+    def _start_new_connect(self):
+        existing = list_drive_remotes()
+        new_name = "gdrive"
+        if new_name in existing:
+            i = 2
+            while f"gdrive{i}" in existing:
+                i += 1
+            new_name = f"gdrive{i}"
+
+        self._new_button.setEnabled(False)
+        self._progress.show()
+        self._status_label.setText(
+            "Opening browser — sign in with your Signal Theory Google account, "
+            "then return here."
+        )
+
+        self._create_worker = RemoteCreateWorker(new_name, self._shared_check.isChecked())
+        self._create_worker.finished_with_result.connect(
+            lambda r: self._on_new_connect_done(new_name, r)
+        )
+        self._create_worker.start()
+
+    def _on_new_connect_done(self, new_name: str, result: CheckResult):
+        self._progress.hide()
+        self._new_button.setEnabled(True)
+
+        if result.status == CheckStatus.OK:
+            save_active_remote(new_name)
+            self.wizard().setProperty("chosen_remote", new_name)
+            self._validated = True
+            self._status_label.setText(f"Connected as '{new_name}'. Click Next to continue.")
+            self._add_remote_row(new_name)
+            self._radio_buttons[new_name].setChecked(True)
+            self._selected_remote = new_name
+        else:
+            self._status_label.setText(f"Connection failed: {result.message}")
             QMessageBox.warning(
                 self, "Connection failed",
-                f"Could not create the rclone remote.\n\n{result.message}\n\n"
+                f"Could not connect to Google Drive.\n\n{result.message}\n\n"
                 "Common causes:\n"
-                "  - You closed the browser before completing sign-in\n"
-                "  - You denied permission\n"
-                "  - Network connectivity issue\n\n"
-                "Try again or check rclone's output in Terminal."
+                "  - Browser closed before completing sign-in\n"
+                "  - Permission was denied\n"
+                "  - Network issue\n\n"
+                "Try again or check rclone output in Terminal."
             )
+
         self.completeChanged.emit()
 
     def isComplete(self) -> bool:
-        return self._connected
+        return self._validated
 
 
 class VerifyPage(QWizardPage):
@@ -388,7 +536,8 @@ class VerifyPage(QWizardPage):
         self.status_label.setText("Testing connection to Google Drive...")
         self.details.clear()
 
-        self.worker = CheckWorker()
+        chosen = self.wizard().property("chosen_remote") or RCLONE_REMOTE
+        self.worker = CheckWorker(chosen)
         self.worker.finished_with_results.connect(self._on_done)
         self.worker.start()
 
@@ -423,7 +572,9 @@ class SetupWizard(QWizard):
         super().__init__(parent)
         self.setWindowTitle("ST SyncTool - Setup")
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
-        self.setMinimumSize(700, 550)
+        self.setMinimumSize(700, 600)
+
+        self.setProperty("chosen_remote", get_active_remote())
 
         self.addPage(WelcomePage())
         self.addPage(SystemCheckPage())
@@ -432,6 +583,10 @@ class SetupWizard(QWizard):
 
         self.setOption(QWizard.WizardOption.NoBackButtonOnStartPage, True)
         self.setOption(QWizard.WizardOption.NoCancelButtonOnLastPage, True)
+
+    @property
+    def chosen_remote(self) -> str:
+        return self.property("chosen_remote") or get_active_remote()
 
 
 def should_show_wizard() -> bool:

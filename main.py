@@ -34,7 +34,7 @@ def main():
 
     app.setStyleSheet(theme.app_stylesheet())
 
-    window = MainWindow()
+    window = MainWindow(force_setup="--setup" in sys.argv)
     window.show()
     sys.exit(app.exec())
 

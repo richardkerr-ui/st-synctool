@@ -1,6 +1,8 @@
+import json
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Optional, List, Tuple
 
 GDRIVE_PATTERNS = [
@@ -17,13 +19,24 @@ def _detect_rclone_remote() -> str:
     """
     Resolve which rclone remote to use, in order of priority:
       1. ST_SYNC_RCLONE_REMOTE environment variable
-      2. A remote literally named "gdrive"
-      3. The first remote returned by `rclone listremotes`
-      4. Fallback to "gdrive" (will surface a clear error if it doesn't exist)
+      2. Saved active remote in ~/.config/st_synctool/config.json
+      3. A remote literally named "gdrive"
+      4. The first remote returned by `rclone listremotes`
+      5. Fallback to "gdrive" (will surface a clear error if it doesn't exist)
     """
     override = os.environ.get(_ENV_OVERRIDE, "").strip().rstrip(":")
     if override:
         return override
+
+    _app_config = Path.home() / ".config" / "st_synctool" / "config.json"
+    if _app_config.exists():
+        try:
+            saved = (json.loads(_app_config.read_text()).get("active_remote") or "").strip()
+            if saved:
+                return saved
+        except Exception:
+            pass
+
     try:
         r = subprocess.run(
             ["rclone", "listremotes"],
@@ -41,6 +54,12 @@ def _detect_rclone_remote() -> str:
     except Exception:
         pass
     return _DEFAULT_REMOTE_NAME
+
+
+def get_rclone_remote() -> str:
+    """Dynamic lookup of the active remote — use when the value may have changed this session."""
+    from core.oauth_config import get_active_remote
+    return get_active_remote()
 
 
 RCLONE_REMOTE = _detect_rclone_remote()

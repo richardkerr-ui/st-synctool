@@ -5,19 +5,37 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import QTimer
 
+from PyQt6.QtCore import QThread, pyqtSignal
+
 from gui.transfer_tab import TransferTab
 from gui.merge_tab    import MergeTab
 from gui.verify_tab   import VerifyTab
 from gui.setup_wizard import SetupWizard, should_show_wizard
 from gui              import theme
 from core.setup_checks import check_rclone_auth, CheckStatus
+from core.oauth_config import get_active_remote, get_remote_account_email
+
+
+class _AccountLabelWorker(QThread):
+    result_ready = pyqtSignal(str, str)  # (remote, email_or_empty)
+
+    def __init__(self, remote: str):
+        super().__init__()
+        self.remote = remote
+
+    def run(self):
+        # _check_auth_health already ran rclone lsd which refreshes the token,
+        # so the config file has a fresh access_token by the time we get here.
+        email = get_remote_account_email(self.remote) or ""
+        self.result_ready.emit(self.remote, email)
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, force_setup: bool = False):
         super().__init__()
         self.setWindowTitle("ST SyncTool -- Signal Theory")
         self.setMinimumSize(1100, 780)
+        self._force_setup = force_setup
         self._build_ui()
 
         # Defer wizard until the window is on screen so the dialog has a parent.
@@ -44,9 +62,14 @@ class MainWindow(QMainWindow):
         subtitle.setStyleSheet("color:#555;font-size:12px;margin-left:10px;")
         version = QLabel("v1.0.0")
         version.setStyleSheet("color:#444;font-size:11px;")
+        self._account_label = QLabel()
+        self._account_label.setStyleSheet(
+            f"color:{theme.ACCENT_GREEN};font-size:11px;margin-right:8px;"
+        )
         header.addWidget(title)
         header.addWidget(subtitle)
         header.addStretch()
+        header.addWidget(self._account_label)
         header.addWidget(version)
         root.addLayout(header)
         root.addSpacing(8)
@@ -136,7 +159,7 @@ class MainWindow(QMainWindow):
         return banner
 
     def _maybe_launch_wizard(self):
-        if should_show_wizard():
+        if self._force_setup or should_show_wizard():
             self._launch_wizard()
         else:
             self._check_auth_health()
@@ -144,14 +167,21 @@ class MainWindow(QMainWindow):
     def _launch_wizard(self):
         wiz = SetupWizard(self)
         wiz.exec()
+        chosen = wiz.chosen_remote
+        if chosen:
+            import utils.gdrive_utils
+            utils.gdrive_utils.RCLONE_REMOTE = chosen
         self._check_auth_health()
 
     def _check_auth_health(self):
-        result = check_rclone_auth(timeout=10)
+        remote = get_active_remote()
+        result = check_rclone_auth(remote, timeout=10)
         if result.status == CheckStatus.OK:
             self._auth_banner.hide()
             self.status_bar.showMessage("Ready")
+            self._update_account_label(remote)
         else:
+            self._account_label.setText("")
             self._banner_label.setText(
                 f'<span style="color: {theme.ACCENT_CORAL}; font-weight: bold;">[!]</span>'
                 f'&nbsp;&nbsp;<b>Google Drive connection issue:</b> {result.message}'
@@ -160,3 +190,15 @@ class MainWindow(QMainWindow):
             )
             self._auth_banner.show()
             self.status_bar.showMessage("Drive auth issue — see banner")
+
+    def _update_account_label(self, remote: str):
+        self._account_label.setText(remote)
+        self._account_worker = _AccountLabelWorker(remote)
+        self._account_worker.result_ready.connect(self._on_account_label_ready)
+        self._account_worker.start()
+
+    def _on_account_label_ready(self, remote: str, email: str):
+        if email:
+            self._account_label.setText(f"{email} ({remote})")
+        else:
+            self._account_label.setText(remote)
