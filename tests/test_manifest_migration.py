@@ -1,7 +1,7 @@
 """
 Tests for the opt-in on-disk schema migration sweep (core/manifest.py).
 
-load_manifest backfills pre-1.1 manifests in memory but never rewrites the
+load_manifest backfills pre-1.2 manifests in memory but never rewrites the
 file. migrate_manifests_on_disk() is the opt-in utility that rewrites them.
 
 These tests are hermetic: every manifest is created under tmp_path and the
@@ -14,6 +14,7 @@ from pathlib import Path
 
 from core.manifest import (
     SCHEMA_VERSION,
+    _migrate,
     needs_migration,
     migrate_manifest_file,
     migrate_manifests_on_disk,
@@ -21,7 +22,7 @@ from core.manifest import (
 
 
 def _write_v10(path: Path) -> None:
-    """A minimal schema-1.0 manifest, missing 1.1 fields."""
+    """A minimal schema-1.0 manifest, missing 1.2 fields."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "schema_version": "1.0",
@@ -36,6 +37,25 @@ def _write_v10(path: Path) -> None:
     }, indent=2))
 
 
+def _write_v11(path: Path, server_path_val: str = "/old/server") -> None:
+    """A schema-1.1 manifest that has server_path but not counterpart_path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "1.1",
+        "label": "old-11",
+        "root": "/some/local/path",
+        "server_path": server_path_val,
+        "files": {
+            "clip.mov": {
+                "type": "file", "size": 10, "modtime": "",
+                "checksums": {"sha256": "b" * 64},
+                "hash_algorithm": "sha256",
+                "gdrive_url": "",
+            }
+        },
+    }, indent=2))
+
+
 def _write_current(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
@@ -43,6 +63,46 @@ def _write_current(path: Path) -> None:
         "label": "new",
         "files": {},
     }, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# _migrate: counterpart_path backfill from server_path (schema 1.1 -> 1.2)
+# ---------------------------------------------------------------------------
+
+class TestMigrateCounterpartPath:
+    def test_backfills_counterpart_path_from_server_path(self, tmp_path):
+        """1.1 manifest with server_path gets counterpart_path backfilled."""
+        p = tmp_path / "st_manifest_v11.json"
+        _write_v11(p, server_path_val="/remote/gdrive/ProjectA")
+        data = json.loads(p.read_text())
+        _migrate(data)
+        assert data["counterpart_path"] == "/remote/gdrive/ProjectA"
+
+    def test_backfill_does_not_overwrite_existing_counterpart_path(self, tmp_path):
+        """If counterpart_path is already set, _migrate must not clobber it."""
+        data = {
+            "schema_version": "1.1",
+            "server_path": "/old/server",
+            "counterpart_path": "/already/set",
+            "files": {},
+        }
+        _migrate(data)
+        assert data["counterpart_path"] == "/already/set"
+
+    def test_migrate_manifest_file_v11_backfills_counterpart_path(self, tmp_path):
+        """migrate_manifest_file rewrites a 1.1 manifest and adds counterpart_path."""
+        p = tmp_path / "st_manifest_v11.json"
+        _write_v11(p, server_path_val="/volumes/nas/A001")
+        assert migrate_manifest_file(p, backup=False) is True
+        data = json.loads(p.read_text())
+        assert data["schema_version"] == SCHEMA_VERSION
+        assert data["counterpart_path"] == "/volumes/nas/A001"
+
+    def test_v11_manifest_needs_migration(self, tmp_path):
+        """1.1 manifests are below SCHEMA_VERSION 1.2 and must be flagged."""
+        p = tmp_path / "st_manifest_v11.json"
+        _write_v11(p)
+        assert needs_migration(p) is True
 
 
 # ---------------------------------------------------------------------------
@@ -161,3 +221,15 @@ class TestMigrateOnDisk:
         # one migrates. The sweep never raises.
         assert len(report["migrated"]) == 1
         assert report["scanned"] == 2
+
+    def test_sweep_migrates_v11_and_backfills_counterpart_path(self, tmp_path):
+        """The sweep must also migrate 1.1 manifests and backfill counterpart_path."""
+        archive = tmp_path / "archive"
+        _write_v11(archive / "D004" / "st_manifest_D004_transfer_1.json",
+                   server_path_val="/volumes/nas/D004")
+        report = migrate_manifests_on_disk(archive, dry_run=False, backup=False)
+        assert len(report["migrated"]) == 1
+        p = next((archive / "D004").glob("st_manifest*.json"))
+        data = json.loads(p.read_text())
+        assert data["schema_version"] == SCHEMA_VERSION
+        assert data["counterpart_path"] == "/volumes/nas/D004"

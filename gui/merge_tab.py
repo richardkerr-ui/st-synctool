@@ -181,7 +181,7 @@ class ScanWorker(QObject):
             self.log.emit("Scanning local folder...", "info")
             yours = generate_manifest_fast(
                 self.local_path, base_manifest=base, label="yours",
-                server_path=self.server_path,
+                counterpart_path=self.server_path,
                 progress_cb=lambda p, f: self.progress.emit(p // 2, f),
             )
             stats = yours.get("scan_stats", {})
@@ -330,12 +330,12 @@ class ApplyWorker(QObject):
                 else:
                     results["failed"].append(rel_path)
 
-            # Regenerate manifest with server_path and renames recorded
+            # Regenerate manifest with counterpart_path and renames recorded
             self.progress.emit(92, "Regenerating manifest...")
             log("Regenerating manifest from new local state...", "info")
             new_manifest = generate_manifest_fast(
                 self.local_path, base_manifest=self.yours, label="post-merge",
-                server_path=self.server_path, operation="post-merge",
+                counterpart_path=self.server_path, operation="post-merge",
             )
             new_manifest["renames"] = renames
             # MANIFEST-FIX (item 08): enrich regenerated entries with the verified

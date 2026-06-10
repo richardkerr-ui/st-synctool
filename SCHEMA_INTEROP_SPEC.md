@@ -3,7 +3,7 @@
 Target: next implementation session. Goal is to make offload output consumable by Verify and Merge without a re-scan, and to give offload and merge one shared rename contract so a folder that crosses the offload to merge boundary does not trip the rename-divergence path.
 
 Grounded in the current code, not invented:
-- Merge/transfer manifest: `core/manifest.py` `generate_manifest` (v1.1).
+- Merge/transfer manifest: `core/manifest.py` `generate_manifest` (v1.2).
 - Offload in-memory manifest: `core/offload.py` `prehash_source` and `build_normalized_manifest`.
 - Rename consumer: `core/comparison.py:96` reads top-level `renames[]` keyed `{from, to}` on relative posix paths.
 
@@ -32,12 +32,12 @@ Reuse the merge/transfer envelope verbatim so consumers do not branch on produce
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "created_at": "<ISO8601 UTC>",
   "label": "<source.label>",
   "root": "<str(source.path)>",
   "destination": "<final committed path at this destination>",
-  "server_path": "",
+  "counterpart_path": "",
   "operation": "offload",
   "project_id": "<see note>",
   "workstation": "<hostname>",
@@ -53,7 +53,7 @@ Reuse the merge/transfer envelope verbatim so consumers do not branch on produce
 ```
 
 Notes:
-- `project_id`: reuse `manifest._project_id(local_path, server_path)`. For offload pass `(str(source.path), str(destination))` so the archive subdir is stable per source-to-dest pairing.
+- `project_id`: reuse `manifest._project_id(local_path, counterpart_path)`. For offload pass `(str(source.path), str(destination))` so the archive subdir is stable per source-to-dest pairing.
 - `destination` is the committed `{dest}/{source_label}` path for the destination this copy of the manifest lives in. The archive copy may set it to the primary destination.
 
 ### File entry shape (must match merge entries)
@@ -161,7 +161,7 @@ There are two different rename events (normalize at offload, preserve at merge) 
 
 Write these against real fixtures, in `tests/` (these are durable, unlike the overnight temp tests):
 
-1. **Offload manifest is loadable and v1.1.** Run an offload with normalization. Load the persisted `{dest}/{label}/st_manifest.json` via `manifest.load_manifest`. Assert `schema_version == "1.1"`, `operation == "offload"`, every file entry has `checksums.sha256` (full 64 char), `hash_algorithm`, `size`, `modtime`.
+1. **Offload manifest is loadable and v1.2.** Run an offload with normalization. Load the persisted `{dest}/{label}/st_manifest.json` via `manifest.load_manifest`. Assert `schema_version == "1.2"`, `operation == "offload"`, every file entry has `checksums.sha256` (full 64 char), `hash_algorithm`, `size`, `modtime`.
 
 2. **Verify consumes an offload manifest.** Point the Verify flow at the committed destination using the offload-produced manifest. Assert all files report OK, no MISSING, no MISMATCH.
 
@@ -178,5 +178,5 @@ Write these against real fixtures, in `tests/` (these are durable, unlike the ov
 ## Out of scope for this change, tracked separately
 
 - `.DS_Store` ingest asymmetry: offload copies it, merge filters it via `comparison._is_ignored`. Unify the ignore list across both subsystems in a follow-up.
-- `root` vs `server_path` path vocabulary across producers.
+- `root` vs `counterpart_path` path vocabulary across producers (renamed from `server_path` in schema 1.2; `_migrate()` backfills `counterpart_path` from `server_path` for schema versions below 1.2).
 - Same-second COC log filename collision (`offload.py` derives the filename from the current second).

@@ -7,14 +7,14 @@ from core.comparison import is_ignored_path
 
 MANIFEST_FILENAME = "st_manifest.json"
 LOCAL_MANIFEST_DIR = Path.home() / "Documents" / "STSyncTool" / "manifests"
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 # Fields backfilled when loading a manifest older than SCHEMA_VERSION.
 _TOP_LEVEL_DEFAULTS = {
     "project_id": "",
     "renames": [],
     "checksum_context": {},
-    "server_path": "",
+    "counterpart_path": "",
     "operation": "",
     "filename_normalization": {"applied": False},
 }
@@ -29,16 +29,16 @@ def _primary_algorithm(gdrive: bool) -> str:
     return "md5" if gdrive else "sha256"
 
 
-def _project_id(local_path: str, server_path: str) -> str:
-    """Stable 12-char hex ID derived from the (local_path, server_path) pair."""
+def _project_id(local_path: str, counterpart_path: str) -> str:
+    """Stable 12-char hex ID derived from the (local_path, counterpart_path) pair."""
     if not local_path:
         return ""
-    key = f"{local_path}|{server_path or ''}"
+    key = f"{local_path}|{counterpart_path or ''}"
     return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 def generate_manifest(folder: Path, label="source", dest_path=None,
                       gdrive=False, progress_cb=None,
-                      server_path="", operation="") -> dict:
+                      counterpart_path="", operation="") -> dict:
     # KNOWN-ISSUE-FIX: skip ignored paths (OS junk like .DS_Store, our own
     # st_manifest.json, staging/failure/thumbnail artifacts) so they never enter
     # a generated manifest. The merge diff already ignores these; generation did
@@ -51,11 +51,11 @@ def generate_manifest(folder: Path, label="source", dest_path=None,
         "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "label": label,
-        "root": str(folder),  # display label only — use server_path for the server side
+        "root": str(folder),  # display label only
         "destination": dest_path or "",
-        "server_path": server_path,
+        "counterpart_path": counterpart_path,
         "operation": operation,
-        "project_id": _project_id(str(folder), server_path),
+        "project_id": _project_id(str(folder), counterpart_path),
         "workstation": socket.gethostname(), "user": getpass.getuser(),
         "file_count": total,
         "renames": [],
@@ -112,10 +112,14 @@ def load_manifest(path: Path) -> dict:
 
 
 def _migrate(manifest: dict) -> None:
-    """Backfill fields missing from pre-1.1 manifests, in-place."""
+    """Backfill fields missing from pre-1.2 manifests, in-place."""
     version = manifest.get("schema_version", "1.0")
     if version >= SCHEMA_VERSION:
         return
+    # Schema 1.2: rename server_path -> counterpart_path. Copy old key when the
+    # new key is absent so old on-disk manifests still display correctly.
+    if "server_path" in manifest and "counterpart_path" not in manifest:
+        manifest["counterpart_path"] = manifest["server_path"]
     for key, default in _TOP_LEVEL_DEFAULTS.items():
         manifest.setdefault(key, default)
     # OVERNIGHT-FIX: backfill hash_algorithm for pre-1.1 file entries. Prefer the
@@ -140,7 +144,7 @@ def _migrate(manifest: dict) -> None:
     manifest["schema_version"] = SCHEMA_VERSION
 
 
-# KNOWN-ISSUE-FIX: load_manifest backfills pre-1.1 manifests to the current
+# KNOWN-ISSUE-FIX: load_manifest backfills pre-1.2 manifests to the current
 # schema in memory but never rewrites the file, so the archive keeps stale 1.0
 # JSON on disk indefinitely. This is an OPT-IN sweep utility — it is never
 # called automatically and the GUI does not invoke it. A human runs it (e.g.
@@ -185,7 +189,7 @@ def migrate_manifest_file(path: Path, backup: bool = True) -> bool:
 def migrate_manifests_on_disk(archive_dir: Optional[Path] = None,
                               dry_run: bool = True,
                               backup: bool = True) -> dict:
-    """Sweep an archive directory and migrate every pre-1.1 manifest on disk.
+    """Sweep an archive directory and migrate every pre-1.2 manifest on disk.
 
     Opt-in and non-destructive by default:
       - `archive_dir` defaults to LOCAL_MANIFEST_DIR (recursed, so per-project
@@ -225,7 +229,7 @@ def migrate_manifests_on_disk(archive_dir: Optional[Path] = None,
 
 def generate_manifest_fast(folder: Path, base_manifest=None, label="source",
                            dest_path=None, gdrive=False, progress_cb=None,
-                           server_path="", operation="") -> dict:
+                           counterpart_path="", operation="") -> dict:
     """Like generate_manifest, but uses modtime+size as a pre-filter against
     a base manifest. Files whose stat matches the base entry exactly are
     assumed unchanged and reuse the base hash. Massive speedup for big projects
@@ -240,11 +244,11 @@ def generate_manifest_fast(folder: Path, base_manifest=None, label="source",
         "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "label": label,
-        "root": str(folder),  # display label only — use server_path for the server side
+        "root": str(folder),  # display label only
         "destination": dest_path or "",
-        "server_path": server_path,
+        "counterpart_path": counterpart_path,
         "operation": operation,
-        "project_id": _project_id(str(folder), server_path),
+        "project_id": _project_id(str(folder), counterpart_path),
         "workstation": socket.gethostname(), "user": getpass.getuser(),
         "file_count": len(files_list),
         "renames": [],

@@ -124,7 +124,7 @@ class TestOffloadManifestLoadable:
         assert ctx["manifest_path"].exists(), "offload did not persist st_manifest.json"
 
         m = load_manifest(ctx["manifest_path"])
-        assert m["schema_version"] == "1.1"
+        assert m["schema_version"] == "1.2"
         assert m["operation"] == "offload"
 
         entries = _real_file_entries(m)

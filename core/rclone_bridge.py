@@ -208,8 +208,8 @@ def lsjson_to_manifest(remote_path, extra_flags=None, label="server"):
         "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "label": label,
-        "root": remote_path,  # display label only — use server_path for the server side
-        "server_path": remote_path,
+        "root": remote_path,  # display label only
+        "counterpart_path": remote_path,
         "operation": "",
         "project_id": "",
         "workstation": socket.gethostname(),

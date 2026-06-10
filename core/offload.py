@@ -609,7 +609,7 @@ def build_offload_manifest(
         "label": source.label,
         "root": str(source.path),
         "destination": str(dest_root),
-        "server_path": str(dest_root),
+        "counterpart_path": "",  # offload has no counterpart — destination IS the artifact; use destination field
         # MANIFEST-FIX: operation label is "offload" (was "offload-ingest") so
         # downstream consumers and the manifest archive use the canonical verb.
         "operation": "offload",

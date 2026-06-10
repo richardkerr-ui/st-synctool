@@ -186,7 +186,7 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None, 
         # so consumers reading a transfer manifest find the same top-level fields.
         "root": str(src),
         "source_root": str(src), "dest_root": str(actual_dest),
-        "server_path": str(actual_dest),
+        "counterpart_path": str(actual_dest),
         "operation": "transfer",
         "project_id": "",
         "renames": [],
@@ -313,7 +313,7 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     # Store the original human-readable URLs (before rclone path conversion) — item 05
     manifest["source_url"] = str(src) if src_is_url else ""
     manifest["dest_url"]   = str(dst) if dst_is_url else ""
-    manifest["server_path"] = str(src) if src_is_url else str(dst) if dst_is_url else ""
+    manifest["counterpart_path"] = str(src) if src_is_url else str(dst) if dst_is_url else ""
     manifest["operation"] = "rclone-transfer"
     manifest["renames"] = []
 
