@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QProgressBar, QCheckBox, QComboBox,
-    QMessageBox, QSizePolicy
+    QMessageBox, QSizePolicy, QFrame,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
@@ -69,6 +69,7 @@ class TransferTab(QWidget):
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
+        # ── Source & Destination ─────────────────────────────────────────────
         io_group = QGroupBox("Source && Destination")
         io_layout = QVBoxLayout(io_group)
 
@@ -90,11 +91,47 @@ class TransferTab(QWidget):
 
         root.addWidget(io_group)
 
-        self.preflight_label = QLabel("Enter source and destination to see transfer summary.")
-        self.preflight_label.setWordWrap(True)
-        self.preflight_label.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:12px;padding:4px;")
-        root.addWidget(self.preflight_label)
+        # ── Pre-flight summary row ───────────────────────────────────────────
+        pf_frame = QFrame()
+        pf_frame.setObjectName("PfFrame")
+        pf_frame.setStyleSheet(
+            "QFrame#PfFrame {"
+            f"  background:{theme.CHARCOAL_LIGHT}; border:1px solid {theme.BORDER};"
+            "  border-radius:6px;"
+            "}"
+        )
+        pf_layout = QHBoxLayout(pf_frame)
+        pf_layout.setContentsMargins(12, 8, 12, 8)
+        pf_layout.setSpacing(0)
 
+        for attr, label_text in [
+            ("_pf_src_val",  "Source size"),
+            ("_pf_dst_val",  "Free space"),
+            ("_pf_time_val", "Est. time"),
+        ]:
+            item = QWidget()
+            item.setStyleSheet("background:transparent;")
+            il = QVBoxLayout(item)
+            il.setContentsMargins(0, 0, 0, 0)
+            il.setSpacing(2)
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet(f"font-size:11px; color:#555; background:transparent;")
+            val = QLabel("—")
+            val.setStyleSheet(f"font-size:13px; font-weight:500; color:#555; background:transparent;")
+            il.addWidget(lbl)
+            il.addWidget(val)
+            setattr(self, attr, val)
+            pf_layout.addWidget(item)
+            pf_layout.addSpacing(32)
+
+        pf_layout.addStretch()
+        self._pf_hint = QLabel("Enter paths to see transfer summary")
+        self._pf_hint.setStyleSheet(f"font-size:12px; color:#555; background:transparent;")
+        pf_layout.addWidget(self._pf_hint)
+
+        root.addWidget(pf_frame)
+
+        # ── Options ──────────────────────────────────────────────────────────
         opts_group = QGroupBox("Options")
         opts_layout = QVBoxLayout(opts_group)
 
@@ -107,41 +144,39 @@ class TransferTab(QWidget):
         opts_row1.addSpacing(20)
         self.extract_zip_chk = QCheckBox("Auto-extract multipart .zips after transfer")
         opts_row1.addWidget(self.extract_zip_chk)
+        opts_row1.addSpacing(20)
+        self.paranoid_chk = QCheckBox("Paranoid verification")
+        self.paranoid_chk.setStyleSheet(f"color:{theme.TEXT_MUTED};")
+        opts_row1.addWidget(self.paranoid_chk)
         opts_row1.addStretch()
         opts_layout.addLayout(opts_row1)
 
-        opts_row2 = QHBoxLayout()
+        danger = QFrame()
+        danger.setObjectName("DangerZone")
+        danger.setStyleSheet(
+            "QFrame#DangerZone {"
+            "  background:#2a1515; border:1px solid #5a2020; border-radius:6px;"
+            "}"
+            "QCheckBox { color:#A32D2D; }"
+        )
+        dl = QHBoxLayout(danger)
+        dl.setContentsMargins(10, 6, 10, 6)
+        dl.setSpacing(8)
+        warn_icon = QLabel("⚠")
+        warn_icon.setStyleSheet("color:#A32D2D; font-size:13px; background:transparent;")
+        dl.addWidget(warn_icon)
         self.mirror_chk = QCheckBox(
-            "Mirror mode (DELETES files at destination not present in source)"
+            "Mirror mode — deletes files at destination not present in source"
         )
-        self.mirror_chk.setStyleSheet(f"color:{theme.CORAL};")
-        opts_row2.addWidget(self.mirror_chk)
-        opts_row2.addStretch()
-        opts_layout.addLayout(opts_row2)
-
-        opts_row3 = QHBoxLayout()
-        self.paranoid_chk = QCheckBox(
-            "Paranoid verification (compute SHA-256 locally; slow but independent of rclone)"
-        )
-        self.paranoid_chk.setStyleSheet(f"color:{theme.TEXT_MUTED};")
-        opts_row3.addWidget(self.paranoid_chk)
-        opts_row3.addStretch()
-        opts_layout.addLayout(opts_row3)
+        dl.addWidget(self.mirror_chk)
+        dl.addStretch()
+        opts_layout.addWidget(danger)
 
         root.addWidget(opts_group)
 
-        prog_group = QGroupBox("Progress")
-        prog_layout = QVBoxLayout(prog_group)
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.current_file_label = QLabel("—")
-        self.current_file_label.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:11px;")
-        prog_layout.addWidget(self.progress_bar)
-        prog_layout.addWidget(self.current_file_label)
-        root.addWidget(prog_group)
-
+        # ── Action row ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
+
         self.start_btn = QPushButton("▶  Start Transfer")
         self.start_btn.setFixedHeight(36)
         self.start_btn.setStyleSheet(theme.primary_button_style())
@@ -152,19 +187,37 @@ class TransferTab(QWidget):
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel_transfer)
 
+        self._status_label = QLabel("Ready")
+        self._status_label.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px;")
+
         self.manifest_btn = QPushButton("📋  Generate Manifest Only")
         self.manifest_btn.setFixedHeight(36)
+        self.manifest_btn.setStyleSheet(
+            "QPushButton {"
+            f"  background:transparent; color:{theme.TEXT_MUTED};"
+            f"  border:1px solid {theme.BORDER}; border-radius:4px; font-size:12px;"
+            "}"
+            "QPushButton:hover {"
+            f"  color:{theme.TEXT_PRIMARY}; border-color:#555;"
+            "}"
+        )
         self.manifest_btn.clicked.connect(self._generate_manifest_only)
 
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(self.cancel_btn)
+        btn_row.addWidget(self._status_label)
         btn_row.addStretch()
         btn_row.addWidget(self.manifest_btn)
         root.addLayout(btn_row)
 
-        self.log = LogWidget(self)
+        # ── Log panel (includes inline progress bar) ─────────────────────────
+        self.log = LogWidget("Transfer log", with_progress=True, parent=self)
         self.log.setMinimumHeight(180)
         root.addWidget(self.log)
+
+        # Convenience aliases so progress-related methods need no changes
+        self.progress_bar       = self.log.progress_bar
+        self.current_file_label = self.log.current_file_label
 
     def _conflict_handler_str(self):
         return {0: "skip", 1: "overwrite", 2: "rename"}[self.conflict_combo.currentIndex()]
@@ -194,37 +247,54 @@ class TransferTab(QWidget):
     def _update_preflight(self):
         src = self.src_input.text()
         dst = self.dst_input.text()
+
         if not src or not dst:
+            for attr in ("_pf_src_val", "_pf_dst_val", "_pf_time_val"):
+                getattr(self, attr).setText("—")
+                getattr(self, attr).setStyleSheet(
+                    "font-size:13px; font-weight:500; color:#555; background:transparent;"
+                )
+            self._pf_hint.setText("Enter paths to see transfer summary")
+            self._pf_hint.setStyleSheet("font-size:12px; color:#555; background:transparent;")
             return
+
         try:
             src_is_url = is_gdrive_url(src)
             dst_is_url = is_gdrive_url(dst)
-            parts = []
             total = None
 
             if src_is_url:
-                parts.append("Source: Google Drive (size unknown until sync starts)")
+                self._pf_src_val.setText("Google Drive")
             else:
                 src_path = Path(src)
                 if not src_path.exists():
-                    self.preflight_label.setText("Source path does not exist.")
+                    self._pf_src_val.setText("Not found")
                     return
                 total = folder_size(src_path)
-                secs = estimate_time_seconds(total)
-                h = int(secs // 3600); m = int((secs % 3600) // 60); s = int(secs % 60)
-                est = f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
-                parts.append(f"Size: {format_bytes(total)}  |  Est. time: {est}")
+                self._pf_src_val.setText(format_bytes(total))
 
             if dst_is_url:
-                parts.append("Destination: Google Drive")
-                if total is not None and total > GDRIVE_DAILY_LIMIT_BYTES:
-                    parts.append("⚠ Exceeds 750 GB GDrive daily limit!")
+                self._pf_dst_val.setText("Google Drive")
             else:
                 dst_path = Path(dst)
                 if dst_path.exists():
-                    parts.append(f"Dest free: {format_bytes(free_space(dst_path))}")
+                    self._pf_dst_val.setText(format_bytes(free_space(dst_path)))
+                else:
+                    self._pf_dst_val.setText("—")
 
-            self.preflight_label.setText("  |  ".join(parts))
+            if total is not None:
+                secs = estimate_time_seconds(total)
+                h = int(secs // 3600); m = int((secs % 3600) // 60); s = int(secs % 60)
+                self._pf_time_val.setText(f"{h}h {m}m {s}s" if h else f"{m}m {s}s")
+            else:
+                self._pf_time_val.setText("—")
+
+            # GDrive daily limit warning
+            if total is not None and total > GDRIVE_DAILY_LIMIT_BYTES and dst_is_url:
+                self._pf_hint.setText("⚠ Exceeds 750 GB daily limit")
+                self._pf_hint.setStyleSheet(f"font-size:12px; color:{theme.CORAL}; background:transparent;")
+            else:
+                self._pf_hint.setText("")
         except Exception:
             pass
 
@@ -335,7 +405,8 @@ class TransferTab(QWidget):
 
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
-        self.progress_bar.setValue(0)
+        self._status_label.setText("Transferring…")
+        self.log.set_progress(0, "Starting…")
 
         start_session()
         self._thread.start()
@@ -353,13 +424,12 @@ class TransferTab(QWidget):
             self._reset_controls()
 
     def _on_progress(self, pct, filename):
-        self.progress_bar.setValue(pct)
-        self.current_file_label.setText(filename)
+        self.log.set_progress(pct, filename)
 
     def _on_finished(self, result):
         end_session()
+        self.log.set_progress(100, "Complete")
         self._reset_controls()
-        self.progress_bar.setValue(100)
         errors = result.get("errors", [])
         if errors:
             self.log.log(f"Transfer complete with {len(errors)} error(s).", "warning")
@@ -378,7 +448,8 @@ class TransferTab(QWidget):
     def _reset_controls(self):
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        self.current_file_label.setText("—")
+        self._status_label.setText("Ready")
+        self.log.hide_progress()
 
     def _generate_manifest_only(self):
         src = self.src_input.text()

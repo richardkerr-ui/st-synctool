@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Offload Tab — Mockup</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; background: #1e1e1e; color: #e0e0e0; display: flex; align-items: flex-start; justify-content: center; padding: 32px; min-height: 100vh; }
+  .win { background: #252525; border-radius: 10px; border: 1px solid #3a3a3a; overflow: hidden; width: 900px; }
+  .titlebar { background: #2d2d2d; border-bottom: 1px solid #3a3a3a; padding: 10px 16px; display: flex; align-items: center; gap: 8px; }
+  .dots { display: flex; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .d-red { background: #ff5f57; } .d-yellow { background: #febc2e; } .d-green { background: #28c840; }
+  .app-title { font-size: 14px; font-weight: 500; margin-left: 8px; }
+  .app-sub { font-size: 13px; color: #888; margin-left: 4px; }
+  .badge { font-size: 11px; color: #1D9E75; margin-left: auto; }
+  .tabs { display: flex; border-bottom: 1px solid #3a3a3a; background: #2d2d2d; padding: 0 16px; }
+  .tab { padding: 8px 16px; font-size: 13px; color: #888; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: #e0e0e0; border-bottom-color: #e0e0e0; font-weight: 500; }
+  .body { padding: 16px; }
+  .config-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .panel { background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 8px; overflow: hidden; }
+  .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #3a3a3a; }
+  .panel-label { font-size: 11px; font-weight: 500; color: #888; text-transform: uppercase; letter-spacing: 0.04em; }
+  .panel-actions { display: flex; gap: 6px; align-items: center; }
+  .preset-label { font-size: 12px; color: #888; }
+  .preset-select { font-size: 12px; border: 1px solid #4a4a4a; border-radius: 6px; padding: 3px 6px; background: #333; color: #e0e0e0; }
+  .btn-sm { font-size: 12px; padding: 3px 8px; border: 1px solid #4a4a4a; border-radius: 6px; background: #333; color: #e0e0e0; cursor: pointer; }
+  .source-row, .dest-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #3a3a3a; }
+  .source-row:last-of-type, .dest-row:last-of-type { border-bottom: none; }
+  .cb { width: 14px; height: 14px; border: 1px solid #4a4a4a; border-radius: 3px; background: #333; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .cb.checked { background: #1D9E75; border-color: #1D9E75; }
+  .cb.checked::after { content: ''; width: 8px; height: 5px; border-left: 1.5px solid white; border-bottom: 1.5px solid white; transform: rotate(-45deg) translateY(-1px); display: block; }
+  .field { flex: 1; font-size: 12px; border: 1px solid #3a3a3a; border-radius: 6px; padding: 4px 8px; background: #333; color: #888; }
+  .field.narrow { max-width: 90px; color: #e0e0e0; }
+  .icon-btn { width: 26px; height: 26px; border: 1px solid #3a3a3a; border-radius: 6px; background: #333; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; color: #888; font-size: 14px; }
+  .add-row { padding: 8px 12px; }
+  .add-btn { font-size: 12px; color: #888; border: 1px dashed #4a4a4a; border-radius: 6px; padding: 5px 12px; background: transparent; cursor: pointer; display: flex; align-items: center; gap: 5px; width: 100%; }
+  .options-bar { display: flex; align-items: center; gap: 20px; padding: 10px 12px; background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 8px; margin-bottom: 12px; }
+  .opt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #aaa; }
+  .opt-divider { width: 1px; height: 16px; background: #3a3a3a; margin: 0 2px; }
+  .spinner { width: 44px; font-size: 12px; border: 1px solid #4a4a4a; border-radius: 6px; padding: 3px 6px; background: #333; color: #e0e0e0; }
+  .primary-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .start-btn { background: #E8A000; color: #1a1000; font-size: 13px; font-weight: 500; padding: 8px 20px; border: none; border-radius: 8px; cursor: pointer; }
+  .cancel-btn { font-size: 13px; padding: 8px 16px; border: 1px solid #4a4a4a; border-radius: 8px; background: #333; color: #e0e0e0; cursor: pointer; }
+  .status-text { font-size: 12px; color: #666; margin-left: auto; }
+  .log-area { background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 8px; overflow: hidden; }
+  .log-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #3a3a3a; }
+  .log-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.04em; }
+  .log-body { padding: 8px 10px; font-size: 11px; font-family: "SF Mono", Monaco, monospace; color: #555; height: 90px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="titlebar">
+    <div class="dots"><div class="dot d-red"></div><div class="dot d-yellow"></div><div class="dot d-green"></div></div>
+    <span class="app-title">ST SyncTool</span>
+    <span class="app-sub">Signal Theory Productions</span>
+    <span class="badge">gdrive &nbsp;v1.0.0</span>
+  </div>
+  <div class="tabs">
+    <div class="tab">Transfer</div>
+    <div class="tab">Merge</div>
+    <div class="tab active">Offload</div>
+    <div class="tab">Verify</div>
+  </div>
+  <div class="body">
+    <div class="config-row">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-label">Sources <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#555;font-size:11px">(read-only)</span></span>
+        </div>
+        <div class="source-row">
+          <div class="cb checked"></div>
+          <div class="field" style="color:#e0e0e0;max-width:100px">Source 1</div>
+          <div class="field">Card path…</div>
+          <div class="icon-btn"><i class="ti ti-folder"></i></div>
+          <div class="icon-btn"><i class="ti ti-trash"></i></div>
+        </div>
+        <div class="add-row">
+          <button class="add-btn"><i class="ti ti-plus" style="font-size:13px"></i> Add source</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-label">Destinations</span>
+          <div class="panel-actions">
+            <span class="preset-label">Preset</span>
+            <select class="preset-select"><option>(select preset)</option></select>
+            <button class="btn-sm">Load</button>
+            <button class="btn-sm">Save</button>
+          </div>
+        </div>
+        <div class="dest-row">
+          <div class="cb checked"></div>
+          <div class="field narrow">Backup A</div>
+          <div class="field">Destination path…</div>
+          <div class="icon-btn"><i class="ti ti-folder"></i></div>
+          <div class="icon-btn"><i class="ti ti-trash"></i></div>
+        </div>
+        <div class="add-row">
+          <button class="add-btn"><i class="ti ti-plus" style="font-size:13px"></i> Add destination</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="options-bar">
+      <div class="opt">
+        <div class="cb checked"></div>
+        <span>Contact sheets</span>
+        <span style="font-size:11px;color:#555;margin-left:4px">max</span>
+        <input class="spinner" type="number" value="4" min="1" max="4">
+      </div>
+      <div class="opt-divider"></div>
+      <div class="opt">
+        <div class="cb"></div>
+        <span>Stop on first failure</span>
+      </div>
+      <div class="opt-divider"></div>
+      <div class="opt">
+        <span>Retries per file</span>
+        <input class="spinner" type="number" value="3" min="1" max="10">
+      </div>
+    </div>
+
+    <div class="primary-row">
+      <button class="start-btn">Start offload</button>
+      <button class="cancel-btn">Cancel</button>
+      <span class="status-text">Ready</span>
+    </div>
+
+    <div class="log-area">
+      <div class="log-header">
+        <span class="log-label">Transfer log</span>
+        <button class="btn-sm">Clear</button>
+      </div>
+      <div class="log-body">Waiting to start…</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

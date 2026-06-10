@@ -22,6 +22,12 @@ _FILE_ENTRY_DEFAULTS = {
 }
 
 
+# OVERNIGHT-FIX: each manifest entry must record which algorithm produced its
+# primary hash (spec: hash_algorithm per entry, not just the hash value).
+def _primary_algorithm(gdrive: bool) -> str:
+    return "md5" if gdrive else "sha256"
+
+
 def _project_id(local_path: str, server_path: str) -> str:
     """Stable 12-char hex ID derived from the (local_path, server_path) pair."""
     if not local_path:
@@ -61,6 +67,8 @@ def generate_manifest(folder: Path, label="source", dest_path=None,
             "type": "file", "size": stat.st_size,
             "modtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
             "checksums": hashes,
+            # OVERNIGHT-FIX: record which algorithm produced the primary hash
+            "hash_algorithm": _primary_algorithm(gdrive),
             "gdrive_url": "",
         }
     manifest["total_size_bytes"] = sum(e["size"] for e in manifest["files"].values())
@@ -103,9 +111,25 @@ def _migrate(manifest: dict) -> None:
         return
     for key, default in _TOP_LEVEL_DEFAULTS.items():
         manifest.setdefault(key, default)
+    # OVERNIGHT-FIX: backfill hash_algorithm for pre-1.1 file entries. Prefer the
+    # manifest-wide checksum_context.algorithm; otherwise infer from the checksum
+    # keys that are actually present (sha256 > md5 > xxhash3_64).
+    ctx_algo = (manifest.get("checksum_context") or {}).get("algorithm")
     for entry in manifest.get("files", {}).values():
         for key, default in _FILE_ENTRY_DEFAULTS.items():
             entry.setdefault(key, default)
+        if "hash_algorithm" not in entry:
+            cs = entry.get("checksums", {}) or {}
+            if ctx_algo and ctx_algo in cs:
+                entry["hash_algorithm"] = ctx_algo
+            elif "sha256" in cs:
+                entry["hash_algorithm"] = "sha256"
+            elif "md5" in cs:
+                entry["hash_algorithm"] = "md5"
+            elif "xxhash3_64" in cs:
+                entry["hash_algorithm"] = "xxhash3_64"
+            else:
+                entry["hash_algorithm"] = ctx_algo or "sha256"
     manifest["schema_version"] = SCHEMA_VERSION
 
 
@@ -163,6 +187,8 @@ def generate_manifest_fast(folder: Path, base_manifest=None, label="source",
         manifest["files"][rel] = {
             "type": "file", "size": size,
             "modtime": modtime, "checksums": hashes,
+            # OVERNIGHT-FIX: record which algorithm produced the primary hash
+            "hash_algorithm": _primary_algorithm(gdrive),
             "gdrive_url": "",
         }
 

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QCheckBox, QLineEdit, QSpinBox, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
     QDialogButtonBox, QComboBox, QInputDialog, QMessageBox,
-    QSplitter, QFileDialog, QSizePolicy, QFrame,
+    QSplitter, QFileDialog, QSizePolicy, QFrame, QAbstractScrollArea,
 )
 
 from gui import theme
@@ -83,22 +83,9 @@ class SourceRowWidget(QWidget):
         browse_btn.clicked.connect(self._browse)
         layout.addWidget(browse_btn)
 
-        subfolder_lbl = QLabel("Subfolder:")
-        subfolder_lbl.setStyleSheet(f"color:{theme.MUTED_TEXT};font-size:11px;")
-        layout.addWidget(subfolder_lbl)
-
+        # Subfolder kept as a hidden attribute so to_offload_source() still works
         self._subfolder = QLineEdit()
-        self._subfolder.setPlaceholderText("(same as label)")
-        self._subfolder.setFixedWidth(120)
-        self._subfolder.setToolTip(
-            "Subfolder name written at the destination. Defaults to the source label."
-        )
-        layout.addWidget(self._subfolder)
-
-        lock_icon = QLabel("🔒")
-        lock_icon.setToolTip("Source is read-only — files will never be modified on the source card.")
-        lock_icon.setStyleSheet("font-size:13px;")
-        layout.addWidget(lock_icon)
+        self._subfolder.setVisible(False)
 
         remove_btn = QPushButton("✕")
         remove_btn.setFixedWidth(28)
@@ -634,7 +621,7 @@ class OffloadTab(QWidget):
         group = QGroupBox("Destinations")
         layout = QVBoxLayout(group)
 
-        # Preset bar
+        # Preset bar (Load / Save — Delete removed, Save overwrites)
         preset_bar = QHBoxLayout()
         preset_bar.addWidget(QLabel("Preset:"))
         self._preset_combo = QComboBox()
@@ -644,11 +631,8 @@ class OffloadTab(QWidget):
         load_btn.clicked.connect(self._load_preset)
         save_btn = QPushButton("Save…")
         save_btn.clicked.connect(self._save_preset)
-        del_btn  = QPushButton("Delete")
-        del_btn.clicked.connect(self._delete_preset)
         preset_bar.addWidget(load_btn)
         preset_bar.addWidget(save_btn)
-        preset_bar.addWidget(del_btn)
         preset_bar.addStretch()
         layout.addLayout(preset_bar)
         self._refresh_preset_combo()
@@ -675,24 +659,17 @@ class OffloadTab(QWidget):
 
     def _build_options_bar(self) -> QWidget:
         bar = QWidget()
+        bar.setObjectName("OptionsBar")
+        bar.setStyleSheet(
+            f"QWidget#OptionsBar {{ background:{theme.CHARCOAL_LIGHT}; border:1px solid {theme.BORDER}; border-radius:6px; }}"
+        )
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(16)
 
-        layout.addWidget(QLabel("Retries per file:"))
-        self._retries_spin = QSpinBox()
-        self._retries_spin.setRange(1, 10)
-        self._retries_spin.setValue(3)
-        self._retries_spin.setFixedWidth(60)
-        layout.addWidget(self._retries_spin)
-
-        self._stop_on_fail = QCheckBox("Stop on first destination failure")
-        layout.addWidget(self._stop_on_fail)
-
-        # ── Thumbnail options ────────────────────────────────────────
+        # 1. Contact sheets + max frames
         _thumb_ok = ffmpeg_available() and pillow_available()
-
-        self._thumb_check = QCheckBox("Generate contact sheets")
+        self._thumb_check = QCheckBox("Contact sheets")
         if _thumb_ok:
             self._thumb_check.setToolTip(
                 "After the primary destination commits, extract thumbnails and build a PDF "
@@ -705,12 +682,12 @@ class OffloadTab(QWidget):
             if not pillow_available():
                 missing.append("Pillow (pip install Pillow)")
             self._thumb_check.setEnabled(False)
-            self._thumb_check.setToolTip(
-                "Requires: " + ", ".join(missing)
-            )
+            self._thumb_check.setToolTip("Requires: " + ", ".join(missing))
         layout.addWidget(self._thumb_check)
 
-        layout.addWidget(QLabel("Max frames:"))
+        max_lbl = QLabel("max")
+        max_lbl.setStyleSheet(f"color:{theme.MUTED_TEXT}; font-size:11px;")
+        layout.addWidget(max_lbl)
         self._max_frames_spin = QSpinBox()
         self._max_frames_spin.setRange(1, 4)
         self._max_frames_spin.setValue(4)
@@ -718,6 +695,37 @@ class OffloadTab(QWidget):
         self._max_frames_spin.setToolTip("Maximum thumbnail frames per clip (adaptive: short clips use fewer)")
         layout.addWidget(self._max_frames_spin)
 
+        # Divider
+        div1 = QFrame()
+        div1.setFrameShape(QFrame.Shape.VLine)
+        div1.setFixedWidth(1)
+        div1.setStyleSheet(f"background:{theme.BORDER}; border:none;")
+        layout.addWidget(div1)
+
+        # 2. Stop on fail
+        self._stop_on_fail = QCheckBox("Stop on first destination failure")
+        layout.addWidget(self._stop_on_fail)
+
+        # Divider
+        div2 = QFrame()
+        div2.setFrameShape(QFrame.Shape.VLine)
+        div2.setFixedWidth(1)
+        div2.setStyleSheet(f"background:{theme.BORDER}; border:none;")
+        layout.addWidget(div2)
+
+        # 3. Retries (advanced)
+        retries_lbl = QLabel("Retries per file")
+        retries_lbl.setStyleSheet(f"color:{theme.MUTED_TEXT}; font-size:12px;")
+        layout.addWidget(retries_lbl)
+        self._retries_spin = QSpinBox()
+        self._retries_spin.setRange(1, 10)
+        self._retries_spin.setValue(3)
+        self._retries_spin.setFixedWidth(60)
+        layout.addWidget(self._retries_spin)
+
+        layout.addStretch()
+
+        # Auto-detect (kept but moved to end)
         self._autodetect_check = QCheckBox("Auto-detect media cards")
         self._autodetect_check.setToolTip(
             "Show a banner when a removable media card (DCIM, CLIP, etc.) is mounted. "
@@ -729,7 +737,6 @@ class OffloadTab(QWidget):
         self._autodetect_check.stateChanged.connect(self._on_autodetect_toggled)
         layout.addWidget(self._autodetect_check)
 
-        layout.addStretch()
         return bar
 
     def _build_matrix_group(self) -> QGroupBox:
@@ -747,25 +754,29 @@ class OffloadTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self._log = LogWidget()
-        self._log.setMinimumHeight(160)
-        layout.addWidget(self._log)
-
+        # Action row above log panel
         btn_row = QHBoxLayout()
-        self._start_btn = QPushButton("Start Offload")
+        self._start_btn = QPushButton("▶  Start Offload")
         self._start_btn.setStyleSheet(theme.primary_button_style())
         self._start_btn.setMinimumHeight(36)
         self._start_btn.clicked.connect(self._start_offload)
         btn_row.addWidget(self._start_btn)
 
-        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn = QPushButton("✕  Cancel")
         self._cancel_btn.setEnabled(False)
         self._cancel_btn.setMinimumHeight(36)
         self._cancel_btn.clicked.connect(self._cancel_offload)
         btn_row.addWidget(self._cancel_btn)
 
+        self._offload_status_lbl = QLabel("Ready")
+        self._offload_status_lbl.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px;")
         btn_row.addStretch()
+        btn_row.addWidget(self._offload_status_lbl)
         layout.addLayout(btn_row)
+
+        self._log = LogWidget("Offload log")
+        self._log.setMinimumHeight(160)
+        layout.addWidget(self._log)
         return container
 
     # ── Volume auto-detection ──────────────────────────────────────────────
@@ -902,24 +913,21 @@ class OffloadTab(QWidget):
         name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
         if not ok or not name.strip():
             return
+        name = name.strip()
+        if name in projects.list_dest_presets():
+            reply = QMessageBox.question(
+                self, "Overwrite Preset",
+                f"A preset named '{name}' already exists. Overwrite it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
         dests = [r.to_dict() for r in self._dest_rows]
-        projects.save_dest_preset(name.strip(), dests)
+        projects.save_dest_preset(name, dests)
         self._refresh_preset_combo()
-        idx = self._preset_combo.findText(name.strip())
+        idx = self._preset_combo.findText(name)
         if idx >= 0:
             self._preset_combo.setCurrentIndex(idx)
-
-    def _delete_preset(self):
-        name = self._preset_combo.currentText()
-        if name == "(select preset)":
-            return
-        reply = QMessageBox.question(
-            self, "Delete Preset", f"Delete preset '{name}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            projects.delete_dest_preset(name)
-            self._refresh_preset_combo()
 
     # ── Offload execution ──────────────────────────────────────────────────
 
@@ -980,6 +988,7 @@ class OffloadTab(QWidget):
 
         self._start_btn.setEnabled(False)
         self._cancel_btn.setEnabled(True)
+        self._offload_status_lbl.setText("Running…")
         self._log.clear()
         self._log.log("Starting offload…", "info")
         self._thread.start()
@@ -1088,5 +1097,6 @@ class OffloadTab(QWidget):
     def _on_thread_done(self):
         self._start_btn.setEnabled(True)
         self._cancel_btn.setEnabled(False)
+        self._offload_status_lbl.setText("Ready")
         self._thread = None
         self._worker = None

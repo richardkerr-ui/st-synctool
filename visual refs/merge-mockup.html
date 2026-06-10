@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Merge Tab — Mockup</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; background: #1e1e1e; color: #e0e0e0; display: flex; align-items: flex-start; justify-content: center; padding: 32px; min-height: 100vh; }
+  .win { background: #252525; border-radius: 10px; border: 1px solid #3a3a3a; overflow: hidden; width: 900px; }
+  .titlebar { background: #2d2d2d; border-bottom: 1px solid #3a3a3a; padding: 10px 16px; display: flex; align-items: center; gap: 8px; }
+  .dots { display: flex; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .d-red { background: #ff5f57; } .d-yellow { background: #febc2e; } .d-green { background: #28c840; }
+  .app-title { font-size: 14px; font-weight: 500; margin-left: 8px; }
+  .app-sub { font-size: 13px; color: #888; margin-left: 4px; }
+  .badge { font-size: 11px; color: #1D9E75; margin-left: auto; }
+  .tabs { display: flex; border-bottom: 1px solid #3a3a3a; background: #2d2d2d; padding: 0 16px; }
+  .tab { padding: 8px 16px; font-size: 13px; color: #888; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: #e0e0e0; border-bottom-color: #e0e0e0; font-weight: 500; }
+  .body { padding: 16px; }
+  .quick-load-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .quick-label { font-size: 12px; color: #888; flex-shrink: 0; }
+  .quick-select { flex: 1; font-size: 12px; border: 1px solid #4a4a4a; border-radius: 6px; padding: 5px 8px; background: #2d2d2d; color: #e0e0e0; }
+  .section { background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+  .section-header { padding: 7px 12px; border-bottom: 1px solid #3a3a3a; font-size: 11px; font-weight: 500; color: #666; text-transform: uppercase; letter-spacing: 0.04em; }
+  .field-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #3a3a3a; }
+  .field-row:last-child { border-bottom: none; }
+  .field-label { font-size: 12px; color: #888; min-width: 110px; flex-shrink: 0; }
+  .field { flex: 1; font-size: 12px; border: 1px solid #3a3a3a; border-radius: 6px; padding: 4px 8px; background: #333; color: #555; }
+  .btn-browse { font-size: 12px; padding: 4px 10px; border: 1px solid #4a4a4a; border-radius: 6px; background: #333; color: #e0e0e0; cursor: pointer; flex-shrink: 0; }
+  .options-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .opt-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #aaa; }
+  .cb { width: 14px; height: 14px; border: 1px solid #4a4a4a; border-radius: 3px; background: #333; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .cb.checked { background: #1D9E75; border-color: #1D9E75; }
+  .cb.checked::after { content: ''; width: 8px; height: 5px; border-left: 1.5px solid white; border-bottom: 1.5px solid white; transform: rotate(-45deg) translateY(-1px); display: block; }
+  .action-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .scan-btn { background: #E8A000; color: #1a1000; font-size: 13px; font-weight: 500; padding: 8px 18px; border: none; border-radius: 8px; cursor: pointer; }
+  .apply-btn { background: #1e3d0a; color: #5a9a30; font-size: 13px; font-weight: 500; padding: 8px 18px; border: 1px solid #2a5010; border-radius: 8px; cursor: not-allowed; opacity: 0.5; }
+  .status-text { font-size: 12px; color: #555; margin-left: 4px; }
+  .diff-table { width: 100%; border-collapse: collapse; }
+  .diff-table th { font-size: 11px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 12px; text-align: left; border-bottom: 1px solid #3a3a3a; }
+  .diff-table td { padding: 7px 12px; font-size: 12px; color: #aaa; border-bottom: 1px solid #333; }
+  .diff-table tr:last-child td { border-bottom: none; }
+  .diff-table td:first-child { color: #e0e0e0; font-family: "SF Mono", Monaco, monospace; font-size: 11px; }
+  .state-badge { font-size: 11px; padding: 2px 7px; border-radius: 6px; font-weight: 500; white-space: nowrap; }
+  .s-lc { background: #0d2a45; color: #5a9fd4; }
+  .s-sc { background: #132a05; color: #5a9a30; }
+  .s-bc { background: #2a0d0d; color: #c07070; }
+  .select-sm { font-size: 12px; border: 1px solid #4a4a4a; border-radius: 6px; padding: 3px 6px; background: #333; color: #e0e0e0; }
+  .log-area { background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 8px; overflow: hidden; }
+  .log-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #3a3a3a; }
+  .log-label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.04em; }
+  .clear-btn { font-size: 11px; padding: 2px 8px; border: 1px solid #4a4a4a; border-radius: 6px; background: #333; color: #888; cursor: pointer; }
+  .log-body { padding: 8px 10px; font-size: 11px; font-family: "SF Mono", Monaco, monospace; color: #555; height: 80px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="titlebar">
+    <div class="dots"><div class="dot d-red"></div><div class="dot d-yellow"></div><div class="dot d-green"></div></div>
+    <span class="app-title">ST SyncTool</span>
+    <span class="app-sub">Signal Theory Productions</span>
+    <span class="badge">gdrive &nbsp;v1.0.0</span>
+  </div>
+  <div class="tabs">
+    <div class="tab">Transfer</div>
+    <div class="tab active">Merge</div>
+    <div class="tab">Offload</div>
+    <div class="tab">Verify</div>
+  </div>
+  <div class="body">
+    <div class="quick-load-row">
+      <span class="quick-label">Quick load</span>
+      <select class="quick-select"><option>— select project —</option></select>
+    </div>
+
+    <div class="section">
+      <div class="section-header">Paths</div>
+      <div class="field-row">
+        <span class="field-label">Base manifest</span>
+        <div class="field">Optional — auto-detects st_manifest.json in local folder</div>
+        <button class="btn-browse">Browse…</button>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Local (yours)</span>
+        <div class="field">Paste path or GDrive URL…</div>
+        <button class="btn-browse">Browse…</button>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Server (theirs)</span>
+        <div class="field">/Volumes/NAS/project  or  https://drive.google.com/…</div>
+        <button class="btn-browse">Browse…</button>
+        <button class="btn-browse">Check</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="options-body">
+        <div class="opt-row"><div class="cb checked"></div>Preserve existing files on overwrite (rename incoming with date-initials suffix)</div>
+        <div class="opt-row"><div class="cb checked"></div>Re-scan before apply (catches drift since initial scan)</div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="scan-btn">Scan &amp; compare</button>
+      <button class="apply-btn" disabled>Apply selected actions</button>
+      <span class="status-text">Scan first to enable apply</span>
+    </div>
+
+    <div class="section">
+      <div class="section-header">Changes</div>
+      <table class="diff-table">
+        <thead>
+          <tr><th>Path</th><th>State</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>edit/sequence_v3.prproj</td>
+            <td><span class="state-badge s-lc">Local changed</span></td>
+            <td><select class="select-sm"><option>Push to server</option><option>Skip</option></select></td>
+          </tr>
+          <tr>
+            <td>audio/stems/mix_r4.wav</td>
+            <td><span class="state-badge s-sc">Server changed</span></td>
+            <td><select class="select-sm"><option>Pull from server</option><option>Skip</option></select></td>
+          </tr>
+          <tr>
+            <td>graphics/logo_final.psd</td>
+            <td><span class="state-badge s-bc">Both changed</span></td>
+            <td><select class="select-sm"><option>Skip (conflict)</option><option>Push to server</option><option>Pull from server</option></select></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="log-area">
+      <div class="log-header">
+        <span class="log-label">Merge log</span>
+        <button class="clear-btn">Clear</button>
+      </div>
+      <div class="log-body">Waiting to start…</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

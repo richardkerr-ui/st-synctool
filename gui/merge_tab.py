@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QProgressBar, QFileDialog, QMessageBox, QCheckBox,
     QComboBox, QDialog, QListWidget, QListWidgetItem, QTextEdit,
-    QDialogButtonBox,
+    QDialogButtonBox, QGraphicsOpacityEffect,
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
@@ -452,7 +452,7 @@ class MergeTab(QWidget):
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
-        # ── Project quick-loader (item 15) ───────────────────────
+        # ── Project quick-loader ─────────────────────────────────
         proj_row = QHBoxLayout()
         proj_row.addWidget(QLabel("Quick Load:"))
         self.project_combo = QComboBox()
@@ -538,38 +538,52 @@ class MergeTab(QWidget):
         self.apply_btn.setEnabled(False)
         self.apply_btn.clicked.connect(self._apply_actions)
 
+        # Opacity effect dims apply button until a scan has results
+        self._apply_opacity = QGraphicsOpacityEffect()
+        self._apply_opacity.setOpacity(0.4)
+        self.apply_btn.setGraphicsEffect(self._apply_opacity)
+
+        self.status_label = QLabel("Scan first to enable apply")
+        self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px;")
+
         btn_row.addWidget(self.scan_btn)
         btn_row.addWidget(self.apply_btn)
+        btn_row.addWidget(self.status_label)
         btn_row.addStretch()
         root.addLayout(btn_row)
 
+        # Progress bar — hidden until a scan/apply is running
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
-        self.status_label = QLabel("--")
-        self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:11px;")
+        self.progress_bar.setVisible(False)
         root.addWidget(self.progress_bar)
-        root.addWidget(self.status_label)
 
+        # ── Changes panel (diff table) ───────────────────────────
+        changes_group = QGroupBox("Changes")
+        cg_layout = QVBoxLayout(changes_group)
+        cg_layout.setContentsMargins(4, 4, 4, 4)
         self.diff_table = DiffTable(self)
-        root.addWidget(self.diff_table, stretch=1)
+        cg_layout.addWidget(self.diff_table)
+        root.addWidget(changes_group, stretch=1)
 
-        self.log = LogWidget(self)
+        # ── Log panel ────────────────────────────────────────────
+        self.log = LogWidget("Merge log", parent=self)
         self.log.setMaximumHeight(160)
         root.addWidget(self.log)
 
-        # ── Merge history panel (item 19) ────────────────────────
-        history_group = QGroupBox("Merge History")
-        hl = QVBoxLayout(history_group)
-        self.history_text = QTextEdit()
-        self.history_text.setReadOnly(True)
-        self.history_text.setMaximumHeight(110)
-        self.history_text.setStyleSheet(
-            "QTextEdit { background:#1a1a1a; color:#888; font-size:11px;"
-            "  border:1px solid #333; border-radius:4px; padding:4px; }"
+        # Open logs folder link (replaces history panel)
+        logs_row = QHBoxLayout()
+        logs_row.addStretch()
+        open_logs_btn = QPushButton("Open logs folder")
+        open_logs_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.TEXT_MUTED};"
+            f"  border:none; font-size:11px; text-decoration:underline; }}"
+            f"QPushButton:hover {{ color:{theme.TEXT_PRIMARY}; }}"
         )
-        self.history_text.setPlainText("No project loaded.")
-        hl.addWidget(self.history_text)
-        root.addWidget(history_group)
+        open_logs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_logs_btn.clicked.connect(self._open_logs_folder)
+        logs_row.addWidget(open_logs_btn)
+        root.addLayout(logs_row)
 
         self._refresh_project_combo()
 
@@ -691,36 +705,17 @@ class MergeTab(QWidget):
         level = "success" if status == "ok" else "warning" if status == "warn" else "error"
         self.log.log(f"Server health: {msg}", level)
 
-    # ── Merge history panel (item 19) ─────────────────────────────────────────
+    # ── Logs folder link ──────────────────────────────────────────────────────
+
+    def _open_logs_folder(self):
+        from PyQt6.QtGui import QDesktopServices
+        from PyQt6.QtCore import QUrl
+        log_dir = Path.home() / "Documents" / "STSyncTool" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir)))
 
     def _refresh_history_panel(self):
-        proj_id = self._current_project_id
-        if not proj_id:
-            self.history_text.setPlainText("No project loaded.")
-            return
-        proj = project_registry.get_project(proj_id)
-        if not proj:
-            self.history_text.setPlainText("Project not found in registry.")
-            return
-        history = proj.get("history", [])
-        last = _fmt_date(proj.get("last_merged_at", ""))
-        header = f"Project: {proj['display_name']}"
-        if last:
-            header += f"  |  Last merged: {last}"
-        if not history:
-            self.history_text.setPlainText(f"{header}\nNo merge history yet.")
-            return
-        lines = [header, "─" * 52]
-        for entry in reversed(history[-20:]):
-            dt    = _fmt_date(entry.get("merged_at", ""))
-            fc    = entry.get("files_changed", 0)
-            co    = entry.get("conflicts", 0)
-            pr    = entry.get("preserve_renames", 0)
-            parts = [f"{fc} file{'s' if fc != 1 else ''} changed"]
-            if co: parts.append(f"{co} conflict{'s' if co != 1 else ''}")
-            if pr: parts.append(f"{pr} rename{'s' if pr != 1 else ''}")
-            lines.append(f"{dt}  {', '.join(parts)}")
-        self.history_text.setPlainText("\n".join(lines))
+        pass  # History panel removed — data written to ~/Documents/STSyncTool/logs/
 
     # ── Scan ──────────────────────────────────────────────────────────────────
 
@@ -736,7 +731,10 @@ class MergeTab(QWidget):
 
         self.scan_btn.setEnabled(False)
         self.apply_btn.setEnabled(False)
+        self._apply_opacity.setOpacity(0.4)
         self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText("Scanning…")
 
         self._scan_thread = QThread()
         self._scan_worker = ScanWorker(self.base_input.text() or None, local, server)
@@ -773,9 +771,16 @@ class MergeTab(QWidget):
             "success" if conflicts == 0 else "warning",
         )
         self.progress_bar.setValue(100)
-        self.status_label.setText(f"{changed} differences found")
+        self.progress_bar.setVisible(False)
         self.scan_btn.setEnabled(True)
-        self.apply_btn.setEnabled(changed > 0)
+        if changed > 0:
+            self.apply_btn.setEnabled(True)
+            self._apply_opacity.setOpacity(1.0)
+            self.status_label.setText(f"{changed} difference{'s' if changed != 1 else ''} found")
+        else:
+            self.apply_btn.setEnabled(False)
+            self._apply_opacity.setOpacity(0.4)
+            self.status_label.setText("No differences found")
 
         # Auto-register project (item 11)
         project_id = yours.get("project_id", "")
@@ -796,6 +801,8 @@ class MergeTab(QWidget):
     def _on_scan_error(self, msg):
         end_session()
         self.scan_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Scan failed")
         self.log.log(f"Scan error: {msg}", "error")
         QMessageBox.critical(self, "Scan Error", msg)
 
@@ -820,8 +827,11 @@ class MergeTab(QWidget):
             return
 
         self.apply_btn.setEnabled(False)
+        self._apply_opacity.setOpacity(0.4)
         self.scan_btn.setEnabled(False)
         self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText("Applying…")
 
         self._apply_thread = QThread()
         self._apply_worker = ApplyWorker(
@@ -856,8 +866,9 @@ class MergeTab(QWidget):
 
     def _on_apply_done(self, results):
         end_session()
-        self.apply_btn.setEnabled(True)
         self.scan_btn.setEnabled(True)
+        self.progress_bar.setValue(100)
+        self.progress_bar.setVisible(False)
         s  = len(results.get("success", []))
         f  = len(results.get("failed", []))
         sk = len(results.get("skipped", []))
@@ -867,7 +878,9 @@ class MergeTab(QWidget):
             f"Apply complete — {s} succeeded, {f} failed, {sk} skipped{rename_note}.",
             "success" if f == 0 else "warning",
         )
-        self.progress_bar.setValue(100)
+        self.status_label.setText(f"Applied {s} action{'s' if s != 1 else ''}")
+        self.apply_btn.setEnabled(True)
+        self._apply_opacity.setOpacity(1.0)
         self._refresh_history_panel()
         self._refresh_project_combo()
         if f == 0:
@@ -880,7 +893,10 @@ class MergeTab(QWidget):
     def _on_rescan_conflict(self, paths):
         end_session()
         self.apply_btn.setEnabled(False)
+        self._apply_opacity.setOpacity(0.4)
         self.scan_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Scan first to enable apply")
         QMessageBox.warning(
             self, "Files Changed Since Scan",
             f"{len(paths)} file(s) changed since the initial scan.\n"

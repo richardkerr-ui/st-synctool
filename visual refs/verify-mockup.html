@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verify Tab — Mockup</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; background: #1e1e1e; color: #e0e0e0; display: flex; align-items: flex-start; justify-content: center; padding: 32px; min-height: 100vh; }
+  .win { background: #252525; border-radius: 10px; border: 1px solid #3a3a3a; overflow: hidden; width: 900px; }
+  .titlebar { background: #2d2d2d; border-bottom: 1px solid #3a3a3a; padding: 10px 16px; display: flex; align-items: center; gap: 8px; }
+  .dots { display: flex; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .d-red { background: #ff5f57; } .d-yellow { background: #febc2e; } .d-green { background: #28c840; }
+  .app-title { font-size: 14px; font-weight: 500; margin-left: 8px; }
+  .app-sub { font-size: 13px; color: #888; margin-left: 4px; }
+  .badge { font-size: 11px; color: #1D9E75; margin-left: auto; }
+  .tabs { display: flex; border-bottom: 1px solid #3a3a3a; background: #2d2d2d; padding: 0 16px; }
+  .tab { padding: 8px 16px; font-size: 13px; color: #888; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: #e0e0e0; border-bottom-color: #e0e0e0; font-weight: 500; }
+  .body { padding: 16px; }
+  .section { background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+  .section-header { padding: 7px 12px; border-bottom: 1px solid #3a3a3a; font-size: 11px; font-weight: 500; color: #666; text-transform: uppercase; letter-spacing: 0.04em; }
+  .field-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #3a3a3a; }
+  .field-row:last-child { border-bottom: none; }
+  .field-label { font-size: 12px; color: #888; min-width: 110px; flex-shrink: 0; }
+  .field { flex: 1; font-size: 12px; border: 1px solid #3a3a3a; border-radius: 6px; padding: 4px 8px; background: #333; color: #555; }
+  .btn-browse { font-size: 12px; padding: 4px 10px; border: 1px solid #4a4a4a; border-radius: 6px; background: #333; color: #e0e0e0; cursor: pointer; flex-shrink: 0; }
+  .action-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .start-btn { background: #E8A000; color: #1a1000; font-size: 13px; font-weight: 500; padding: 8px 20px; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .cancel-btn { font-size: 13px; padding: 8px 14px; border: 1px solid #4a4a4a; border-radius: 8px; background: #333; color: #e0e0e0; cursor: pointer; }
+  .status-text { font-size: 12px; color: #555; margin-left: auto; }
+  .summary-row { display: flex; gap: 10px; padding: 10px 12px; }
+  .summary-card { flex: 1; background: #222; border-radius: 6px; padding: 10px 12px; text-align: center; }
+  .s-num { font-size: 22px; font-weight: 500; }
+  .s-lbl { font-size: 11px; color: #555; margin-top: 3px; }
+  .s-ok { color: #1D9E75; }
+  .s-warn { color: #BA7517; }
+  .s-err { color: #c07070; }
+  .log-area { background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 8px; overflow: hidden; }
+  .log-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #3a3a3a; }
+  .log-label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.04em; }
+  .clear-btn { font-size: 11px; padding: 2px 8px; border: 1px solid #4a4a4a; border-radius: 6px; background: #333; color: #888; cursor: pointer; }
+  .log-body { padding: 8px 10px; font-size: 11px; font-family: "SF Mono", Monaco, monospace; color: #555; height: 120px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="titlebar">
+    <div class="dots"><div class="dot d-red"></div><div class="dot d-yellow"></div><div class="dot d-green"></div></div>
+    <span class="app-title">ST SyncTool</span>
+    <span class="app-sub">Signal Theory Productions</span>
+    <span class="badge">gdrive &nbsp;v1.0.0</span>
+  </div>
+  <div class="tabs">
+    <div class="tab">Transfer</div>
+    <div class="tab">Merge</div>
+    <div class="tab">Offload</div>
+    <div class="tab active">Verify</div>
+  </div>
+  <div class="body">
+    <div class="section">
+      <div class="section-header">Verify settings</div>
+      <div class="field-row">
+        <span class="field-label">Folder to verify</span>
+        <div class="field">Local path or https://drive.google.com/drive/folders/…</div>
+        <button class="btn-browse">Browse…</button>
+      </div>
+      <div class="field-row">
+        <span class="field-label">Manifest file</span>
+        <div class="field">Required for Drive folders; auto-detects st_manifest.json for local folders</div>
+        <button class="btn-browse">Browse…</button>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="start-btn"><i class="ti ti-shield-check" style="font-size:13px"></i> Run verification</button>
+      <button class="cancel-btn">Cancel</button>
+      <span class="status-text">Ready</span>
+    </div>
+
+    <div class="section">
+      <div class="section-header">Summary</div>
+      <div class="summary-row">
+        <div class="summary-card"><div class="s-num s-ok">—</div><div class="s-lbl">OK</div></div>
+        <div class="summary-card"><div class="s-num s-warn">—</div><div class="s-lbl">Extra files</div></div>
+        <div class="summary-card"><div class="s-num s-err">—</div><div class="s-lbl">Missing</div></div>
+        <div class="summary-card"><div class="s-num s-err">—</div><div class="s-lbl">Mismatch</div></div>
+      </div>
+    </div>
+
+    <div class="log-area">
+      <div class="log-header">
+        <span class="log-label">Results log</span>
+        <button class="clear-btn">Clear</button>
+      </div>
+      <div class="log-body">Waiting to start…</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

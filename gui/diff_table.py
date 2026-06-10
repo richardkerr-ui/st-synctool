@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (
-    QTableWidget, QTableWidgetItem, QComboBox,
+    QTableWidget, QTableWidgetItem, QComboBox, QWidget, QHBoxLayout, QLabel,
     QHeaderView, QAbstractItemView, QMenu, QApplication,
 )
 from PyQt6.QtGui import QColor, QDesktopServices
@@ -28,6 +28,20 @@ class DiffTable(QTableWidget):
     }
 
     _STATE_COLORS = theme.STATE_COLORS
+
+    # Dark-adapted pill colors for the Changes table
+    _PILL_COLORS: dict[str, tuple[str, str]] = {
+        "LOCAL_CHANGED":  ("#0d2a45", "#5a9fd4"),
+        "SERVER_CHANGED": ("#132a05", "#5a9a30"),
+        "BOTH_CHANGED":   ("#2a0d0d", "#c07070"),
+        "LOCAL_ONLY":     ("#2a2a2a", "#888888"),
+        "SERVER_ONLY":    ("#2a2a2a", "#888888"),
+        "DELETED_LOCAL":  ("#2a2a2a", "#555555"),
+        "DELETED_SERVER": ("#2a2a2a", "#555555"),
+        "DELETED_BOTH":   ("#2a2a2a", "#555555"),
+        "RENAMED":        ("#2a1a40", "#9070c0"),
+        "UNCHANGED":      ("#2a2a2a", "#555555"),
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -87,10 +101,22 @@ class DiffTable(QTableWidget):
 
             state_label = state_name.replace("_", " ").title()
             if state_name == "RENAMED" and r.renamed_from:
-                state_label = f"Renamed"
-            state_item = QTableWidgetItem(state_label)
-            state_item.setForeground(QColor(self._STATE_COLORS.get(state_name, "#cccccc")))
-            self.setItem(row, 1, state_item)
+                state_label = "Renamed"
+            bg, fg = self._PILL_COLORS.get(state_name, ("#2a2a2a", "#888888"))
+            pill_container = QWidget()
+            pill_container.setStyleSheet("background: transparent;")
+            pill_layout = QHBoxLayout(pill_container)
+            pill_layout.setContentsMargins(4, 2, 4, 2)
+            pill_layout.setSpacing(0)
+            pill = QLabel(state_label)
+            pill.setStyleSheet(
+                f"background: {bg}; color: {fg};"
+                " border-radius: 4px; padding: 2px 7px;"
+                " font-size: 11px; font-weight: 500;"
+            )
+            pill_layout.addWidget(pill)
+            pill_layout.addStretch()
+            self.setCellWidget(row, 1, pill_container)
 
             options = self._ACTIONS_BY_STATE.get(state_name, [ACT_SKIP])
             combo = QComboBox()

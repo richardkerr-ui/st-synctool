@@ -33,8 +33,11 @@ Edge cases to verify on real hardware
   so it qualifies for the marker check.  This is intentional (test convenience).
 - Generic volume name ("NO NAME", "UNTITLED", "Untitled"): label falls back to
   "Card_<MMDD>" so the user always gets an editable label rather than an empty one.
-- Volume mounted before the app starts: watcher only catches live mount events;
-  already-mounted cards are not auto-detected.  Users can still add them manually.
+# OVERNIGHT-FIX: docstring corrected — scan_existing() now detects pre-mounted cards
+- Volume mounted before the app starts: live mount events are caught by the
+  NSWorkspace observer, while cards already mounted at launch are surfaced by
+  scan_existing() (called once on the Offload tab's first show).  Users can
+  also still add any volume manually.
 """
 
 from __future__ import annotations

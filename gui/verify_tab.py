@@ -1,9 +1,9 @@
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QPushButton, QProgressBar, QFileDialog, QMessageBox
+    QPushButton, QProgressBar, QFileDialog, QMessageBox, QFrame,
 )
-from PyQt6.QtCore import QThread, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
@@ -166,6 +166,7 @@ class VerifyTab(QWidget):
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
+        # ── Verify settings ──────────────────────────────────────
         input_group = QGroupBox("Verify Settings")
         ig = QVBoxLayout(input_group)
 
@@ -191,32 +192,71 @@ class VerifyTab(QWidget):
 
         root.addWidget(input_group)
 
+        # ── Action row ───────────────────────────────────────────
         btn_row = QHBoxLayout()
-        self.verify_btn = QPushButton("  Run Verification")
+        self.verify_btn = QPushButton("🛡  Run Verification")
         self.verify_btn.setFixedHeight(36)
         self.verify_btn.setStyleSheet(theme.primary_button_style())
         self.verify_btn.clicked.connect(self._run_verify)
         btn_row.addWidget(self.verify_btn)
+
+        self.cancel_btn = QPushButton("✕  Cancel")
+        self.cancel_btn.setFixedHeight(36)
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._cancel_verify)
+        btn_row.addWidget(self.cancel_btn)
+
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px; margin-left:auto;")
         btn_row.addStretch()
+        btn_row.addWidget(self.status_label)
         root.addLayout(btn_row)
 
+        # ── Summary cards ────────────────────────────────────────
+        summary_group = QGroupBox("Summary")
+        sg = QHBoxLayout(summary_group)
+        sg.setSpacing(10)
+
+        card_defs = [
+            ("_card_ok",      "—", "#1D9E75", "OK"),
+            ("_card_extra",   "—", "#BA7517", "Extra files"),
+            ("_card_missing", "—", "#c07070", "Missing"),
+            ("_card_mismatch","—", "#c07070", "Mismatch"),
+        ]
+        for attr, default_val, color, label_text in card_defs:
+            card = QFrame()
+            card.setStyleSheet(
+                f"QFrame {{ background:{theme.CHARCOAL_LIGHT}; border-radius:6px; }}"
+            )
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(12, 10, 12, 10)
+            cl.setSpacing(3)
+            num_lbl = QLabel(default_val)
+            num_lbl.setStyleSheet(
+                f"font-size:22px; font-weight:500; color:{color}; background:transparent;"
+            )
+            num_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            txt_lbl = QLabel(label_text)
+            txt_lbl.setStyleSheet(
+                f"font-size:11px; color:{theme.TEXT_MUTED}; background:transparent;"
+            )
+            txt_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cl.addWidget(num_lbl)
+            cl.addWidget(txt_lbl)
+            sg.addWidget(card)
+            setattr(self, attr, num_lbl)
+
+        root.addWidget(summary_group)
+
+        # ── Progress bar ─────────────────────────────────────────
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
-        self.status_label = QLabel("--")
-        self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:11px;")
+        self.progress_bar.setVisible(False)
         root.addWidget(self.progress_bar)
-        root.addWidget(self.status_label)
 
-        results_label = QLabel("Results Log:")
-        results_label.setStyleSheet(f"font-weight:bold;color:{theme.TEXT_MUTED};")
-        root.addWidget(results_label)
-
-        self.results_log = LogWidget(self)
-        root.addWidget(self.results_log, stretch=1)
-
-        self.log = LogWidget(self)
-        self.log.setMaximumHeight(130)
-        root.addWidget(self.log)
+        # ── Single log panel ─────────────────────────────────────
+        self.log = LogWidget("Results log", parent=self)
+        root.addWidget(self.log, stretch=1)
 
     def _browse_manifest(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -269,9 +309,12 @@ class VerifyTab(QWidget):
         file_count = len(self._manifest.get("files", {}))
         kind = "Drive folder" if folder_is_url else "local folder"
         self.log.log(f"Starting verification of {file_count} files in {kind}...", "info")
-        self.results_log.clear_log()
+        self.log.clear_log()
         self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
         self.verify_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.status_label.setText("Verifying…")
 
         self._thread = QThread()
         self._worker = VerifyWorker(folder_str, self._manifest)
@@ -280,30 +323,53 @@ class VerifyTab(QWidget):
         self._worker.progress.connect(
             lambda p, f: (self.progress_bar.setValue(p), self.status_label.setText(f))
         )
-        self._worker.log.connect(self.results_log.log)
+        self._worker.log.connect(self.log.log)
         self._worker.finished.connect(self._on_verify_done)
         self._worker.error.connect(self._on_verify_error)
         self._worker.finished.connect(self._thread.quit)
         self._worker.error.connect(self._thread.quit)
         self._thread.start()
 
+    def _cancel_verify(self):
+        if self._thread and self._thread.isRunning():
+            self._thread.quit()
+            self._thread.wait(3000)
+        self.verify_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Cancelled")
+        self.log.log("Verification cancelled by user.", "warning")
+
     def _on_verify_done(self, results):
         self.verify_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setValue(100)
+        self.progress_bar.setVisible(False)
+
         ok       = sum(1 for r in results if r["status"] == "OK")
         missing  = sum(1 for r in results if r["status"] == "MISSING")
         mismatch = sum(1 for r in results if r["status"] == "MISMATCH")
         total    = len(results)
-        level    = "success" if (missing == 0 and mismatch == 0) else "warning"
+
+        # Populate summary cards
+        self._card_ok.setText(str(ok))
+        self._card_extra.setText("—")     # tracked in GDrive verify log only
+        self._card_missing.setText(str(missing))
+        self._card_mismatch.setText(str(mismatch))
+
+        level = "success" if (missing == 0 and mismatch == 0) else "warning"
         self.log.log(
-            f"Verification complete -- {ok} OK | {mismatch} MISMATCHES | {missing} MISSING",
+            f"Verification complete — {ok} OK | {mismatch} mismatch{'es' if mismatch != 1 else ''} | {missing} missing",
             level,
         )
-        self.progress_bar.setValue(100)
         self.status_label.setText(f"{ok}/{total} files OK")
         self._write_verify_report(results)
 
     def _on_verify_error(self, msg):
         self.verify_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Error")
         self.log.log(f"Verify error: {msg}", "error")
         QMessageBox.critical(self, "Verify Error", msg)
 

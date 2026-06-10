@@ -217,14 +217,19 @@ def build_normalization_plan(source_manifest: dict) -> dict:
     """
     from core.thumbnail import VIDEO_EXTENSIONS
 
-    # First pass: stem → hash suffix for video files that will be renamed
+    # First pass: stem → hash suffix for video files that will be renamed.
+    # OVERNIGHT-FIX: iterate in sorted order and keep the first match per stem so
+    # the sidecar parent suffix is deterministic when two video clips share a stem
+    # (e.g. IMG_0001.MOV + IMG_0001.R3D). Previously dict insertion / filesystem
+    # ordering decided which clip's hash a co-named sidecar inherited, so a sidecar
+    # could be bound to the wrong parent non-deterministically across runs.
     stem_to_suffix: dict[str, str] = {}
-    for rel, info in source_manifest.items():
+    for rel, info in sorted(source_manifest.items()):
         if rel == "generated_artifacts":
             continue
         p = Path(rel)
         if p.suffix.lower() in VIDEO_EXTENSIONS and _sequential_pattern_name(p.stem):
-            stem_to_suffix[p.stem] = info["checksum"][:8]
+            stem_to_suffix.setdefault(p.stem, info["checksum"][:8])
 
     plan: dict[str, str] = {}
     for rel in source_manifest:
@@ -529,16 +534,25 @@ def write_chain_of_custody_log(
 
     for src in sources:
         manifest = source_manifests.get(src.label, {})
+        # OVERNIGHT-FIX: a post-normalisation / post-thumbnail manifest carries
+        # non-file meta keys ("filename_normalization", "generated_artifacts")
+        # whose values are dicts without "size"/"checksum". Iterating every value
+        # blindly raised KeyError. Restrict file accounting to real file entries
+        # (dict values that actually carry a "size").
+        file_entries = {
+            rel: info for rel, info in manifest.items()
+            if isinstance(info, dict) and "size" in info
+        }
         lines += [
             f"SOURCE: {src.label}",
             f"  Path:      {src.path}",
             f"  Subfolder: {src.effective_subfolder()}",
-            f"  Files:     {len(manifest)}",
-            f"  Total:     {sum(v['size'] for v in manifest.values()):,} bytes",
+            f"  Files:     {len(file_entries)}",
+            f"  Total:     {sum(v['size'] for v in file_entries.values()):,} bytes",
             "  Pre-hash manifest:",
         ]
-        for rel, info in sorted(manifest.items()):
-            lines.append(f"    {info['checksum'][:16]}  {rel}")
+        for rel, info in sorted(file_entries.items()):
+            lines.append(f"    {info.get('checksum', '')[:16]}  {rel}")
         lines.append("")
 
     lines += ["RESULTS:", ""]
