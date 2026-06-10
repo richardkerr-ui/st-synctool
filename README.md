@@ -17,59 +17,44 @@ Four things, each in its own tab:
 
 ## Installation (macOS)
 
-## Setup
+### Quick setup
 
-1. Install dependencies:
-   pip install -r requirements.txt
-
-2. Install rclone:
-   brew install rclone
-
-3. Run the app:
-   python main.py
-
-4. The setup wizard will guide you through rclone config and OAuth.
-
-You need five things. Most are one-time.
-
-### 1. Homebrew
-
-Already installed on most ST workstations. Check:
+**Step 1 — Install Xcode Command Line Tools** (one-time system requirement, shows a dialog):
 
 ```bash
-brew --version
+xcode-select --install
 ```
 
-If not installed, follow the instructions at [brew.sh](https://brew.sh).
-
-### 2. rclone
-
-Handles all Google Drive communication.
+**Step 2 — Run the setup script** from the repo directory:
 
 ```bash
-brew install rclone
+bash setup.sh
 ```
 
-### 3. Python 3.10 or newer
+This installs Homebrew, Python, rclone, and all Python dependencies automatically.
 
-Usually preinstalled on macOS. Check:
+**Step 3 — Launch the app:**
 
 ```bash
-python3 --version
+./run.sh
 ```
 
-### 4. Python packages
+That's it. After the first setup, only `./run.sh` is needed to launch.
 
-From the repo directory:
+---
 
-```bash
-cd /path/to/st_synctool
-pip3 install -r requirements.txt
-```
+### What the setup script installs
 
-### 5. Amphetamine
+| Tool | Purpose |
+|------|---------|
+| Homebrew | macOS package manager |
+| Python 3 | Runtime |
+| rclone | Google Drive communication |
+| PyQt6 and other pip packages | App dependencies (from `requirements.txt`) |
 
-**Optional but recommended.** Prevents your Mac from sleeping mid-transfer. Install from the [Mac App Store](https://apps.apple.com/us/app/amphetamine/id937984704).
+### Amphetamine (optional but recommended)
+
+Prevents your Mac from sleeping mid-transfer. Install from the [Mac App Store](https://apps.apple.com/us/app/amphetamine/id937984704).
 
 ---
 
@@ -113,7 +98,14 @@ Should list your Google Drive folders.
 ## Launching the app
 
 ```bash
+./run.sh
+```
+
+Or directly:
+
+```bash
 cd /path/to/st_synctool
+source .venv/bin/activate
 python3 main.py
 ```
 
