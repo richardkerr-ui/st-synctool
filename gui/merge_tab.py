@@ -261,6 +261,9 @@ class ApplyWorker(QObject):
             total   = max(len(self.actions), 1)
             results = {"success": [], "failed": [], "skipped": []}
             renames = []
+            # MANIFEST-FIX (item 08): capture verified post-copy hashes from merge_ops
+            # so they can be merged into the regenerated manifest instead of discarded.
+            verified_entries = {}
 
             for i, (rel_path, action) in enumerate(self.actions.items()):
                 self.progress.emit(int(20 + i / total * 70), f"{action}: {rel_path}")
@@ -288,12 +291,27 @@ class ApplyWorker(QObject):
 
                 if op_result:
                     results["success"].append(rel_path)
-                    if isinstance(op_result, dict) and op_result.get("renamed_to"):
-                        renames.append({
-                            "from":   rel_path,
-                            "to":     op_result["renamed_to"],
-                            "action": action,
-                        })
+                    if isinstance(op_result, dict):
+                        # MANIFEST-FIX (item 08): keep verified post-copy hashes so the
+                        # post-merge manifest records the verification that just happened.
+                        dest_rel = op_result.get("renamed_to", rel_path)
+                        post = op_result.get("post")
+                        if post:
+                            verified_entries[dest_rel] = {
+                                "checksums": post,
+                                "hash_algorithm": "sha256",
+                                "verification_method": "local-copy",
+                            }
+                        elif op_result.get("method"):
+                            verified_entries[dest_rel] = {
+                                "verification_method": op_result.get("method"),
+                            }
+                        if op_result.get("renamed_to"):
+                            renames.append({
+                                "from":   rel_path,
+                                "to":     op_result["renamed_to"],
+                                "action": action,
+                            })
                 else:
                     results["failed"].append(rel_path)
 
@@ -305,6 +323,17 @@ class ApplyWorker(QObject):
                 server_path=self.server_path, operation="post-merge",
             )
             new_manifest["renames"] = renames
+            # MANIFEST-FIX (item 08): enrich regenerated entries with the verified
+            # hashes captured during apply so they are persisted, not recomputed.
+            for rel, extra in verified_entries.items():
+                entry = new_manifest["files"].get(rel)
+                if entry is not None:
+                    if extra.get("checksums"):
+                        entry.setdefault("checksums", {}).update(extra["checksums"])
+                    if extra.get("hash_algorithm"):
+                        entry["hash_algorithm"] = extra["hash_algorithm"]
+                    if extra.get("verification_method"):
+                        entry["verification_method"] = extra["verification_method"]
             saved = save_manifest(new_manifest, source_dir=self.local_path,
                                   name_hint=self.local_path.name, operation="post-merge")
             log(f"  Local manifest saved to {len(saved)} location(s)", "info")

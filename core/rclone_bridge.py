@@ -135,11 +135,24 @@ def lsjson_to_manifest(remote_path, extra_flags=None, label="server"):
             if "xxhash" in h: cs["xxhash3_64"] = h["xxhash"].lower()
         drive_id = item.get("ID", "")
         gdrive_url = f"https://drive.google.com/file/d/{drive_id}/view" if drive_id else ""
+        # MANIFEST-FIX: record hash_algorithm per entry so a manifest produced from
+        # lsjson is complete on load (no reliance on backfill inference).
+        if "sha256" in cs:
+            hash_algo = "sha256"
+        elif "md5" in cs:
+            hash_algo = "md5"
+        elif "xxhash3_64" in cs:
+            hash_algo = "xxhash3_64"
+        elif "sha1" in cs:
+            hash_algo = "sha1"
+        else:
+            hash_algo = "rclone-lsjson"
         files[item["Path"]] = {
             "type": "file",
             "size": item.get("Size", 0),
             "modtime": item.get("ModTime", ""),
             "checksums": cs,
+            "hash_algorithm": hash_algo,
             "gdrive_url": gdrive_url,
         }
     return {
@@ -154,9 +167,14 @@ def lsjson_to_manifest(remote_path, extra_flags=None, label="server"):
         "user": getpass.getuser(),
         "file_count": len(files),
         "renames": [],
+        # MANIFEST-FIX: standardise checksum_context shape (method + gdrive_mode +
+        # paranoid_fallback_count) for cross-module interoperability.
         "checksum_context": {
             "algorithm": "rclone-lsjson",
+            "method": "rclone",
+            "gdrive_mode": True,
             "source": "lsjson --hash",
+            "paranoid_fallback_count": 0,
         },
         "files": files,
         "total_size_bytes": sum(v["size"] for v in files.values()),

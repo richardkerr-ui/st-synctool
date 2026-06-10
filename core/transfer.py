@@ -157,11 +157,21 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None, 
         try:
             r = copy_file(fpath, dest_file, log_cb=log_cb, gdrive_mode=gdrive_mode)
             fstat = fpath.stat()
+            # MANIFEST-FIX: key manifest entries by relative POSIX path, not bare
+            # filename. Every other writer (generate_manifest[_fast]) keys by
+            # rel-path; keying by basename collapsed subdir/FILE_C.txt -> FILE_C.txt,
+            # breaking comparison.three_way_diff and verify (both resolve folder/rel).
+            rel_key = fpath.relative_to(src).as_posix()
             r.update({
                 "source_path": str(fpath), "dest_path": str(dest_file),
-                "filename": fpath.name, "size": fstat.st_size,
+                "filename": fpath.name, "rel_path": rel_key, "size": fstat.st_size,
                 "modtime": datetime.fromtimestamp(fstat.st_mtime, tz=timezone.utc).isoformat(),
                 "checksums": r.get("dest_checksums", {}),
+                # MANIFEST-FIX: record the primary algorithm per file so a transfer
+                # manifest used as a merge base does not rely on presence-based inference.
+                "hash_algorithm": "md5" if gdrive_mode else "sha256",
+                "verification_method": "local-copy",
+                "gdrive_url": "",
             })
             records.append(r)
         except Exception as e:
@@ -172,19 +182,28 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None, 
         "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "workstation": socket.gethostname(), "user": getpass.getuser(),
+        # MANIFEST-FIX: include `root` display label like generate_manifest does,
+        # so consumers reading a transfer manifest find the same top-level fields.
+        "root": str(src),
         "source_root": str(src), "dest_root": str(actual_dest),
         "server_path": str(actual_dest),
         "operation": "transfer",
         "project_id": "",
         "renames": [],
         "same_name_merge": same_name, "gdrive_mode": gdrive_mode,
+        # MANIFEST-FIX: standardise checksum_context shape (algorithm, gdrive_mode,
+        # method, paranoid_fallback_count) so every writer is interoperable.
         "checksum_context": {
             "algorithm": "md5" if gdrive_mode else "sha256",
             "gdrive_mode": gdrive_mode,
+            "method": "local",
             "verification": "pre-post-copy",
+            "paranoid_fallback_count": 0,
         },
         "file_count": len(records), "error_count": len(errors),
-        "files": {r["filename"]: r for r in records}, "errors": errors,
+        # MANIFEST-FIX: key by rel_path (relative POSIX) so subdir files survive
+        # round-trip into comparison/verify which both key by relative path.
+        "files": {r["rel_path"]: r for r in records}, "errors": errors,
     }
     saved = save_manifest(manifest, source_dir=src, dest_dir=actual_dest, name_hint=src.name)
     log(f"  Manifest saved to {len(saved)} locations")
@@ -345,6 +364,19 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
 
         fdata["verified"] = v_ok
         fdata["verification_method"] = v_method
+        # MANIFEST-FIX: record the primary algorithm per file. Paranoid transfers
+        # verify on SHA-256; non-paranoid relies on rclone's internal --checksum.
+        if paranoid_verify and v_method == "paranoid":
+            fdata["hash_algorithm"] = "sha256"
+        elif "sha256" in drive_cs:
+            fdata["hash_algorithm"] = "sha256"
+        elif "md5" in drive_cs:
+            fdata["hash_algorithm"] = "md5"
+        elif "xxhash3_64" in drive_cs:
+            fdata["hash_algorithm"] = "xxhash3_64"
+        else:
+            fdata["hash_algorithm"] = "rclone-checksum"
+        fdata.setdefault("gdrive_url", "")
         fdata["filename"] = fpath
         if not v_ok:
             verify_failures.append(fpath)
@@ -368,8 +400,12 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     manifest["files"] = normalized
     manifest["verification_method"] = "paranoid" if paranoid_verify else "rclone-checksum"
     manifest["verify_failures"] = verify_failures
+    # MANIFEST-FIX: standardise checksum_context shape — always expose `method`
+    # and `gdrive_mode` alongside the rclone-specific paranoid fields.
     manifest["checksum_context"] = {
         "algorithm": "sha256" if paranoid_verify else "rclone-checksum",
+        "method": "paranoid" if paranoid_verify else "rclone",
+        "gdrive_mode": bool(src_is_url or dst_is_url),
         "paranoid": paranoid_verify,
         "paranoid_fallback_files": paranoid_fallback_files,
         "paranoid_fallback_count": len(paranoid_fallback_files),

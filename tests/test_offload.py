@@ -639,3 +639,113 @@ class TestEjectSignal:
 
         assert     self._source_done(results, "A001")
         assert not self._source_done(results, "B001")
+
+
+# ---------------------------------------------------------------------------
+# write_chain_of_custody_log — auditable overall verdict + per-file verify
+#
+# MANIFEST-FIX (Phase 4): the chain-of-custody log must be readable by a human
+# or an audit tool without inferring outcomes from cell state.  It must carry an
+# explicit OVERALL RESULT line, a per-file VERIFY: PASS/FAIL line for every file,
+# a collision-proof filename (4-char hex suffix), and must never mention OS-junk
+# files (.DS_Store, Thumbs.db, desktop.ini) that are filtered before pre-hash.
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+class TestChainOfCustodyLog:
+    """Drives run_offload end to end and inspects the written COC log file."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_side_effects(self, tmp_path, monkeypatch):
+        # Keep the log out of the real ~/Documents/STSyncTool/offload_logs/ and
+        # skip the schema-1.1 archive write so the test stays hermetic.
+        monkeypatch.setattr("core.offload.OFFLOAD_LOGS_DIR", tmp_path / "_logs")
+        monkeypatch.setattr("core.offload.save_offload_manifest", lambda *a, **k: None)
+
+    def _run(self, sources, dests, config=None):
+        cfg = config or _default_config()
+        return run_offload(sources, dests, cfg, MagicMock(), MagicMock())
+
+    def test_overall_result_complete_on_clean_run(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        _, _, log_path = self._run([src], [dst])
+        content = log_path.read_text()
+        assert "OVERALL RESULT: COMPLETE" in content
+
+    def test_overall_result_partial_failure_when_a_cell_fails(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"original"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def corrupt_then_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            for f in staging_dir.rglob("*"):
+                if f.is_file():
+                    f.write_bytes(b"corrupted")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=corrupt_then_verify):
+            _, _, log_path = self._run([src], [dst])
+
+        content = log_path.read_text()
+        assert "OVERALL RESULT: PARTIAL_FAILURE" in content
+
+    def test_per_file_verify_pass_lines_present(self, tmp_path):
+        src = _make_source_dir(
+            tmp_path, "A001",
+            {"clip001.mov": b"one", "subdir/clip002.mov": b"two"},
+        )
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        _, _, log_path = self._run([src], [dst])
+        content = log_path.read_text()
+        # Every source file must have an explicit PASS line in the log.
+        assert "VERIFY: PASS  clip001.mov" in content
+        assert "VERIFY: PASS  subdir/clip002.mov" in content
+
+    def test_per_file_verify_fail_line_on_corruption(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"original"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def corrupt_then_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            for f in staging_dir.rglob("*"):
+                if f.is_file():
+                    f.write_bytes(b"corrupted")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=corrupt_then_verify):
+            _, _, log_path = self._run([src], [dst])
+
+        assert "VERIFY: FAIL  clip.mov" in log_path.read_text()
+
+    def test_log_filename_has_4char_hex_suffix(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        _, _, log_path = self._run([src], [dst])
+        # offload_<YYYYmmdd>_<HHMMSS>_<4 hex>.txt
+        assert _re.fullmatch(r"offload_\d{8}_\d{6}_[0-9a-f]{4}\.txt", log_path.name), log_path.name
+
+    def test_ds_store_never_appears_in_log(self, tmp_path):
+        src_dir = tmp_path / "A001"
+        src_dir.mkdir()
+        (src_dir / "clip.mov").write_bytes(b"good data")
+        (src_dir / ".DS_Store").write_bytes(b"junk")          # must be filtered
+        (src_dir / "subdir").mkdir()
+        (src_dir / "subdir" / "Thumbs.db").write_bytes(b"junk")  # must be filtered
+        src = OffloadSource(label="A001", path=src_dir)
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        results, manifests, log_path = self._run([src], [dst])
+        content = log_path.read_text()
+        assert ".DS_Store" not in content
+        assert "Thumbs.db" not in content
+        # And the only real file was accounted for, so the run still completes.
+        assert results[0].state == CellState.DONE
+        assert ".DS_Store" not in manifests["A001"]

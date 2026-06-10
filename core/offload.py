@@ -31,6 +31,12 @@ from core.thumbnail import (
 OFFLOAD_LOGS_DIR = Path.home() / "Documents" / "STSyncTool" / "offload_logs"
 MAX_RETRIES_DEFAULT = 3
 
+# MANIFEST-FIX: OS-generated junk files that must never enter the offload
+# pipeline (pre-hash, copy, verify, manifest, chain-of-custody log).
+SKIP_FILENAMES: frozenset[str] = frozenset({
+    ".DS_Store", "Thumbs.db", "desktop.ini",
+})
+
 _RETRYABLE = (OSError, IOError, ConnectionResetError, TimeoutError)
 
 
@@ -116,6 +122,11 @@ class CellResult:
     staging_path: Optional[Path] = None
     final_path: Optional[Path] = None
     thumbnail_result: Optional[dict] = None   # set for primary dest when thumbnails enabled
+    # MANIFEST-FIX: per-file post-copy verification outcome from verify_staging().
+    # verified is True only when every file's hash matched the source ground-truth.
+    # per_file_verify maps relative path -> True (PASS) / False (FAIL) for the COC log.
+    verified: Optional[bool] = None
+    per_file_verify: dict = field(default_factory=dict)
 
 
 # Callback type aliases (not enforced at runtime, just for clarity)
@@ -377,7 +388,12 @@ def prehash_source(
       { relative_path_str: {"size": int, "checksum": str, "algorithm": "sha256"} }
     """
     log_cb(f"[Offload] Pre-hashing: {source.label} ({source.path})", "info")
-    files = sorted(p for p in source.path.rglob("*") if p.is_file())
+    # MANIFEST-FIX: filter OS junk (.DS_Store, Thumbs.db, desktop.ini) so it
+    # never enters the pipeline — by exact filename, case-insensitive.
+    files = sorted(
+        p for p in source.path.rglob("*")
+        if p.is_file() and p.name.lower() not in {n.lower() for n in SKIP_FILENAMES}
+    )
     manifest: dict = {}
     for i, f in enumerate(files):
         rel = str(f.relative_to(source.path))
@@ -509,6 +525,89 @@ def write_failure_report(
         pass
 
 
+# MANIFEST-FIX (item 60 / Phase 7): offload returned ground-truth manifests but
+# never persisted them, so downstream merges had no base. Convert the offload
+# ground-truth shape ({rel: {size, checksum, algorithm, ...}}) into a canonical
+# schema-1.1 manifest and write it to the committed destination + central archive.
+def build_offload_manifest(
+    source: "OffloadSource",
+    source_manifest: dict,
+    dest_root: Path,
+    norm_block: Optional[dict] = None,
+) -> dict:
+    """Convert an offload ground-truth manifest into a schema-1.1 manifest dict."""
+    import socket as _socket
+    import getpass as _getpass
+    from core.manifest import SCHEMA_VERSION
+
+    files: dict = {}
+    generated_artifacts = {}
+    for rel, info in source_manifest.items():
+        if rel == "generated_artifacts":
+            generated_artifacts = info
+            continue
+        if not (isinstance(info, dict) and "size" in info):
+            continue
+        checksum = info.get("checksum", "")
+        entry = {
+            "type": "file",
+            "size": info["size"],
+            "modtime": "",
+            "checksums": {"sha256": checksum} if checksum else {},
+            "hash_algorithm": info.get("algorithm", "sha256"),
+            "gdrive_url": "",
+        }
+        # Carry through normalisation + thumbnail metadata if present
+        for k in ("original_filename", "filename_hash_suffix", "hash_method", "thumbnails"):
+            if k in info:
+                entry[k] = info[k]
+        files[rel] = entry
+
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "label": source.label,
+        "root": str(source.path),
+        "destination": str(dest_root),
+        "server_path": str(dest_root),
+        "operation": "offload-ingest",
+        "project_id": "",
+        "workstation": _socket.gethostname(),
+        "user": _getpass.getuser(),
+        "file_count": len(files),
+        "renames": [],
+        "checksum_context": {
+            "algorithm": "sha256",
+            "gdrive_mode": False,
+            "method": "local",
+            "paranoid_fallback_count": 0,
+        },
+        "filename_normalization": norm_block or {"applied": False},
+        "files": files,
+        "total_size_bytes": sum(e["size"] for e in files.values()),
+    }
+    if generated_artifacts:
+        manifest["generated_artifacts"] = generated_artifacts
+    return manifest
+
+
+def save_offload_manifest(
+    source: "OffloadSource",
+    source_manifest: dict,
+    dest_root: Path,
+    norm_block: Optional[dict] = None,
+) -> list:
+    """Build and persist an offload manifest to the destination + central archive."""
+    from core.manifest import save_manifest
+    manifest = build_offload_manifest(source, source_manifest, dest_root, norm_block)
+    return save_manifest(
+        manifest,
+        dest_dir=dest_root,
+        name_hint=source.effective_subfolder(),
+        operation="offload-ingest",
+    )
+
+
 def write_chain_of_custody_log(
     sources: list,
     dests: list,
@@ -521,13 +620,26 @@ def write_chain_of_custody_log(
     Saved to ~/Documents/STSyncTool/offload_logs/offload_{ts}.txt.
     """
     OFFLOAD_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = OFFLOAD_LOGS_DIR / f"offload_{ts}.txt"
+    # MANIFEST-FIX: append a 4-char random hex suffix so two offloads that start
+    # in the same second do not collide on the log filename and silently
+    # overwrite each other's chain-of-custody record.
+    import secrets as _secrets
+    suffix = _secrets.token_hex(2)  # 4 hex chars
+    log_path = OFFLOAD_LOGS_DIR / f"offload_{ts}_{suffix}.txt"
+
+    # MANIFEST-FIX: explicit overall verdict near the top. PARTIAL_FAILURE if any
+    # result cell is not DONE (failed, skipped or otherwise incomplete).
+    overall_complete = bool(results) and all(
+        r.state == CellState.DONE for r in results
+    )
+    overall = "COMPLETE" if overall_complete else "PARTIAL_FAILURE"
 
     lines: list[str] = [
         "=" * 72,
         "ST SyncTool — Offload Chain of Custody",
         f"Run: {ts}",
         f"Sources: {len(sources)}   Destinations: {len(dests)}",
+        f"OVERALL RESULT: {overall}",
         "=" * 72,
         "",
     ]
@@ -565,6 +677,15 @@ def write_chain_of_custody_log(
         ]
         if r.final_path:
             lines.append(f"    Path:   {r.final_path}")
+        # MANIFEST-FIX: explicit per-file post-copy verification result so a human
+        # or audit tool can read PASS/FAIL per file rather than infer it.
+        if r.verified is not None:
+            lines.append(f"    Verified: {'PASS' if r.verified else 'FAIL'}")
+        if r.per_file_verify:
+            lines.append("    Per-file verification:")
+            for rel in sorted(r.per_file_verify):
+                status = "PASS" if r.per_file_verify[rel] else "FAIL"
+                lines.append(f"      VERIFY: {status}  {rel}")
         if r.thumbnail_result:
             lines.append(f"    Contact sheet: {r.thumbnail_result.get('contact_sheet_path', '')}")
         if r.errors:
@@ -683,6 +804,17 @@ def run_offload(
                 errors = verify_staging(
                     staging, norm_mfst, log_cb, status_cb, src.label, dst.label,
                 )
+                # MANIFEST-FIX: capture per-file PASS/FAIL for the chain-of-custody
+                # log. A file is FAIL if any error string mentions its relative path;
+                # otherwise PASS. Overall verified flag is True only with zero errors.
+                file_rels = [
+                    rel for rel, v in norm_mfst.items()
+                    if isinstance(v, dict) and "size" in v
+                ]
+                r.per_file_verify = {
+                    rel: not any(rel in e for e in errors) for rel in file_rels
+                }
+                r.verified = not errors
                 if errors:
                     r.state  = CellState.FAILED
                     r.errors = errors
@@ -712,6 +844,20 @@ def run_offload(
                         nm = dict(norm_mfst)
                         nm["filename_normalization"] = norm_block
                         source_manifests[src.label] = nm
+
+                    # MANIFEST-FIX (item 60): persist a schema-1.1 offload manifest to
+                    # the committed destination + archive so downstream merges have a
+                    # base manifest. Failure here must not fail the offload.
+                    try:
+                        save_offload_manifest(
+                            src, source_manifests.get(src.label, norm_mfst), final,
+                            norm_block if norm_plan else None,
+                        )
+                    except Exception as exc:
+                        log_cb(
+                            f"[Offload] Could not save manifest for {src.label} → {dst.label}: {exc}",
+                            "warning",
+                        )
 
                     # ── Thumbnail generation (primary dest only) ──────────
                     if (
