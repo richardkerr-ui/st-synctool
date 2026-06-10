@@ -17,6 +17,7 @@ from core.transfer import (
     GDRIVE_DAILY_LIMIT_BYTES,
 )
 from core.amphetamine import check_and_prompt, start_session, end_session
+from core.demo import ensure_demo_folder
 from gui import theme
 from core import rclone_bridge
 
@@ -88,6 +89,25 @@ class TransferTab(QWidget):
         self.dst_input.pathChanged.connect(self._on_paths_changed)
         dst_row.addWidget(self.dst_input)
         io_layout.addLayout(dst_row)
+
+        # Demo shortcut — right-aligned link below the path fields
+        demo_row = QHBoxLayout()
+        demo_row.setContentsMargins(0, 0, 0, 0)
+        self._demo_link = QLabel(
+            '<a href="demo" style="color:#555; font-size:11px; text-decoration:none;">'
+            '⊙ Use demo folder</a>'
+        )
+        self._demo_link.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextBrowserInteraction
+        )
+        self._demo_link.linkActivated.connect(self._load_demo_folder)
+        self._demo_link.setToolTip(
+            "Pre-fills source and destination with a sample camera card structure\n"
+            "so you can try the tool without using real files."
+        )
+        demo_row.addStretch()
+        demo_row.addWidget(self._demo_link)
+        io_layout.addLayout(demo_row)
 
         root.addWidget(io_group)
 
@@ -221,6 +241,20 @@ class TransferTab(QWidget):
 
     def _conflict_handler_str(self):
         return {0: "skip", 1: "overwrite", 2: "rename"}[self.conflict_combo.currentIndex()]
+
+    def _load_demo_folder(self, _href=""):
+        """Pre-fill source/destination with the demo camera card structure."""
+        try:
+            src, dst = ensure_demo_folder()
+            self.src_input.setText(str(src))
+            self.dst_input.setText(str(dst))
+            # Style the link to indicate it was used
+            self._demo_link.setText(
+                '<a href="demo" style="color:#555; font-size:11px; text-decoration:none;">'
+                '⊙ Demo loaded</a>'
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Demo folder", f"Could not create demo folder:\n{exc}")
 
     def _on_paths_changed(self, _text=""):
         gdrive = is_gdrive_url(self.src_input.text()) or is_gdrive_url(self.dst_input.text())

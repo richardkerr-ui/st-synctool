@@ -7,14 +7,15 @@ from PyQt6.QtCore import QTimer
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from gui.transfer_tab  import TransferTab
-from gui.merge_tab     import MergeTab
-from gui.verify_tab    import VerifyTab
-from gui.offload_tab   import OffloadTab
-from gui.setup_wizard import SetupWizard, should_show_wizard
-from gui              import theme
-from core.setup_checks import check_rclone_auth, CheckStatus
-from core.oauth_config import get_active_remote, get_remote_account_email
+from gui.transfer_tab     import TransferTab
+from gui.merge_tab        import MergeTab
+from gui.verify_tab       import VerifyTab
+from gui.offload_tab      import OffloadTab
+from gui.setup_wizard     import SetupWizard, should_show_wizard
+from gui.tutorial_overlay import TutorialOverlay, tutorial_already_seen, reset_tutorial
+from gui                  import theme
+from core.setup_checks    import check_rclone_auth, CheckStatus
+from core.oauth_config    import get_active_remote, get_remote_account_email
 
 
 class _AccountLabelWorker(QThread):
@@ -67,10 +68,27 @@ class MainWindow(QMainWindow):
         self._account_label.setStyleSheet(
             f"color:{theme.ACCENT_GREEN};font-size:11px;margin-right:8px;"
         )
+
+        # "Take the Tour" button — always visible so users can re-run it
+        self._tour_btn = QPushButton("? Tour")
+        self._tour_btn.setFixedHeight(24)
+        self._tour_btn.setStyleSheet("""
+            QPushButton {
+                background:#2a2a2a; color:#888;
+                border:1px solid #3a3a3a; border-radius:4px;
+                font-size:11px; padding:0 8px;
+            }
+            QPushButton:hover { background:#3a3a3a; color:#ccc; }
+        """)
+        self._tour_btn.setToolTip("Replay the onboarding tour")
+        self._tour_btn.clicked.connect(self._launch_tutorial)
+
         header.addWidget(title)
         header.addWidget(subtitle)
         header.addStretch()
         header.addWidget(self._account_label)
+        header.addWidget(self._tour_btn)
+        header.addSpacing(6)
         header.addWidget(version)
         root.addLayout(header)
         root.addSpacing(8)
@@ -78,6 +96,10 @@ class MainWindow(QMainWindow):
         # Auth-health banner (hidden by default; shown when Drive auth fails)
         self._auth_banner = self._build_auth_banner()
         root.addWidget(self._auth_banner)
+
+        # Tutorial overlay (parented to central widget so it covers the tabs)
+        # Created here so tab references are valid; started later.
+        self._tutorial = None  # built lazily after tabs exist
 
         # Tabs
         self.tabs = QTabWidget()
@@ -107,10 +129,15 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        self.tabs.addTab(TransferTab(self),  "Transfer")
-        self.tabs.addTab(MergeTab(self),     "Merge")
-        self.tabs.addTab(OffloadTab(self),   "Offload")
-        self.tabs.addTab(VerifyTab(self),    "Verify")
+        self._transfer_tab = TransferTab(self)
+        self._merge_tab    = MergeTab(self)
+        self._offload_tab  = OffloadTab(self)
+        self._verify_tab   = VerifyTab(self)
+
+        self.tabs.addTab(self._transfer_tab, "Transfer")
+        self.tabs.addTab(self._merge_tab,    "Merge")
+        self.tabs.addTab(self._offload_tab,  "Offload")
+        self.tabs.addTab(self._verify_tab,   "Verify")
         root.addWidget(self.tabs)
 
         # Status bar
@@ -165,6 +192,8 @@ class MainWindow(QMainWindow):
             self._launch_wizard()
         else:
             self._check_auth_health()
+        # Offer tutorial to new users after wizard (or on first cold launch)
+        self._maybe_launch_tutorial()
 
     def _launch_wizard(self):
         wiz = SetupWizard(self)
@@ -209,3 +238,218 @@ class MainWindow(QMainWindow):
             self._account_label.setText(f"{email} ({remote})")
         else:
             self._account_label.setText(remote)
+
+    # ------------------------------------------------------------------
+    # Tutorial
+    # ------------------------------------------------------------------
+
+    def _build_tutorial_steps(self) -> list:
+        """
+        Returns the ordered list of tour steps.
+
+        Each step is a dict accepted by TutorialOverlay:
+            tab     – QTabWidget index to activate (or None)
+            widget  – zero-arg callable returning the target QWidget (or None)
+            title   – card heading
+            body    – card description
+            padding – optional extra px around spotlight (default 10)
+
+        To add, remove, or reorder steps, edit this list only — the overlay
+        logic is completely generic.
+        """
+        tt = self._transfer_tab
+        mt = self._merge_tab
+        ot = self._offload_tab
+        vt = self._verify_tab
+
+        return [
+            # ── Welcome ──────────────────────────────────────────────────
+            {
+                "tab":    0,
+                "widget": None,
+                "title":  "Welcome to ST SyncTool",
+                "body":   (
+                    "This quick tour walks you through the four main tabs: "
+                    "Transfer, Merge, Offload, and Verify. "
+                    "You can skip at any time and replay it via the '? Tour' button."
+                ),
+            },
+
+            # ── Transfer tab ──────────────────────────────────────────────
+            {
+                "tab":    0,
+                "widget": lambda: self.tabs.tabBar(),
+                "title":  "Four-tab workflow",
+                "body":   (
+                    "Work flows left to right: Transfer files in, Merge "
+                    "conflicts, Offload to drives, then Verify integrity. "
+                    "Each tab is independent — use only the ones you need."
+                ),
+                "padding": 4,
+            },
+            {
+                "tab":    0,
+                "widget": lambda: tt.src_input,
+                "title":  "Source folder",
+                "body":   (
+                    "Type or browse to the folder you want to copy from. "
+                    "Google Drive URLs (gdrive://…) work here too — "
+                    "the tool will route through rclone automatically."
+                ),
+            },
+            {
+                "tab":    0,
+                "widget": lambda: tt.dst_input,
+                "title":  "Destination folder",
+                "body":   (
+                    "Where the files land. Can be a local path or a "
+                    "Google Drive URL. The preflight summary above updates "
+                    "live to show folder sizes and estimated transfer time."
+                ),
+            },
+            {
+                "tab":    0,
+                "widget": lambda: tt.conflict_combo,
+                "title":  "Conflict handling",
+                "body":   (
+                    "Controls what happens when a file already exists at "
+                    "the destination: Skip (leave it), Overwrite (replace it), "
+                    "or Rename Copy (keep both). Overwrite is the default."
+                ),
+            },
+            {
+                "tab":    0,
+                "widget": lambda: tt.start_btn,
+                "title":  "Start Transfer",
+                "body":   (
+                    "Kicks off the copy. Progress and per-file status appear "
+                    "in the log below. A manifest file is written alongside "
+                    "the destination so you can verify later."
+                ),
+            },
+
+            # ── Merge tab ────────────────────────────────────────────────
+            {
+                "tab":    1,
+                "widget": lambda: mt.project_combo,
+                "title":  "Select a project",
+                "body":   (
+                    "Projects group a local folder with its server counterpart. "
+                    "Pick one here to auto-fill the paths below, or enter them manually."
+                ),
+            },
+            {
+                "tab":    1,
+                "widget": lambda: mt.scan_btn,
+                "title":  "Scan & Compare",
+                "body":   (
+                    "Compares local and server file trees against the base manifest. "
+                    "Files changed on both sides are flagged for your decision; "
+                    "one-sided changes are resolved automatically."
+                ),
+            },
+            {
+                "tab":    1,
+                "widget": lambda: mt.diff_table,
+                "title":  "Diff table",
+                "body":   (
+                    "Each row is a file with a status: green = only you changed it, "
+                    "blue = only server changed it, coral = both changed (you decide). "
+                    "Toggle the checkbox to include or exclude each action."
+                ),
+            },
+            {
+                "tab":    1,
+                "widget": lambda: mt.apply_btn,
+                "title":  "Apply Selected Actions",
+                "body":   (
+                    "Executes the checked actions — copies, overwrites, or skips — "
+                    "then writes a new manifest so the next merge starts clean."
+                ),
+            },
+
+            # ── Offload tab ───────────────────────────────────────────────
+            {
+                "tab":    2,
+                "widget": lambda: ot._preset_combo,
+                "title":  "Offload presets",
+                "body":   (
+                    "Save a named configuration of multiple sources and destinations "
+                    "so a shoot day's offload is one click. Presets persist between sessions."
+                ),
+            },
+            {
+                "tab":    2,
+                "widget": lambda: ot._start_btn,
+                "title":  "Start Offload",
+                "body":   (
+                    "Copies all sources to all destinations simultaneously with "
+                    "paranoid checksum verification. Designed for end-of-day "
+                    "camera card offloads to two drives at once."
+                ),
+            },
+
+            # ── Verify tab ────────────────────────────────────────────────
+            {
+                "tab":    3,
+                "widget": lambda: vt.folder_input,
+                "title":  "Folder to verify",
+                "body":   (
+                    "Point this at any folder that was transferred by ST SyncTool. "
+                    "It will be compared byte-for-byte against the manifest."
+                ),
+            },
+            {
+                "tab":    3,
+                "widget": lambda: vt.verify_btn,
+                "title":  "Run Verification",
+                "body":   (
+                    "Checksums every file and reports OK, MISSING, or MISMATCH. "
+                    "Run this after any transfer or offload to confirm nothing "
+                    "was corrupted in transit."
+                ),
+            },
+
+            # ── Auth / header ─────────────────────────────────────────────
+            {
+                "tab":    None,
+                "widget": lambda: self._account_label,
+                "title":  "Google Drive connection",
+                "body":   (
+                    "Your connected Drive account appears here. If it's missing "
+                    "or a banner appears at the top, click 'Open Setup' to "
+                    "re-authenticate. Auth refreshes automatically every 10 minutes."
+                ),
+            },
+
+            # ── Done ──────────────────────────────────────────────────────
+            {
+                "tab":    0,
+                "widget": None,
+                "title":  "You're all set!",
+                "body":   (
+                    "That's the full tour. Replay it anytime with the '? Tour' "
+                    "button in the top-right corner. Good luck on your shoot!"
+                ),
+            },
+        ]
+
+    def _maybe_launch_tutorial(self):
+        """Auto-launch the tour for first-time users."""
+        if not tutorial_already_seen():
+            # Small delay so the window is fully painted before the overlay appears
+            QTimer.singleShot(400, self._launch_tutorial)
+
+    def _launch_tutorial(self):
+        """Build (or rebuild) and start the tutorial overlay."""
+        reset_tutorial()  # reset so _finish() will mark it seen fresh
+        if self._tutorial is None:
+            self._tutorial = TutorialOverlay(self)
+        self._tutorial.resize(self.centralWidget().size())
+        self._tutorial.set_steps(self._build_tutorial_steps())
+        self._tutorial.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._tutorial and self._tutorial.isVisible():
+            self._tutorial.resize(self.centralWidget().size())
