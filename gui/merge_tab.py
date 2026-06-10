@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QProgressBar, QFileDialog, QMessageBox, QCheckBox,
     QComboBox, QDialog, QListWidget, QListWidgetItem, QTextEdit,
-    QDialogButtonBox, QGraphicsOpacityEffect,
+    QDialogButtonBox, QGraphicsOpacityEffect, QFrame,
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
@@ -63,6 +63,21 @@ def _fmt_date(iso_str: str) -> str:
         return datetime.fromisoformat(iso_str).astimezone().strftime("%Y-%m-%d %H:%M")
     except Exception:
         return iso_str[:16]
+
+
+def _fmt_size(size_bytes) -> str:
+    """Human-readable file size string (e.g. 1.2 GB, 340 MB, 4.0 KB)."""
+    if size_bytes is None:
+        return "unknown"
+    try:
+        n = int(size_bytes)
+    except (TypeError, ValueError):
+        return str(size_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
+        n /= 1024
+    return f"{n:.1f} PB"
 
 
 def _build_server_manifest(server_path: str, base_manifest=None, log_cb=None, progress_cb=None):
@@ -572,11 +587,27 @@ class MergeTab(QWidget):
         self._apply_opacity.setOpacity(0.4)
         self.apply_btn.setGraphicsEffect(self._apply_opacity)
 
+        self.newer_wins_btn = QPushButton("Newer Wins")
+        self.newer_wins_btn.setFixedHeight(36)
+        self.newer_wins_btn.setToolTip(
+            "For every conflict row, set the action to Push if local is newer, "
+            "Pull if server is newer, or Skip if equal / unknown."
+        )
+        self.newer_wins_btn.setStyleSheet(
+            f"QPushButton {{ background:#3a2a00; color:{theme.ACCENT_GOLD};"
+            f"  border:1px solid {theme.ACCENT_GOLD}; border-radius:4px;"
+            f"  padding:8px 14px; font-weight:bold; }}"
+            f"QPushButton:hover {{ background:#4a3800; }}"
+            f"QPushButton:pressed {{ background:#2a1e00; }}"
+        )
+        self.newer_wins_btn.clicked.connect(self._on_newer_wins)
+
         self.status_label = QLabel("Scan first to enable apply")
         self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px;")
 
         btn_row.addWidget(self.scan_btn)
         btn_row.addWidget(self.apply_btn)
+        btn_row.addWidget(self.newer_wins_btn)
         btn_row.addWidget(self.status_label)
         btn_row.addStretch()
         root.addLayout(btn_row)
@@ -594,6 +625,72 @@ class MergeTab(QWidget):
         self.diff_table = DiffTable(self)
         cg_layout.addWidget(self.diff_table)
         root.addWidget(changes_group, stretch=1)
+
+        # ── Conflict detail panel ────────────────────────────────
+        # Shown only when a BOTH_CHANGED row is selected; hidden otherwise.
+        self._conflict_panel = QFrame(self)
+        self._conflict_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        self._conflict_panel.setStyleSheet(
+            f"QFrame {{ background:#1e1212; border:1px solid #5a2020;"
+            f"  border-radius:4px; padding:4px; }}"
+            f"QLabel {{ background:transparent; color:#cccccc; }}"
+        )
+        cp_layout = QVBoxLayout(self._conflict_panel)
+        cp_layout.setContentsMargins(8, 6, 8, 6)
+        cp_layout.setSpacing(4)
+
+        conflict_title = QLabel("Conflict detail")
+        conflict_title.setStyleSheet(
+            f"font-weight:bold; font-size:12px; color:{theme.CORAL};"
+        )
+        cp_layout.addWidget(conflict_title)
+
+        cols_layout = QHBoxLayout()
+        cols_layout.setSpacing(20)
+
+        # Local column
+        local_col = QVBoxLayout()
+        local_col.setSpacing(2)
+        local_col.addWidget(QLabel("<b>LOCAL</b>"))
+        self._cp_local_size  = QLabel()
+        self._cp_local_mtime = QLabel()
+        self._cp_local_hash  = QLabel()
+        for lbl in (self._cp_local_size, self._cp_local_mtime, self._cp_local_hash):
+            lbl.setStyleSheet("font-family: monospace; font-size: 11px;")
+            local_col.addWidget(lbl)
+        cols_layout.addLayout(local_col)
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet("color:#5a2020;")
+        cols_layout.addWidget(sep)
+
+        # Server column
+        server_col = QVBoxLayout()
+        server_col.setSpacing(2)
+        server_col.addWidget(QLabel("<b>SERVER</b>"))
+        self._cp_server_size  = QLabel()
+        self._cp_server_mtime = QLabel()
+        self._cp_server_hash  = QLabel()
+        for lbl in (self._cp_server_size, self._cp_server_mtime, self._cp_server_hash):
+            lbl.setStyleSheet("font-family: monospace; font-size: 11px;")
+            server_col.addWidget(lbl)
+        cols_layout.addLayout(server_col)
+        cols_layout.addStretch()
+        cp_layout.addLayout(cols_layout)
+
+        self._cp_verdict = QLabel()
+        self._cp_verdict.setStyleSheet(
+            f"font-weight:bold; font-size:12px; color:{theme.ACCENT_GOLD};"
+        )
+        cp_layout.addWidget(self._cp_verdict)
+
+        self._conflict_panel.setVisible(False)
+        root.addWidget(self._conflict_panel)
+
+        # Wire diff_table selection signal to the conflict panel
+        self.diff_table.conflict_selected.connect(self._on_conflict_selected)
 
         # ── Log panel ────────────────────────────────────────────
         self.log = LogWidget("Merge log", parent=self)
@@ -956,6 +1053,70 @@ class MergeTab(QWidget):
         else:
             QMessageBox.warning(self, "Apply Finished with Errors",
                                 f"{s} succeeded, {f} failed. See log for details.")
+
+    # ── Conflict detail panel ─────────────────────────────────────────────────
+
+    def _on_conflict_selected(self, result):
+        """Update the conflict detail panel when a BOTH_CHANGED row is selected.
+        `result` is a DiffResult or None."""
+        if result is None:
+            self._conflict_panel.setVisible(False)
+            return
+
+        local_e  = result.yours_entry  or {}
+        server_e = result.server_entry or {}
+
+        def _short_hash(entry):
+            cs = entry.get("checksums", {})
+            h = cs.get("sha256") or cs.get("md5") or cs.get("xxhash3_64")
+            return h[:8] if h else "n/a"
+
+        local_size  = _fmt_size(local_e.get("size"))
+        server_size = _fmt_size(server_e.get("size"))
+        local_mt    = _fmt_date(local_e.get("modtime", ""))
+        server_mt   = _fmt_date(server_e.get("modtime", ""))
+        local_hash  = _short_hash(local_e)
+        server_hash = _short_hash(server_e)
+
+        self._cp_local_size.setText(f"size:     {local_size}")
+        self._cp_local_mtime.setText(f"modified: {local_mt or 'unknown'}")
+        self._cp_local_hash.setText(f"sha256:   {local_hash}")
+
+        self._cp_server_size.setText(f"size:     {server_size}")
+        self._cp_server_mtime.setText(f"modified: {server_mt or 'unknown'}")
+        self._cp_server_hash.setText(f"sha256:   {server_hash}")
+
+        raw_local  = local_e.get("modtime", "")
+        raw_server = server_e.get("modtime", "")
+        if raw_local and raw_server:
+            if raw_local > raw_server:
+                verdict = "LOCAL is newer"
+            elif raw_server > raw_local:
+                verdict = "SERVER is newer"
+            else:
+                verdict = "Same modification time"
+        else:
+            verdict = "Modification time unknown"
+
+        self._cp_verdict.setText(f"  {verdict}")
+        self._conflict_panel.setVisible(True)
+
+    # ── Newer Wins batch action ───────────────────────────────────────────────
+
+    def _on_newer_wins(self):
+        """Apply the mtime-based default action to every BOTH_CHANGED row."""
+        self.diff_table.apply_newer_wins()
+        conflict_rows = [
+            path for path, state in self.diff_table.get_states().items()
+            if state == "BOTH_CHANGED"
+        ]
+        if conflict_rows:
+            self.log.log(
+                f"Newer Wins applied to {len(conflict_rows)} conflict row(s).",
+                "info",
+            )
+        else:
+            self.log.log("Newer Wins: no conflict rows found.", "info")
 
     def _on_rescan_conflict(self, paths):
         end_session()

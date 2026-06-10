@@ -3,18 +3,22 @@ from PyQt6.QtWidgets import (
     QHeaderView, QAbstractItemView, QMenu, QApplication,
 )
 from PyQt6.QtGui import QColor, QDesktopServices
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 
 from gui import theme
 from core.merge_ops import (
     ACT_PUSH, ACT_PULL, ACT_DELETE_LOCAL, ACT_DELETE_SERVER, ACT_SKIP
 )
+from core.comparison import conflict_suggested_action
 
 
 class DiffTable(QTableWidget):
     _COLUMNS = ["Path", "State", "Action"]
 
     # For each state, list of actions. First item is the default selection.
+    # BOTH_CHANGED uses a smart per-row default (see load_results); this list
+    # defines the available options only — the initial selection is set by
+    # conflict_suggested_action() when rows are populated.
     _ACTIONS_BY_STATE = {
         "LOCAL_ONLY":     [ACT_PUSH,          ACT_DELETE_LOCAL,  ACT_SKIP],
         "SERVER_ONLY":    [ACT_PULL,          ACT_DELETE_SERVER, ACT_SKIP],
@@ -43,11 +47,17 @@ class DiffTable(QTableWidget):
         "UNCHANGED":      ("#2a2a2a", "#555555"),
     }
 
+    # Emitted when the selected row changes.
+    # Carries the DiffResult for the newly selected row, or None when the
+    # selection is cleared or a non-conflict row is selected.
+    conflict_selected = pyqtSignal(object)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._action_combos = {}
         self._row_states = {}     # path -> state_name
         self._gdrive_urls = {}    # path -> gdrive_url (from server/yours manifest entries)
+        self._diff_results = {}   # path -> DiffResult (stored for selection signal)
         self._build_ui()
 
     def _build_ui(self):
@@ -72,17 +82,20 @@ class DiffTable(QTableWidget):
         )
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+        self.itemSelectionChanged.connect(self._on_selection_changed)
 
     def load_results(self, results):
         self._action_combos.clear()
         self._row_states.clear()
         self._gdrive_urls.clear()
+        self._diff_results.clear()
         self.setRowCount(len(results))
 
         for row, r in enumerate(results):
             state_name = r.state.name
             path_str = self._extract_path(r)
             self._row_states[path_str] = state_name
+            self._diff_results[path_str] = r
 
             # Collect gdrive_url from server or local manifest entry
             gdrive_url = (
@@ -121,7 +134,18 @@ class DiffTable(QTableWidget):
             options = self._ACTIONS_BY_STATE.get(state_name, [ACT_SKIP])
             combo = QComboBox()
             combo.addItems(options)
-            combo.setCurrentIndex(0)
+
+            # For BOTH_CHANGED rows, pre-select the mtime-based smart default
+            # instead of always defaulting to Skip.
+            if state_name == "BOTH_CHANGED":
+                suggested = conflict_suggested_action(r)
+                if suggested in options:
+                    combo.setCurrentIndex(options.index(suggested))
+                else:
+                    combo.setCurrentIndex(0)
+            else:
+                combo.setCurrentIndex(0)
+
             combo.setStyleSheet("QComboBox { padding:2px 6px; }")
             self.setCellWidget(row, 2, combo)
             self._action_combos[path_str] = combo
@@ -137,6 +161,40 @@ class DiffTable(QTableWidget):
     def get_states(self) -> dict:
         """Return {path: state_name} for the currently loaded results."""
         return dict(self._row_states)
+
+    def apply_newer_wins(self):
+        """For every BOTH_CHANGED row, set the action dropdown to the mtime-based
+        suggestion (Push if local newer, Pull if server newer, Skip if tied/unknown).
+        All other rows are left unchanged."""
+        for path_str, combo in self._action_combos.items():
+            if self._row_states.get(path_str) != "BOTH_CHANGED":
+                continue
+            result = self._diff_results.get(path_str)
+            if result is None:
+                continue
+            suggested = conflict_suggested_action(result)
+            options = [combo.itemText(i) for i in range(combo.count())]
+            if suggested in options:
+                combo.setCurrentIndex(options.index(suggested))
+
+    def _on_selection_changed(self):
+        """Emit conflict_selected with the DiffResult when a BOTH_CHANGED row is
+        selected, or None for any other selection state."""
+        selected = self.selectedItems()
+        if not selected:
+            self.conflict_selected.emit(None)
+            return
+        row = self.currentRow()
+        path_item = self.item(row, 0)
+        if not path_item:
+            self.conflict_selected.emit(None)
+            return
+        path = path_item.text()
+        result = self._diff_results.get(path)
+        if result and result.state.name == "BOTH_CHANGED":
+            self.conflict_selected.emit(result)
+        else:
+            self.conflict_selected.emit(None)
 
     def _show_context_menu(self, pos):
         row = self.rowAt(pos.y())

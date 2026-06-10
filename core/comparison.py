@@ -70,6 +70,39 @@ def _is_ignored(path: str) -> bool:
 def is_ignored_path(path: str) -> bool:
     return _is_ignored(path)
 
+
+def conflict_suggested_action(result: "DiffResult") -> str:
+    """Return the mtime-based suggested action for a BOTH_CHANGED DiffResult.
+
+    Compares yours_entry.modtime vs server_entry.modtime:
+      - local newer  -> "Push to Server"
+      - server newer -> "Pull from Server"
+      - tie / unknown -> "Skip"
+
+    Safe to call on non-BOTH_CHANGED rows; always returns "Skip" for those.
+    """
+    # Import here to avoid circular dependency (merge_ops imports comparison)
+    from core.merge_ops import ACT_PUSH, ACT_PULL, ACT_SKIP
+
+    if result.state.name != "BOTH_CHANGED":
+        return ACT_SKIP
+
+    local_mt  = (result.yours_entry  or {}).get("modtime")
+    server_mt = (result.server_entry or {}).get("modtime")
+
+    if not local_mt or not server_mt:
+        return ACT_SKIP
+
+    try:
+        if local_mt > server_mt:
+            return ACT_PUSH
+        if server_mt > local_mt:
+            return ACT_PULL
+    except Exception:
+        pass
+
+    return ACT_SKIP
+
 def _cs(entry):
     if not entry: return None
     c = entry.get("checksums", {})
