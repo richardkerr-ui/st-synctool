@@ -42,9 +42,25 @@ IGNORED_FILES = {
     "desktop.ini",
 }
 
+# Path segments that mark internally generated artifacts (item 52c)
+_IGNORED_PREFIXES = (
+    "_contact_sheet_",  # offload contact sheet PDFs/JPEGs
+    ".st_staging_",     # in-progress staging directories
+    ".st_failure_",     # failure reports left alongside staging
+    ".st_offload_",     # offload metadata files
+)
+_IGNORED_DIRS = {"_thumbnails"}  # thumbnail frame cache
+
+
 def _is_ignored(path: str) -> bool:
     name = path.rsplit("/", 1)[-1]
-    return name in IGNORED_FILES
+    if name in IGNORED_FILES:
+        return True
+    if any(name.startswith(p) for p in _IGNORED_PREFIXES):
+        return True
+    # Check every path segment for ignored directory names
+    parts = path.replace("\\", "/").split("/")
+    return any(part in _IGNORED_DIRS or any(part.startswith(p) for p in _IGNORED_PREFIXES) for part in parts)
 
 def _cs(entry):
     if not entry: return None

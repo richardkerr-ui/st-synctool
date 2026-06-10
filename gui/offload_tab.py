@@ -1,0 +1,755 @@
+"""
+Offload tab — camera card / audio recorder ingest.
+
+Phase 5 items 22–40 (SYNCTOOL_CONTEXT.md).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
+    QPushButton, QCheckBox, QLineEdit, QSpinBox, QScrollArea,
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
+    QDialogButtonBox, QComboBox, QInputDialog, QMessageBox,
+    QSplitter, QFileDialog, QSizePolicy,
+)
+
+from gui import theme
+from gui.log_widget import LogWidget
+from core.offload import (
+    OffloadSource, OffloadDest, OffloadConfig, CellResult, CellState,
+    run_offload,
+)
+from core.thumbnail import ffmpeg_available, pillow_available
+import core.projects as projects
+
+# ---------------------------------------------------------------------------
+# Cell state styling
+# ---------------------------------------------------------------------------
+
+_STATE_STYLE: dict[CellState, tuple[str, str]] = {
+    CellState.PENDING:    ("#555",             "Pending"),
+    CellState.HASHING:    (theme.ACCENT_INFO,  "Hashing…"),
+    CellState.COPYING:    (theme.ACCENT_GOLD,  "Copying…"),
+    CellState.VERIFYING:  (theme.ACCENT_INFO,  "Verifying…"),
+    CellState.COMMITTING: (theme.ACCENT_INFO,  "Committing…"),
+    CellState.THUMBNAILS: (theme.ACCENT_INFO,  "Thumbnails…"),
+    CellState.DONE:       (theme.ACCENT_GREEN, "Done"),
+    CellState.FAILED:     (theme.ACCENT_CORAL, "Failed"),
+    CellState.SKIPPED:    (theme.MUTED_TEXT,   "Skipped"),
+}
+
+
+# ---------------------------------------------------------------------------
+# Row widgets
+# ---------------------------------------------------------------------------
+
+class SourceRowWidget(QWidget):
+    removed = pyqtSignal(object)
+
+    def __init__(self, index: int, parent=None):
+        super().__init__(parent)
+        self._build_ui(index)
+
+    def _build_ui(self, index: int):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(6)
+
+        self._enable = QCheckBox()
+        self._enable.setChecked(True)
+        self._enable.setFixedWidth(20)
+        layout.addWidget(self._enable)
+
+        self._label = QLineEdit()
+        self._label.setPlaceholderText(f"Label (e.g. CAM_A)")
+        self._label.setText(f"Source {index}")
+        self._label.setFixedWidth(110)
+        layout.addWidget(self._label)
+
+        self._path = QLineEdit()
+        self._path.setPlaceholderText("Source path…")
+        self._path.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self._path)
+
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setFixedWidth(80)
+        browse_btn.clicked.connect(self._browse)
+        layout.addWidget(browse_btn)
+
+        subfolder_lbl = QLabel("Subfolder:")
+        subfolder_lbl.setStyleSheet(f"color:{theme.MUTED_TEXT};font-size:11px;")
+        layout.addWidget(subfolder_lbl)
+
+        self._subfolder = QLineEdit()
+        self._subfolder.setPlaceholderText("(same as label)")
+        self._subfolder.setFixedWidth(120)
+        self._subfolder.setToolTip(
+            "Subfolder name written at the destination. Defaults to the source label."
+        )
+        layout.addWidget(self._subfolder)
+
+        lock_icon = QLabel("🔒")
+        lock_icon.setToolTip("Source is read-only — files will never be modified on the source card.")
+        lock_icon.setStyleSheet("font-size:13px;")
+        layout.addWidget(lock_icon)
+
+        remove_btn = QPushButton("✕")
+        remove_btn.setFixedWidth(28)
+        remove_btn.setFixedHeight(28)
+        remove_btn.setToolTip("Remove this source")
+        remove_btn.setStyleSheet(
+            f"color:{theme.ACCENT_CORAL};font-weight:bold;font-size:13px;"
+        )
+        remove_btn.clicked.connect(lambda: self.removed.emit(self))
+        layout.addWidget(remove_btn)
+
+    def _browse(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select source folder", str(Path.home())
+        )
+        if folder:
+            self._path.setText(folder)
+            if not self._label.text().strip() or self._label.text().startswith("Source "):
+                self._label.setText(Path(folder).name)
+
+    def to_offload_source(self) -> Optional[OffloadSource]:
+        path_str = self._path.text().strip()
+        label    = self._label.text().strip()
+        if not path_str or not label:
+            return None
+        return OffloadSource(
+            label=label,
+            path=Path(path_str),
+            subfolder=self._subfolder.text().strip(),
+            enabled=self._enable.isChecked(),
+        )
+
+
+class DestRowWidget(QWidget):
+    removed = pyqtSignal(object)
+
+    def __init__(self, index: int, parent=None):
+        super().__init__(parent)
+        self._build_ui(index)
+
+    def _build_ui(self, index: int):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(6)
+
+        self._enable = QCheckBox()
+        self._enable.setChecked(True)
+        self._enable.setFixedWidth(20)
+        layout.addWidget(self._enable)
+
+        self._label = QLineEdit()
+        self._label.setPlaceholderText(f"Label (e.g. RAID_1)")
+        self._label.setText(f"Dest {index}")
+        self._label.setFixedWidth(110)
+        layout.addWidget(self._label)
+
+        self._path = QLineEdit()
+        self._path.setPlaceholderText("Destination path…")
+        self._path.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self._path)
+
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setFixedWidth(80)
+        browse_btn.clicked.connect(self._browse)
+        layout.addWidget(browse_btn)
+
+        remove_btn = QPushButton("✕")
+        remove_btn.setFixedWidth(28)
+        remove_btn.setFixedHeight(28)
+        remove_btn.setToolTip("Remove this destination")
+        remove_btn.setStyleSheet(
+            f"color:{theme.ACCENT_CORAL};font-weight:bold;font-size:13px;"
+        )
+        remove_btn.clicked.connect(lambda: self.removed.emit(self))
+        layout.addWidget(remove_btn)
+
+    def _browse(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select destination folder", str(Path.home())
+        )
+        if folder:
+            self._path.setText(folder)
+            if not self._label.text().strip() or self._label.text().startswith("Dest "):
+                self._label.setText(Path(folder).name)
+
+    def to_offload_dest(self) -> Optional[OffloadDest]:
+        path_str = self._path.text().strip()
+        label    = self._label.text().strip()
+        if not path_str or not label:
+            return None
+        return OffloadDest(
+            label=label,
+            path=Path(path_str),
+            enabled=self._enable.isChecked(),
+        )
+
+    def set_from_dict(self, d: dict):
+        self._label.setText(d.get("label", ""))
+        self._path.setText(d.get("path", ""))
+        self._enable.setChecked(d.get("enabled", True))
+
+    def to_dict(self) -> dict:
+        return {
+            "label":   self._label.text().strip(),
+            "path":    self._path.text().strip(),
+            "enabled": self._enable.isChecked(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Status matrix widget
+# ---------------------------------------------------------------------------
+
+class StatusMatrixWidget(QTableWidget):
+    """M×N grid: sources as rows, destinations as columns."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.setStyleSheet(
+            "QTableWidget { gridline-color: #3a3a3a; }"
+            "QHeaderView::section { background:#2a2a2a; color:#888; padding:4px; border:none; }"
+        )
+
+    def configure(self, sources: list[str], dests: list[str]) -> None:
+        self.setRowCount(len(sources))
+        self.setColumnCount(len(dests))
+        self.setHorizontalHeaderLabels(dests)
+        self.setVerticalHeaderLabels(sources)
+        for r in range(len(sources)):
+            for c in range(len(dests)):
+                item = QTableWidgetItem("Pending")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setForeground(__import__("PyQt6.QtGui", fromlist=["QColor"]).QColor("#555"))
+                self.setItem(r, item.row() if False else r, item)
+                # row/col set correctly below
+        # rebuild properly
+        for r, src_label in enumerate(sources):
+            for c, dst_label in enumerate(dests):
+                self._set_cell(r, c, CellState.PENDING)
+
+    def update_cell(self, src_label: str, dst_label: str, state: CellState) -> None:
+        src_labels = [self.verticalHeaderItem(r).text() for r in range(self.rowCount())]
+        dst_labels = [self.horizontalHeaderItem(c).text() for c in range(self.columnCount())]
+        if src_label not in src_labels or dst_label not in dst_labels:
+            return
+        r = src_labels.index(src_label)
+        c = dst_labels.index(dst_label)
+        self._set_cell(r, c, state)
+
+    def _set_cell(self, row: int, col: int, state: CellState) -> None:
+        from PyQt6.QtGui import QColor
+        color, text = _STATE_STYLE.get(state, ("#555", state.value))
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setForeground(QColor(color))
+        self.setItem(row, col, item)
+
+
+# ---------------------------------------------------------------------------
+# Worker
+# ---------------------------------------------------------------------------
+
+class OffloadWorker(QObject):
+    status_changed = pyqtSignal(str, str, object)   # src_label, dst_label, CellState
+    log            = pyqtSignal(str, str)
+    progress       = pyqtSignal(str, str, int, int)
+    finished       = pyqtSignal(list, dict, str)    # results, manifests, log_path
+    error          = pyqtSignal(str)
+
+    def __init__(
+        self,
+        sources: list,
+        dests: list,
+        config: OffloadConfig,
+    ):
+        super().__init__()
+        self._sources    = sources
+        self._dests      = dests
+        self._config     = config
+        self._cancelled  = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        try:
+            results, manifests, log_path = run_offload(
+                self._sources,
+                self._dests,
+                self._config,
+                status_cb=lambda s, d, state: self.status_changed.emit(s, d or "", state),
+                log_cb=lambda m, l: self.log.emit(m, l),
+                progress_cb=lambda s, d, n, t: self.progress.emit(s, d, n, t),
+                cancelled_cb=lambda: self._cancelled,
+            )
+            self.finished.emit(results, manifests, str(log_path))
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Summary dialog
+# ---------------------------------------------------------------------------
+
+class SummaryDialog(QDialog):
+    def __init__(self, results: list, log_path: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Offload Complete — Summary")
+        self.setMinimumWidth(640)
+        self._build_ui(results, log_path)
+
+    def _build_ui(self, results: list, log_path: str):
+        from PyQt6.QtGui import QColor
+        layout = QVBoxLayout(self)
+
+        total   = len(results)
+        done    = sum(1 for r in results if r.state == CellState.DONE)
+        failed  = sum(1 for r in results if r.state == CellState.FAILED)
+        skipped = sum(1 for r in results if r.state == CellState.SKIPPED)
+
+        summary_lbl = QLabel(
+            f"<b>{done}/{total}</b> transfers complete"
+            + (f" &nbsp;|&nbsp; <span style='color:{theme.ACCENT_CORAL}'>{failed} failed</span>" if failed else "")
+            + (f" &nbsp;|&nbsp; {skipped} skipped" if skipped else "")
+        )
+        summary_lbl.setTextFormat(Qt.TextFormat.RichText)
+        summary_lbl.setStyleSheet("font-size:14px;margin-bottom:8px;")
+        layout.addWidget(summary_lbl)
+
+        # Per-source eject indicators
+        src_labels = list(dict.fromkeys(r.source_label for r in results))
+        for src_label in src_labels:
+            src_results = [r for r in results if r.source_label == src_label]
+            all_done    = all(r.state in (CellState.DONE, CellState.SKIPPED) for r in src_results)
+            any_failed  = any(r.state == CellState.FAILED for r in src_results)
+            if all_done and not any_failed:
+                color = theme.ACCENT_GREEN
+                msg   = f"✓ {src_label} — Safe to eject"
+            elif all_done:
+                color = theme.ACCENT_CORAL
+                msg   = f"⚠ {src_label} — Errors on some destinations — review before ejecting"
+            else:
+                color = theme.MUTED_TEXT
+                msg   = f"• {src_label} — Not all destinations completed"
+            eject_lbl = QLabel(msg)
+            eject_lbl.setStyleSheet(f"color:{color};font-weight:bold;font-size:13px;")
+            layout.addWidget(eject_lbl)
+
+        layout.addSpacing(8)
+
+        # Result table
+        table = QTableWidget(len(results), 4)
+        table.setHorizontalHeaderLabels(["Source", "Destination", "Status", "Files"])
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        for row, r in enumerate(results):
+            color, text = _STATE_STYLE.get(r.state, ("#ccc", r.state.value))
+            for col, val in enumerate([r.source_label, r.dest_label, text, str(r.files_copied)]):
+                item = QTableWidgetItem(val)
+                if col == 2:
+                    item.setForeground(__import__("PyQt6.QtGui", fromlist=["QColor"]).QColor(color))
+                table.setItem(row, col, item)
+        layout.addWidget(table)
+
+        log_lbl = QLabel(f"Chain-of-custody log: <code>{log_path}</code>")
+        log_lbl.setTextFormat(Qt.TextFormat.RichText)
+        log_lbl.setStyleSheet(f"color:{theme.MUTED_TEXT};font-size:11px;margin-top:6px;")
+        layout.addWidget(log_lbl)
+
+        for r in results:
+            if r.thumbnail_result and r.thumbnail_result.get("contact_sheet_path"):
+                cs_path = r.thumbnail_result["contact_sheet_path"]
+                cs_lbl = QLabel(f"Contact sheet ({r.source_label}): <code>{cs_path}</code>")
+                cs_lbl.setTextFormat(Qt.TextFormat.RichText)
+                cs_lbl.setStyleSheet(f"color:{theme.MUTED_TEXT};font-size:11px;")
+                layout.addWidget(cs_lbl)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
+# ---------------------------------------------------------------------------
+# Main tab
+# ---------------------------------------------------------------------------
+
+class OffloadTab(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._source_rows: list[SourceRowWidget] = []
+        self._dest_rows:   list[DestRowWidget]   = []
+        self._thread: Optional[QThread] = None
+        self._worker: Optional[OffloadWorker] = None
+        self._build_ui()
+
+    # ── UI construction ────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        root.setContentsMargins(12, 12, 12, 8)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+
+        splitter.addWidget(self._build_source_panel())
+        splitter.addWidget(self._build_dest_panel())
+        splitter.setSizes([520, 520])
+        root.addWidget(splitter)
+
+        root.addWidget(self._build_options_bar())
+        root.addWidget(self._build_matrix_group())
+        root.addWidget(self._build_log_and_actions())
+
+    def _build_source_panel(self) -> QGroupBox:
+        group = QGroupBox("Sources (read-only)")
+        layout = QVBoxLayout(group)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(160)
+        scroll.setMaximumHeight(280)
+        self._sources_container = QWidget()
+        self._sources_layout = QVBoxLayout(self._sources_container)
+        self._sources_layout.setSpacing(2)
+        self._sources_layout.setContentsMargins(0, 0, 0, 0)
+        self._sources_layout.addStretch()
+        scroll.setWidget(self._sources_container)
+        layout.addWidget(scroll)
+
+        add_btn = QPushButton("+ Add Source")
+        add_btn.setStyleSheet(theme.primary_button_style())
+        add_btn.clicked.connect(self._add_source)
+        layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        self._add_source()
+        return group
+
+    def _build_dest_panel(self) -> QGroupBox:
+        group = QGroupBox("Destinations")
+        layout = QVBoxLayout(group)
+
+        # Preset bar
+        preset_bar = QHBoxLayout()
+        preset_bar.addWidget(QLabel("Preset:"))
+        self._preset_combo = QComboBox()
+        self._preset_combo.setMinimumWidth(160)
+        preset_bar.addWidget(self._preset_combo)
+        load_btn = QPushButton("Load")
+        load_btn.clicked.connect(self._load_preset)
+        save_btn = QPushButton("Save…")
+        save_btn.clicked.connect(self._save_preset)
+        del_btn  = QPushButton("Delete")
+        del_btn.clicked.connect(self._delete_preset)
+        preset_bar.addWidget(load_btn)
+        preset_bar.addWidget(save_btn)
+        preset_bar.addWidget(del_btn)
+        preset_bar.addStretch()
+        layout.addLayout(preset_bar)
+        self._refresh_preset_combo()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(160)
+        scroll.setMaximumHeight(280)
+        self._dests_container = QWidget()
+        self._dests_layout = QVBoxLayout(self._dests_container)
+        self._dests_layout.setSpacing(2)
+        self._dests_layout.setContentsMargins(0, 0, 0, 0)
+        self._dests_layout.addStretch()
+        scroll.setWidget(self._dests_container)
+        layout.addWidget(scroll)
+
+        add_btn = QPushButton("+ Add Destination")
+        add_btn.setStyleSheet(theme.primary_button_style())
+        add_btn.clicked.connect(self._add_dest)
+        layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        self._add_dest()
+        return group
+
+    def _build_options_bar(self) -> QWidget:
+        bar = QWidget()
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        layout.addWidget(QLabel("Retries per file:"))
+        self._retries_spin = QSpinBox()
+        self._retries_spin.setRange(1, 10)
+        self._retries_spin.setValue(3)
+        self._retries_spin.setFixedWidth(60)
+        layout.addWidget(self._retries_spin)
+
+        self._stop_on_fail = QCheckBox("Stop on first destination failure")
+        layout.addWidget(self._stop_on_fail)
+
+        # ── Thumbnail options ────────────────────────────────────────
+        _thumb_ok = ffmpeg_available() and pillow_available()
+
+        self._thumb_check = QCheckBox("Generate contact sheets")
+        if _thumb_ok:
+            self._thumb_check.setToolTip(
+                "After the primary destination commits, extract thumbnails and build a PDF "
+                "contact sheet from destination files."
+            )
+        else:
+            missing = []
+            if not ffmpeg_available():
+                missing.append("ffmpeg (brew install ffmpeg)")
+            if not pillow_available():
+                missing.append("Pillow (pip install Pillow)")
+            self._thumb_check.setEnabled(False)
+            self._thumb_check.setToolTip(
+                "Requires: " + ", ".join(missing)
+            )
+        layout.addWidget(self._thumb_check)
+
+        layout.addWidget(QLabel("Max frames:"))
+        self._max_frames_spin = QSpinBox()
+        self._max_frames_spin.setRange(1, 4)
+        self._max_frames_spin.setValue(4)
+        self._max_frames_spin.setFixedWidth(50)
+        self._max_frames_spin.setToolTip("Maximum thumbnail frames per clip (adaptive: short clips use fewer)")
+        layout.addWidget(self._max_frames_spin)
+
+        layout.addStretch()
+        return bar
+
+    def _build_matrix_group(self) -> QGroupBox:
+        group = QGroupBox("Transfer Status")
+        layout = QVBoxLayout(group)
+        self._matrix = StatusMatrixWidget()
+        self._matrix.setMinimumHeight(90)
+        self._matrix.setMaximumHeight(200)
+        layout.addWidget(self._matrix)
+        return group
+
+    def _build_log_and_actions(self) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._log = LogWidget()
+        self._log.setMinimumHeight(160)
+        layout.addWidget(self._log)
+
+        btn_row = QHBoxLayout()
+        self._start_btn = QPushButton("Start Offload")
+        self._start_btn.setStyleSheet(theme.primary_button_style())
+        self._start_btn.setMinimumHeight(36)
+        self._start_btn.clicked.connect(self._start_offload)
+        btn_row.addWidget(self._start_btn)
+
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setEnabled(False)
+        self._cancel_btn.setMinimumHeight(36)
+        self._cancel_btn.clicked.connect(self._cancel_offload)
+        btn_row.addWidget(self._cancel_btn)
+
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        return container
+
+    # ── Source / dest row management ───────────────────────────────────────
+
+    def _add_source(self):
+        row = SourceRowWidget(len(self._source_rows) + 1, self)
+        row.removed.connect(self._remove_source)
+        self._source_rows.append(row)
+        # Insert before the trailing stretch
+        self._sources_layout.insertWidget(self._sources_layout.count() - 1, row)
+
+    def _remove_source(self, row: SourceRowWidget):
+        if len(self._source_rows) <= 1:
+            return
+        self._source_rows.remove(row)
+        self._sources_layout.removeWidget(row)
+        row.deleteLater()
+
+    def _add_dest(self):
+        row = DestRowWidget(len(self._dest_rows) + 1, self)
+        row.removed.connect(self._remove_dest)
+        self._dest_rows.append(row)
+        self._dests_layout.insertWidget(self._dests_layout.count() - 1, row)
+
+    def _remove_dest(self, row: DestRowWidget):
+        if len(self._dest_rows) <= 1:
+            return
+        self._dest_rows.remove(row)
+        self._dests_layout.removeWidget(row)
+        row.deleteLater()
+
+    # ── Preset management ──────────────────────────────────────────────────
+
+    def _refresh_preset_combo(self):
+        self._preset_combo.blockSignals(True)
+        self._preset_combo.clear()
+        self._preset_combo.addItem("(select preset)")
+        for name in projects.list_dest_presets():
+            self._preset_combo.addItem(name)
+        self._preset_combo.blockSignals(False)
+
+    def _load_preset(self):
+        name = self._preset_combo.currentText()
+        if name == "(select preset)":
+            return
+        dests = projects.get_dest_preset(name)
+        if not dests:
+            return
+        # Remove all existing dest rows
+        for row in list(self._dest_rows):
+            self._dests_layout.removeWidget(row)
+            row.deleteLater()
+        self._dest_rows.clear()
+        for d in dests:
+            row = DestRowWidget(len(self._dest_rows) + 1, self)
+            row.removed.connect(self._remove_dest)
+            row.set_from_dict(d)
+            self._dest_rows.append(row)
+            self._dests_layout.insertWidget(self._dests_layout.count() - 1, row)
+        if not self._dest_rows:
+            self._add_dest()
+
+    def _save_preset(self):
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
+        if not ok or not name.strip():
+            return
+        dests = [r.to_dict() for r in self._dest_rows]
+        projects.save_dest_preset(name.strip(), dests)
+        self._refresh_preset_combo()
+        idx = self._preset_combo.findText(name.strip())
+        if idx >= 0:
+            self._preset_combo.setCurrentIndex(idx)
+
+    def _delete_preset(self):
+        name = self._preset_combo.currentText()
+        if name == "(select preset)":
+            return
+        reply = QMessageBox.question(
+            self, "Delete Preset", f"Delete preset '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            projects.delete_dest_preset(name)
+            self._refresh_preset_combo()
+
+    # ── Offload execution ──────────────────────────────────────────────────
+
+    def _collect_inputs(self) -> tuple[list, list]:
+        sources = [r.to_offload_source() for r in self._source_rows]
+        dests   = [r.to_offload_dest()   for r in self._dest_rows]
+        sources = [s for s in sources if s is not None]
+        dests   = [d for d in dests   if d is not None]
+        return sources, dests
+
+    def _start_offload(self):
+        sources, dests = self._collect_inputs()
+
+        if not sources:
+            QMessageBox.warning(self, "Offload", "Add at least one source with a label and path.")
+            return
+        if not dests:
+            QMessageBox.warning(self, "Offload", "Add at least one destination with a label and path.")
+            return
+
+        active_src = [s for s in sources if s.enabled]
+        active_dst = [d for d in dests   if d.enabled]
+        if not active_src:
+            QMessageBox.warning(self, "Offload", "Enable at least one source.")
+            return
+        if not active_dst:
+            QMessageBox.warning(self, "Offload", "Enable at least one destination.")
+            return
+
+        # Build matrix
+        src_labels = [s.label for s in active_src]
+        dst_labels = [d.label for d in active_dst]
+        self._matrix.configure(src_labels, dst_labels)
+
+        config = OffloadConfig(
+            max_retries=self._retries_spin.value(),
+            stop_on_first_failure=self._stop_on_fail.isChecked(),
+            generate_thumbnails=self._thumb_check.isChecked() and self._thumb_check.isEnabled(),
+            thumbnail_max_frames=self._max_frames_spin.value(),
+        )
+
+        self._worker = OffloadWorker(sources, dests, config)
+        self._thread = QThread()
+        self._worker.moveToThread(self._thread)
+
+        self._thread.started.connect(self._worker.run)
+        self._worker.status_changed.connect(self._on_status_changed)
+        self._worker.log.connect(self._log.log)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.error.connect(self._on_error)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.error.connect(self._thread.quit)
+        self._thread.finished.connect(self._on_thread_done)
+
+        self._start_btn.setEnabled(False)
+        self._cancel_btn.setEnabled(True)
+        self._log.clear()
+        self._log.log("Starting offload…", "info")
+        self._thread.start()
+
+    def _cancel_offload(self):
+        if self._worker:
+            self._worker.cancel()
+            self._log.log("Cancellation requested…", "warning")
+        self._cancel_btn.setEnabled(False)
+
+    def _on_status_changed(self, src_label: str, dst_label: str, state: CellState):
+        if dst_label:
+            self._matrix.update_cell(src_label, dst_label, state)
+
+    def _on_progress(self, src_label: str, dst_label: str, done: int, total: int):
+        pct = int(done / total * 100) if total else 0
+        self._log.log(
+            f"[{src_label} → {dst_label}] {done}/{total} files ({pct}%)", "info"
+        )
+
+    def _on_finished(self, results: list, manifests: dict, log_path: str):
+        done   = sum(1 for r in results if r.state == CellState.DONE)
+        failed = sum(1 for r in results if r.state == CellState.FAILED)
+        sheets = [
+            r.thumbnail_result["contact_sheet_path"]
+            for r in results
+            if r.thumbnail_result and r.thumbnail_result.get("contact_sheet_path")
+        ]
+        self._log.log(
+            f"Offload complete — {done} succeeded, {failed} failed. Log: {log_path}",
+            "success" if not failed else "warning",
+        )
+        for sp in sheets:
+            self._log.log(f"Contact sheet: {sp}", "success")
+        dlg = SummaryDialog(results, log_path, self)
+        dlg.exec()
+
+    def _on_error(self, msg: str):
+        self._log.log(f"Offload engine error: {msg}", "error")
+        QMessageBox.critical(self, "Offload Error", msg)
+
+    def _on_thread_done(self):
+        self._start_btn.setEnabled(True)
+        self._cancel_btn.setEnabled(False)
+        self._thread = None
+        self._worker = None

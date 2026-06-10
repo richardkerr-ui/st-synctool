@@ -10,12 +10,12 @@ Use this file to orient Claude Code at the start of any session. It captures the
 | 2 | Projects Registry (items 10–12) | ✅ Complete |
 | 3 | Rename Tracking + Diff Logic (items 13–14) | ✅ Complete |
 | 4 | Merge Tab UI (items 15–21) | ✅ Complete |
-| 5 | Offload Tab (items 22–40) | 🔲 Next |
-| 6 | Thumbnail Extraction + Contact Sheets (items 41–52) | 🔲 Pending |
+| 5 | Offload Tab (items 22–40) | ✅ Complete |
+| 6 | Thumbnail Extraction + Contact Sheets (items 41–52) | ✅ Complete |
 | 7 | Filename Normalisation (items 53–61) | 🔲 Pending |
 | 8 | R3D Support (items 62–68) | 🔲 Pending |
 
-**Next session start:** Phase 5, item 22 — new Offload tab (`gui/offload_tab.py`, `core/offload.py`)
+**Next session start:** Phase 7, item 53 — filename normalisation: pre-offload sequential naming pattern detection (`core/offload.py`, `gui/offload_tab.py`)
 
 ---
 
@@ -240,6 +240,38 @@ GDrive does not always compute SHA-256 for all files. When it hasn't, paranoid m
 | 50 | PDF output (primary) + JPEG option | `core/thumbnail.py` |
 | 51 | Output to `{primary_dest}/{source_label}/_contact_sheet_{ts}.pdf` + `~/Documents/STSyncTool/contact_sheets/` | `core/thumbnail.py` |
 | 52 | Background thread thumbnail generation — progress label "Generating thumbnails — clip N of M", non-blocking | `gui/offload_tab.py` |
+| 52a | Per-file `thumbnails` block in offload manifest — links each clip to its generated frame paths and contact sheet filename | `core/offload.py`, `core/thumbnail.py` |
+| 52b | Top-level `generated_artifacts` block in offload manifest — lists contact sheets with their own SHA-256 checksums and source clip list | `core/manifest.py`, `core/thumbnail.py` |
+| 52c | Pattern-based exclusions in `comparison.py` `_is_ignored` — `_contact_sheet_*`, `_thumbnails/`, `.st_staging_*`, `.st_offload_*` excluded from all diff logic | `core/comparison.py` |
+| 52d | Thumbnails generated from primary destination only — explicitly recorded in offload manifest; secondary destinations get footage only by design | `core/offload.py` |
+| 52e | Thumbnail failure is non-fatal — logs warning in offload summary, sets `"generated": false` + `"error"` field in manifest `thumbnails` block, footage result unaffected | `core/thumbnail.py`, `core/offload.py` |
+
+**Manifest shape for thumbnail tracking:**
+
+Per-file `thumbnails` block:
+```json
+"IMG_1205_a3f9b2c1.mov": {
+  "size": ...,
+  "checksums": {...},
+  "thumbnails": {
+    "generated": true,
+    "frames": ["_thumbnails/IMG_1205_a3f9b2c1_f1.jpg", "_thumbnails/IMG_1205_a3f9b2c1_f2.jpg"],
+    "contact_sheet": "_contact_sheet_20260609_143201.pdf"
+  }
+}
+```
+
+Top-level `generated_artifacts` block:
+```json
+"generated_artifacts": {
+  "_contact_sheet_20260609_143201.pdf": {
+    "type": "contact_sheet",
+    "generated_by": "st_synctool",
+    "source_clips": ["IMG_1205_a3f9b2c1.mov", "IMG_1206_a3f9b2c1.mov"],
+    "checksums": {"sha256": "..."}
+  }
+}
+```
 
 ---
 

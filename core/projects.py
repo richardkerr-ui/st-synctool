@@ -85,3 +85,43 @@ def find_by_local_path(local_path: str) -> Optional[dict]:
         if p.get("local_path") == local_path:
             return p
     return None
+
+
+# ---------------------------------------------------------------------------
+# Destination presets (Phase 5, item 27)
+# Stored in projects.json under top-level key "offload_dest_presets".
+# ---------------------------------------------------------------------------
+
+def _load_presets() -> dict:
+    raw = _load()
+    return raw.get("offload_dest_presets", {})
+
+
+def _save_presets(presets: dict) -> None:
+    data = _load()
+    data["offload_dest_presets"] = presets
+    _save(data)
+
+
+def list_dest_presets() -> list:
+    """Return sorted list of preset names."""
+    return sorted(_load_presets().keys())
+
+
+def get_dest_preset(name: str) -> list:
+    """Return list of destination dicts for the named preset, or []."""
+    return _load_presets().get(name, [])
+
+
+def save_dest_preset(name: str, dests: list) -> None:
+    """Create or overwrite a named destination preset."""
+    presets = _load_presets()
+    presets[name] = dests
+    _save_presets(presets)
+
+
+def delete_dest_preset(name: str) -> None:
+    """Remove a named destination preset if it exists."""
+    presets = _load_presets()
+    presets.pop(name, None)
+    _save_presets(presets)

@@ -7,9 +7,10 @@ from PyQt6.QtCore import QTimer
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from gui.transfer_tab import TransferTab
-from gui.merge_tab    import MergeTab
-from gui.verify_tab   import VerifyTab
+from gui.transfer_tab  import TransferTab
+from gui.merge_tab     import MergeTab
+from gui.verify_tab    import VerifyTab
+from gui.offload_tab   import OffloadTab
 from gui.setup_wizard import SetupWizard, should_show_wizard
 from gui              import theme
 from core.setup_checks import check_rclone_auth, CheckStatus
@@ -106,9 +107,10 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        self.tabs.addTab(TransferTab(self), "Transfer")
-        self.tabs.addTab(MergeTab(self),    "Merge")
-        self.tabs.addTab(VerifyTab(self),   "Verify")
+        self.tabs.addTab(TransferTab(self),  "Transfer")
+        self.tabs.addTab(MergeTab(self),     "Merge")
+        self.tabs.addTab(OffloadTab(self),   "Offload")
+        self.tabs.addTab(VerifyTab(self),    "Verify")
         root.addWidget(self.tabs)
 
         # Status bar
