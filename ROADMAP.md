@@ -1,32 +1,28 @@
 # Roadmap
 
-## v1 carry-forward tests
+## Completed milestones
 
-1. Real-world Drive merge test. Drive Transfer + Drive Verify and
-   Local<->Local Merge are validated. Drive-as-server Merge code path
-   exists but hasn't actually been exercised end-to-end. 10-minute test.
-2. Verify drift detection. Verify against a healthy Drive folder passes.
-   Confirm Verify actually catches a mismatch: rename a file in Drive
-   via the web UI, re-run Verify, confirm MISSING/MISMATCH is reported.
-   2-minute test.
-3. Build / distribute. App currently runs via python3 main.py from a
-   checkout. build_st_synctool.sh exists — confirm it still produces a
-   working .app bundle after today's refactor.
+### Phase 1 — SHIPPED
+- Setup wizard (`gui/setup_wizard.py`) replaces manual rclone setup.
+- README documents brew install rclone, rclone config and the
+  `ST_SYNC_RCLONE_REMOTE` override.
+- Default exclude filter for `.DS_Store`, `Thumbs.db`, `desktop.ini`
+  (see `core/offload.py` `SKIP_FILENAMES`).
+
+### v1 carry-forward tests — CLOSED
+- Drive-as-server Merge end-to-end validated.
+- Verify drift detection confirmed (rename in Drive web UI triggers
+  MISSING/MISMATCH).
+- `.app` bundle confirmed working after refactor (`build_st_synctool.sh`).
 
 ## v2 work in progress
 
-- Phase 1: Setup wizard. SHIPPED.
-- Phase 2: Live file-level progress + ETA. In progress.
+- Phase 2: Live file-level progress + ETA. Actively next.
 - Phase 3: Conflict resolution UI for BOTH_CHANGED Merge rows. Planned.
 
 ## v2 candidates (not yet committed)
 
-- Drive -> Drive transfers. Plumbing mostly exists. Real ask: moving a
+- Drive to Drive transfers. Plumbing mostly exists. Real ask: moving a
   project between ST Drive folders without burning local disk space.
 - Local NAS server merge speed. Full hash walk on first scan; pre-filter
   helps but still slow. Worth profiling.
-- Manual merge for text files. Only if someone actually asks. Production
-  binary assets don't benefit from text-merge tooling.
-- Default exclude filter for .DS_Store, Thumbs.db, desktop.ini.
-- README documenting brew install rclone + rclone config + the
-  ST_SYNC_RCLONE_REMOTE override.
