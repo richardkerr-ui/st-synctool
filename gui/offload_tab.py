@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QCheckBox, QLineEdit, QSpinBox, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
     QDialogButtonBox, QComboBox, QInputDialog, QMessageBox,
-    QSplitter, QFileDialog, QSizePolicy,
+    QSplitter, QFileDialog, QSizePolicy, QFrame,
 )
 
 from gui import theme
@@ -27,6 +27,7 @@ from core.offload import (
 )
 from core.thumbnail import ffmpeg_available, pillow_available
 import core.projects as projects
+from utils.volume_watcher import VolumeWatcher
 
 # ---------------------------------------------------------------------------
 # Cell state styling
@@ -502,6 +503,63 @@ class NormalisationPromptDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Volume-detection banner
+# ---------------------------------------------------------------------------
+
+class VolumeBanner(QFrame):
+    """
+    Non-modal banner displayed when a qualifying media-card volume is detected.
+    Emits accepted() when the user clicks [Add] and dismissed() for [Dismiss].
+    """
+
+    accepted  = pyqtSignal(dict)   # payload: the volume info dict
+    dismissed = pyqtSignal(str)    # payload: mount_path
+
+    def __init__(self, volume_info: dict, parent=None):
+        super().__init__(parent)
+        self._info = volume_info
+        self._build_ui()
+
+    def _build_ui(self):
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet(
+            f"VolumeBanner {{ background:{theme.CHARCOAL_LIGHT};"
+            f" border:1px solid {theme.ACCENT_GOLD}; border-radius:6px; }}"
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
+
+        icon = QLabel("💾")
+        icon.setStyleSheet("font-size:18px;")
+        layout.addWidget(icon)
+
+        info = self._info
+        text = (
+            f"<b>New volume '{info['volume_name']}' detected</b> "
+            f"({info['total_size_str']}, {info['filesystem']}, "
+            f"contains <code>{info['marker']}</code>) — Add as source?"
+        )
+        lbl = QLabel(text)
+        lbl.setTextFormat(Qt.TextFormat.RichText)
+        lbl.setStyleSheet(f"color:{theme.TEXT_PRIMARY};font-size:12px;")
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl, stretch=1)
+
+        add_btn = QPushButton("Add")
+        add_btn.setStyleSheet(theme.primary_button_style())
+        add_btn.setFixedWidth(70)
+        add_btn.clicked.connect(lambda: self.accepted.emit(self._info))
+        layout.addWidget(add_btn)
+
+        dismiss_btn = QPushButton("Dismiss")
+        dismiss_btn.setFixedWidth(70)
+        dismiss_btn.clicked.connect(lambda: self.dismissed.emit(self._info["mount_path"]))
+        layout.addWidget(dismiss_btn)
+
+
+# ---------------------------------------------------------------------------
 # Main tab
 # ---------------------------------------------------------------------------
 
@@ -512,7 +570,12 @@ class OffloadTab(QWidget):
         self._dest_rows:   list[DestRowWidget]   = []
         self._thread: Optional[QThread] = None
         self._worker: Optional[OffloadWorker] = None
+        # mount_path -> VolumeBanner, for volumes currently showing a banner
+        self._banners: dict[str, VolumeBanner] = {}
+        # mount_paths the user dismissed this session (cleared on unmount)
+        self._dismissed: set[str] = set()
         self._build_ui()
+        self._start_volume_watcher()
 
     # ── UI construction ────────────────────────────────────────────────────
 
@@ -520,6 +583,14 @@ class OffloadTab(QWidget):
         root = QVBoxLayout(self)
         root.setSpacing(10)
         root.setContentsMargins(12, 12, 12, 8)
+
+        # Banner container — banners are inserted here dynamically
+        self._banner_container = QWidget()
+        self._banner_layout = QVBoxLayout(self._banner_container)
+        self._banner_layout.setContentsMargins(0, 0, 0, 0)
+        self._banner_layout.setSpacing(4)
+        self._banner_container.setVisible(False)
+        root.addWidget(self._banner_container)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -645,6 +716,17 @@ class OffloadTab(QWidget):
         self._max_frames_spin.setToolTip("Maximum thumbnail frames per clip (adaptive: short clips use fewer)")
         layout.addWidget(self._max_frames_spin)
 
+        self._autodetect_check = QCheckBox("Auto-detect media cards")
+        self._autodetect_check.setToolTip(
+            "Show a banner when a removable media card (DCIM, CLIP, etc.) is mounted. "
+            "Detection only — never starts a copy automatically."
+        )
+        self._autodetect_check.setChecked(
+            bool(projects.get_app_setting("volume_autodetect", True))
+        )
+        self._autodetect_check.stateChanged.connect(self._on_autodetect_toggled)
+        layout.addWidget(self._autodetect_check)
+
         layout.addStretch()
         return bar
 
@@ -683,6 +765,68 @@ class OffloadTab(QWidget):
         btn_row.addStretch()
         layout.addLayout(btn_row)
         return container
+
+    # ── Volume auto-detection ──────────────────────────────────────────────
+
+    def _start_volume_watcher(self):
+        self._watcher = VolumeWatcher(self)
+        self._watcher.volume_mounted.connect(self._on_volume_mounted)
+        self._watcher.volume_unmounted.connect(self._on_volume_unmounted)
+        if not self._watcher.available:
+            self._autodetect_check.setEnabled(False)
+            self._autodetect_check.setToolTip(
+                "Volume auto-detection requires pyobjc (pip install pyobjc-framework-AppKit)."
+            )
+
+    def _on_autodetect_toggled(self, state: int):
+        projects.save_app_setting("volume_autodetect", bool(state))
+
+    def _on_volume_mounted(self, info: dict):
+        if not self._autodetect_check.isChecked():
+            return
+        path = info["mount_path"]
+        if path in self._dismissed or path in self._banners:
+            return
+        banner = VolumeBanner(info, self)
+        banner.accepted.connect(self._on_banner_accepted)
+        banner.dismissed.connect(self._on_banner_dismissed)
+        self._banners[path] = banner
+        self._banner_layout.addWidget(banner)
+        self._banner_container.setVisible(True)
+
+    def _on_volume_unmounted(self, mount_path: str):
+        # Withdraw the banner (if any) for this volume
+        banner = self._banners.pop(mount_path, None)
+        if banner is not None:
+            self._banner_layout.removeWidget(banner)
+            banner.deleteLater()
+            if not self._banners:
+                self._banner_container.setVisible(False)
+        # Clear the dismiss record so a remount shows the banner again
+        self._dismissed.discard(mount_path)
+
+    def _on_banner_accepted(self, info: dict):
+        path = info["mount_path"]
+        self._dismiss_banner(path)
+        # Populate a new source row (label + path pre-filled, enabled)
+        row = SourceRowWidget(len(self._source_rows) + 1, self)
+        row.removed.connect(self._remove_source)
+        row._label.setText(info["label"])
+        row._path.setText(info["mount_path"])
+        self._source_rows.append(row)
+        self._sources_layout.insertWidget(self._sources_layout.count() - 1, row)
+
+    def _on_banner_dismissed(self, mount_path: str):
+        self._dismissed.add(mount_path)
+        self._dismiss_banner(mount_path)
+
+    def _dismiss_banner(self, mount_path: str):
+        banner = self._banners.pop(mount_path, None)
+        if banner is not None:
+            self._banner_layout.removeWidget(banner)
+            banner.deleteLater()
+            if not self._banners:
+                self._banner_container.setVisible(False)
 
     # ── Source / dest row management ───────────────────────────────────────
 

@@ -143,3 +143,20 @@ def save_naming_preference(pattern: str, choice: str) -> None:
     data = _load()
     data.setdefault("naming_preferences", {})[pattern] = choice
     _save(data)
+
+
+# ---------------------------------------------------------------------------
+# Generic app settings (flat key/value store)
+# Stored in projects.json under top-level key "app_settings".
+# ---------------------------------------------------------------------------
+
+def get_app_setting(key: str, default=None):
+    """Return a stored app setting, or default if not set."""
+    return _load().get("app_settings", {}).get(key, default)
+
+
+def save_app_setting(key: str, value) -> None:
+    """Persist an app setting."""
+    data = _load()
+    data.setdefault("app_settings", {})[key] = value
+    _save(data)
