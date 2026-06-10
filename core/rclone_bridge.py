@@ -9,7 +9,23 @@ _current_proc_lock = threading.Lock()
 
 # Matches rclone --stats-one-line output. Real-world format observed:
 #   "2026/06/08 15:38:36 NOTICE: 19.996 MiB / 2.421 GiB, 1%, 0 B/s, ETA - (xfr#0/20)"
-_PROGRESS_RE = re.compile(r"\d[\d.]*\s*[KMGTPE]?i?B\s*/\s*\d[\d.]*\s*[KMGTPE]?i?B,\s*(\d+)\s*%")
+#   "NOTICE: 45.2 MiB / 500 MiB, 9%, 12.3 MB/s, ETA 1m2s (xfr#5/47, chk#3/47)"
+# Groups: (1) pct  (2) speed  (3) eta  (4) xfr_done  (5) xfr_total
+_PROGRESS_RE = re.compile(
+    r"\d[\d.]*\s*[KMGTPE]?i?B\s*/\s*\d[\d.]*\s*[KMGTPE]?i?B"
+    r",\s*(\d+)\s*%"                              # group 1: percent
+    r"(?:,\s*([\d.]+\s*[KMGTPE]?i?B/s))?"        # group 2: speed (optional)
+    r"(?:,\s*ETA\s*([\w-]+))?"                    # group 3: ETA (optional)
+    r"(?:.*\(xfr#(\d+)/(\d+))?"                  # groups 4-5: files done / total (optional)
+)
+
+# Matches rclone INFO lines that announce a file is actively being or was copied.
+# Used to track the currently-transferring filename for live UI display.
+# Handles: "INFO  : filename: Copying", "INFO  : filename: Copied ..."
+_CURRENT_FILE_RE = re.compile(
+    r"INFO\s*:\s+(.+?):\s+Cop(?:ying|ied)",
+    re.IGNORECASE,
+)
 
 
 def is_rclone_installed() -> bool:
@@ -17,6 +33,18 @@ def is_rclone_installed() -> bool:
 
 
 def _run(args, timeout=300, log_cb=None, progress_cb=None):
+    """Run an rclone command and stream stderr for progress and log events.
+
+    progress_cb receives (pct: int, info: dict) where info contains:
+        line         -- original stats line (always present)
+        speed        -- e.g. "12.3 MB/s" (may be None)
+        eta          -- e.g. "1m2s" or "-" (may be None)
+        files_done   -- int (may be None)
+        files_total  -- int (may be None)
+        current_file -- filename being transferred (may be None)
+
+    Callers that only use the first argument (pct) are unaffected.
+    """
     global _current_proc
     if log_cb:
         log_cb(f"  rclone {' '.join(args)}", "info")
@@ -30,6 +58,10 @@ def _run(args, timeout=300, log_cb=None, progress_cb=None):
         _current_proc = proc
 
     stdout_chunks, stderr_chunks = [], []
+    # Shared mutable state for the most recently seen transferring filename.
+    # Both reader threads can write; the progress line reader consumes it.
+    _state = {"current_file": None}
+    _state_lock = threading.Lock()
 
     def reader(stream, chunks, is_stderr):
         try:
@@ -39,10 +71,27 @@ def _run(args, timeout=300, log_cb=None, progress_cb=None):
                 if not stripped:
                     continue
                 if is_stderr:
+                    # Check for a current-file INFO line first
+                    fm = _CURRENT_FILE_RE.search(stripped)
+                    if fm:
+                        with _state_lock:
+                            _state["current_file"] = fm.group(1).strip()
+
+                    # Check for a stats NOTICE line
                     m = _PROGRESS_RE.search(stripped)
                     if m and progress_cb:
+                        with _state_lock:
+                            cur_file = _state["current_file"]
+                        info = {
+                            "line": stripped,
+                            "speed": m.group(2),
+                            "eta": m.group(3),
+                            "files_done": int(m.group(4)) if m.group(4) is not None else None,
+                            "files_total": int(m.group(5)) if m.group(5) is not None else None,
+                            "current_file": cur_file,
+                        }
                         try:
-                            progress_cb(int(m.group(1)), stripped)
+                            progress_cb(int(m.group(1)), info)
                         except Exception:
                             pass
                         continue
@@ -195,6 +244,7 @@ def sync(src, dst, mode="copy", conflict="overwrite",
         "--stats", "1s",
         "--stats-one-line",
         "--stats-log-level", "NOTICE",
+        "--verbose",  # enables INFO lines per file (Copying/Copied) for live filename tracking
     ]
 
     if conflict == "skip":

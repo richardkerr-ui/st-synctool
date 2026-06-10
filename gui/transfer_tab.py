@@ -23,7 +23,10 @@ from core import rclone_bridge
 
 
 class TransferWorker(QObject):
-    progress = pyqtSignal(int, str)
+    # progress carries (pct: int, info: object) where info is either a plain str
+    # (local transfers) or a dict with keys: line, speed, eta, files_done,
+    # files_total, current_file (rclone transfers).
+    progress = pyqtSignal(int, object)
     log      = pyqtSignal(str, str)
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
@@ -440,7 +443,7 @@ class TransferTab(QWidget):
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self._status_label.setText("Transferring…")
-        self.log.set_progress(0, "Starting…")
+        self.log.set_progress(0, current_file="Starting…")
 
         start_session()
         self._thread.start()
@@ -457,12 +460,29 @@ class TransferTab(QWidget):
             self.log.log("Transfer cancelled by user.", "warning")
             self._reset_controls()
 
-    def _on_progress(self, pct, filename):
-        self.log.set_progress(pct, filename)
+    def _on_progress(self, pct, info):
+        if isinstance(info, dict):
+            # Unpack rich rclone progress dict
+            current_file = info.get("current_file") or ""
+            speed        = info.get("speed") or ""
+            eta          = info.get("eta") or ""
+            files_done   = info.get("files_done")
+            files_total  = info.get("files_total")
+            self.log.set_progress(
+                pct,
+                current_file=current_file,
+                speed=speed,
+                eta=eta,
+                files_done=files_done,
+                files_total=files_total,
+            )
+        else:
+            # Plain string from local transfers (or legacy callers)
+            self.log.set_progress(pct, current_file=str(info) if info else "")
 
     def _on_finished(self, result):
         end_session()
-        self.log.set_progress(100, "Complete")
+        self.log.set_progress(100, current_file="Complete")
         self._reset_controls()
         errors = result.get("errors", [])
         if errors:

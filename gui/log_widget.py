@@ -84,8 +84,10 @@ class LogWidget(QWidget):
             self._progress_container = QWidget()
             self._progress_container.setStyleSheet("background: #1e1e1e;")
             pc = QVBoxLayout(self._progress_container)
-            pc.setContentsMargins(8, 4, 8, 2)
-            pc.setSpacing(2)
+            pc.setContentsMargins(8, 6, 8, 4)
+            pc.setSpacing(3)
+
+            # ── progress bar ────────────────────────────────────────────────
             self.progress_bar = QProgressBar()
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
@@ -96,11 +98,33 @@ class LogWidget(QWidget):
                 "QProgressBar::chunk { background: #F6BE00; border-radius: 2px; }"
             )
             pc.addWidget(self.progress_bar)
-            self.current_file_label = QLabel("—")
+
+            # ── stats row: file count + ETA (left) | speed (right) ──────────
+            stats_row = QHBoxLayout()
+            stats_row.setContentsMargins(0, 0, 0, 0)
+            stats_row.setSpacing(0)
+
+            self._file_count_label = QLabel("")
+            self._file_count_label.setStyleSheet(
+                "color: #777; font-size: 11px; background: transparent;"
+            )
+            stats_row.addWidget(self._file_count_label)
+            stats_row.addStretch()
+
+            self._speed_label = QLabel("")
+            self._speed_label.setStyleSheet(
+                "color: #777; font-size: 11px; background: transparent;"
+            )
+            stats_row.addWidget(self._speed_label)
+            pc.addLayout(stats_row)
+
+            # ── currently-transferring filename ──────────────────────────────
+            self.current_file_label = QLabel("")
             self.current_file_label.setStyleSheet(
                 "color: #555; font-size: 11px; background: transparent;"
             )
             pc.addWidget(self.current_file_label)
+
             self._progress_container.setVisible(False)
             fl.addWidget(self._progress_container)
 
@@ -118,20 +142,65 @@ class LogWidget(QWidget):
 
     # ── Progress helpers ────────────────────────────────────────────────────
 
-    def set_progress(self, pct: int, filename: str = ""):
+    def set_progress(
+        self,
+        pct: int,
+        current_file: str = "",
+        speed: str = "",
+        eta: str = "",
+        files_done: "int | None" = None,
+        files_total: "int | None" = None,
+    ):
+        """Update the inline progress area.
+
+        Parameters
+        ----------
+        pct          -- 0-100 percentage for the progress bar
+        current_file -- filename currently being transferred (may be empty)
+        speed        -- human-readable transfer speed, e.g. "12.3 MB/s"
+        eta          -- time remaining string from rclone, e.g. "1m23s" or "-"
+        files_done   -- number of files transferred so far
+        files_total  -- total number of files to transfer
+        """
         if not self._with_progress:
             return
         if not self._progress_container.isVisible():
             self._progress_container.setVisible(True)
+
         self.progress_bar.setValue(pct)
-        if filename:
-            self.current_file_label.setText(filename)
+
+        # File count + ETA label
+        if files_done is not None and files_total is not None:
+            count_text = f"{files_done} / {files_total} files"
+            if eta and eta != "-":
+                count_text += f"  —  {eta} remaining"
+            self._file_count_label.setText(count_text)
+        elif eta and eta != "-":
+            self._file_count_label.setText(f"{eta} remaining")
+        else:
+            self._file_count_label.setText("")
+
+        # Speed label
+        self._speed_label.setText(speed if speed else "")
+
+        # Current file — truncate to last 2 path components for long paths
+        if current_file:
+            from pathlib import PurePosixPath
+            parts = PurePosixPath(current_file.replace("\\", "/")).parts
+            display = "/".join(parts[-2:]) if len(parts) > 2 else current_file
+            self.current_file_label.setText(display)
+        elif current_file == "":
+            pass  # keep whatever was shown last
+        else:
+            self.current_file_label.setText("")
 
     def hide_progress(self):
         if not self._with_progress:
             return
         self._progress_container.setVisible(False)
-        self.current_file_label.setText("—")
+        self.current_file_label.setText("")
+        self._file_count_label.setText("")
+        self._speed_label.setText("")
 
     # ── Public API ──────────────────────────────────────────────────────────
 

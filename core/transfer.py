@@ -272,10 +272,13 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
 
     if progress_cb: progress_cb(0, f"Starting rclone {mode}...")
 
-    def _rclone_progress(pct, status_line):
+    def _rclone_progress(pct, info):
         if progress_cb:
             mapped = min(90, int(pct * 0.9))
-            progress_cb(mapped, status_line)
+            # Pass the rich info dict through unchanged so the UI can display
+            # speed, ETA, file counts and current filename.
+            # Callers that only inspect the percent arg are unaffected.
+            progress_cb(mapped, info)
 
     ok = rclone_bridge.sync(
         src_str, dst_str,
