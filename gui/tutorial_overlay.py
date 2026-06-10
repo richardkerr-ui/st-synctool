@@ -21,6 +21,8 @@ Each step is a dict:
 If "widget" is None the card is centered with no spotlight.
 """
 
+from __future__ import annotations
+from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QSizePolicy,
@@ -276,7 +278,7 @@ class TutorialOverlay(QWidget):
         self._position_card(step)
         self.update()  # repaint backdrop/spotlight
 
-    def _spotlight_rect(self, step: dict) -> QRect | None:
+    def _spotlight_rect(self, step: dict) -> Optional[QRect]:
         """Return the spotlight rectangle in overlay-local coords, or None."""
         widget_fn = step.get("widget")
         if not widget_fn:
