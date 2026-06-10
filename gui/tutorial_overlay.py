@@ -258,6 +258,14 @@ class TutorialOverlay(QWidget):
             if tabs:
                 tabs.setCurrentIndex(tab_index)
 
+        # Optional per-step action (e.g. pre-fill demo paths)
+        on_show = step.get("on_show")
+        if callable(on_show):
+            try:
+                on_show()
+            except Exception:
+                pass  # never let a hook crash the tour
+
         # Longer delay so Qt fully repaints the new tab before we measure widgets
         QTimer.singleShot(80, lambda: self._render_step(step, index, total))
 

@@ -13,6 +13,7 @@ from gui.verify_tab       import VerifyTab
 from gui.offload_tab      import OffloadTab
 from gui.setup_wizard     import SetupWizard, should_show_wizard
 from gui.tutorial_overlay import TutorialOverlay, tutorial_already_seen, reset_tutorial
+from core.demo import ensure_demo_folder, demo_verify_sample, demo_verify_manifest
 from gui                  import theme
 from core.setup_checks    import check_rclone_auth, CheckStatus
 from core.oauth_config    import get_active_remote, get_remote_account_email
@@ -288,14 +289,15 @@ class MainWindow(QMainWindow):
                 "padding": 4,
             },
             {
-                "tab":    0,
-                "widget": lambda: tt.src_input,
-                "title":  "Source folder",
-                "body":   (
+                "tab":     0,
+                "widget":  lambda: tt.src_input,
+                "title":   "Source folder",
+                "body":    (
                     "Type or browse to the folder you want to copy from. "
-                    "Google Drive URLs (gdrive://…) work here too — "
-                    "the tool will route through rclone automatically."
+                    "We've loaded a demo camera card so you can try it right now — "
+                    "hit Start Transfer when you're ready."
                 ),
+                "on_show": lambda: tt._load_demo_folder(),
             },
             {
                 "tab":    0,
@@ -391,12 +393,17 @@ class MainWindow(QMainWindow):
 
             # ── Verify tab ────────────────────────────────────────────────
             {
-                "tab":    3,
-                "widget": lambda: vt.folder_input,
-                "title":  "Folder to verify",
-                "body":   (
-                    "Point this at any folder that was transferred by ST SyncTool. "
-                    "It will be compared byte-for-byte against the manifest."
+                "tab":     3,
+                "widget":  lambda: vt.folder_input,
+                "title":   "Folder to verify",
+                "body":    (
+                    "Point this at any folder transferred by ST SyncTool. "
+                    "We've loaded a demo sample so you can run it right now — "
+                    "it will compare the files against the pre-built manifest."
+                ),
+                "on_show": lambda: (
+                    vt.folder_input.setText(str(ensure_demo_folder()[0].parent / "verify_sample")),
+                    vt.manifest_input.setText(str(demo_verify_manifest())),
                 ),
             },
             {

@@ -11,37 +11,20 @@ Structure created
 -----------------
 <app_support>/demo/
     source/
-        DCIM/
-            A001/
-                A001C001_260610_R0FH.mov      (zero-byte)
-                A001C002_260610_R0FH.mov
-                A001C003_260610_R0FH.mov
-                A001C004_260610_R0FH.mov
-            B001/
-                B001C001_260610_R0FH.mov
-                B001C002_260610_R0FH.mov
-                B001C003_260610_R0FH.mov
-            C001/
-                C001C001_260610_R0FH.arw     (stills — zero-byte)
-                C001C002_260610_R0FH.arw
-                C001C003_260610_R0FH.arw
-                C001C004_260610_R0FH.arw
-                C001C005_260610_R0FH.arw
-        AUDIO/
-            SND001_BOOM.wav
-            SND002_BOOM.wav
-            SND003_LAV_A.wav
-            SND004_LAV_B.wav
-        MISC/
-            NOTES.txt           (small text file, not zero-byte)
-    destination/                (empty — transfer lands here)
-    README_DEMO.txt             (explains what the folder is)
+        DCIM/A001..C001/  (zero-byte .mov/.arw stubs)
+        AUDIO/            (zero-byte .wav stubs)
+        MISC/NOTES.txt    (real text content)
+    destination/          (empty — Transfer tab lands here)
+    verify_sample/        (pre-populated stubs + manifest for Verify tab)
+    README_DEMO.txt
 """
 
 from __future__ import annotations
 
+import json
 import os
 import platform
+import shutil
 import textwrap
 from pathlib import Path
 
@@ -69,6 +52,15 @@ def demo_source() -> Path:
 
 def demo_destination() -> Path:
     return demo_root() / "destination"
+
+
+def demo_verify_sample() -> Path:
+    """Pre-populated folder + manifest for the Verify tutorial step."""
+    return demo_root() / "verify_sample"
+
+
+def demo_verify_manifest() -> Path:
+    return demo_verify_sample() / "st_manifest.json"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,12 +113,89 @@ _README = textwrap.dedent("""\
     It contains zero-byte file stubs that mimic a real camera card offload,
     so you can try every feature without needing real production files.
 
-    source/     — pretend camera card (DCIM + AUDIO)
-    destination/ — empty; use as the Transfer destination
+    source/        — pretend camera card (DCIM + AUDIO)
+    destination/   — empty; Transfer tab lands here
+    verify_sample/ — pre-populated folder + manifest for the Verify tab
 
-    Safe to delete at any time. ST SyncTool will recreate it if you
-    click "Use demo folder" again.
+    Safe to delete at any time. ST SyncTool will recreate it on next launch.
 """).encode()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# verify_sample builder
+# ─────────────────────────────────────────────────────────────────────────────
+
+# sha256 of an empty file — all zero-byte stubs share this hash.
+_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def _build_verify_sample(root: Path) -> None:
+    """
+    Populate demo/verify_sample/ with copies of the source stubs and a valid
+    st_manifest.json so the Verify tab can run without the user first doing a
+    Transfer.
+
+    Only creates files that don't already exist so repeated calls are safe.
+    """
+    sample = demo_verify_sample()
+    sample.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = demo_verify_manifest()
+
+    # Copy stubs (relative paths mirror source/ structure)
+    rel_paths = []
+    for rel_str, content in _STUB_FILES:
+        # Strip leading "source/" to get the relative path inside verify_sample
+        rel = rel_str[len("source/"):]
+        dest_file = sample / rel
+        if not dest_file.exists():
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            dest_file.write_bytes(content if content is not None else b"")
+        rel_paths.append((rel, dest_file))
+
+    if not manifest_path.exists():
+        # Build a minimal but structurally valid manifest
+        from datetime import datetime, timezone
+        import socket, getpass
+
+        files: dict = {}
+        total_size = 0
+        for rel, fpath in rel_paths:
+            stat = fpath.stat()
+            size = stat.st_size
+            total_size += size
+            files[rel] = {
+                "type": "file",
+                "size": size,
+                "modtime": datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).isoformat(),
+                "checksums": {"sha256": _EMPTY_SHA256},
+                "hash_algorithm": "sha256",
+                "gdrive_url": "",
+            }
+
+        manifest = {
+            "schema_version": "1.1",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "label": "demo_verify_sample",
+            "root": str(sample),
+            "destination": str(sample),
+            "server_path": "",
+            "operation": "demo",
+            "project_id": "demo",
+            "workstation": socket.gethostname(),
+            "user": getpass.getuser(),
+            "file_count": len(files),
+            "total_size_bytes": total_size,
+            "renames": [],
+            "checksum_context": {
+                "algorithm": "sha256",
+                "gdrive_mode": False,
+            },
+            "files": files,
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,7 +204,7 @@ _README = textwrap.dedent("""\
 
 def ensure_demo_folder() -> tuple[Path, Path]:
     """
-    Create (or verify) the demo folder structure.
+    Create (or verify) the full demo folder structure.
 
     Returns (source_path, destination_path).
     Safe to call multiple times — skips files that already exist.
@@ -155,6 +224,8 @@ def ensure_demo_folder() -> tuple[Path, Path]:
 
     dest = demo_destination()
     dest.mkdir(parents=True, exist_ok=True)
+
+    _build_verify_sample(root)
 
     return demo_source(), dest
 
