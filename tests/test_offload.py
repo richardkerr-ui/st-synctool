@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 from core.offload import (
     OffloadSource,
     OffloadDest,
+    OffloadConfig,
     CellState,
     preflight_source_readonly,
     prehash_source,
@@ -26,6 +27,7 @@ from core.offload import (
     detect_cross_source_duplicates,
     build_normalization_plan,
     apply_normalization_in_staging,
+    run_offload,
 )
 
 
@@ -397,3 +399,243 @@ class TestFilenameNormalisation:
         # Source card must be untouched
         assert (source_dir / "IMG_0001.mov").exists()
         assert (source_dir / "IMG_0001.mov").read_bytes() == b"original"
+
+
+# ---------------------------------------------------------------------------
+# run_offload — staging never committed on verification failure
+# ---------------------------------------------------------------------------
+
+def _default_config(**overrides) -> OffloadConfig:
+    cfg = OffloadConfig()
+    for k, v in overrides.items():
+        setattr(cfg, k, v)
+    return cfg
+
+
+def _make_source_dir(tmp_path: Path, label: str, files: dict) -> OffloadSource:
+    src_dir = tmp_path / label
+    src_dir.mkdir(parents=True, exist_ok=True)
+    for rel, data in files.items():
+        p = src_dir / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    return OffloadSource(label=label, path=src_dir)
+
+
+class TestRunOffloadStagingInvariant:
+    """
+    Staging must never be renamed to the final path unless verification passes.
+    These tests drive run_offload end-to-end using real filesystem operations
+    and inject corruption at the right moment to confirm the invariant holds.
+    """
+
+    def _run(self, sources, dests, config=None):
+        status_cb = MagicMock()
+        log_cb = MagicMock()
+        cfg = config or _default_config()
+        return run_offload(sources, dests, cfg, status_cb, log_cb)
+
+    def test_clean_offload_produces_done_state(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        results, _, _ = self._run([src], [dst])
+
+        assert len(results) == 1
+        assert results[0].state == CellState.DONE
+
+    def test_clean_offload_files_at_final_path(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        results, _, _ = self._run([src], [dst])
+
+        final = results[0].final_path
+        assert final and Path(final).exists()
+        assert (Path(final) / "clip.mov").exists()
+
+    def test_clean_offload_no_staging_dir_remains(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        self._run([src], [dst])
+
+        staging_dirs = list((tmp_path / "nas").rglob(".st_staging_*"))
+        assert staging_dirs == []
+
+    def test_verification_failure_state_is_failed(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"original"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        # Corrupt every file in staging before verification runs
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def corrupt_then_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            for f in staging_dir.rglob("*"):
+                if f.is_file():
+                    f.write_bytes(b"corrupted")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=corrupt_then_verify):
+            results, _, _ = self._run([src], [dst])
+
+        assert results[0].state == CellState.FAILED
+
+    def test_verification_failure_leaves_no_final_dir(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"original"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def corrupt_then_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            for f in staging_dir.rglob("*"):
+                if f.is_file():
+                    f.write_bytes(b"corrupted")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=corrupt_then_verify):
+            results, _, _ = self._run([src], [dst])
+
+        final_dir = dst.path / src.effective_subfolder()
+        # If final_dir exists it must still contain a staging subdir (not committed)
+        if final_dir.exists():
+            committed_files = [
+                f for f in final_dir.rglob("*")
+                if f.is_file() and ".st_staging_" not in str(f)
+            ]
+            assert committed_files == []
+
+    def test_verification_failure_leaves_failure_report(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"original"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def corrupt_then_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            for f in staging_dir.rglob("*"):
+                if f.is_file():
+                    f.write_bytes(b"corrupted")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=corrupt_then_verify):
+            self._run([src], [dst])
+
+        failure_reports = list((tmp_path / "nas").rglob(".st_failure_*.txt"))
+        assert len(failure_reports) >= 1
+
+    def test_failed_result_has_errors_list(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"original"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def corrupt_then_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            for f in staging_dir.rglob("*"):
+                if f.is_file():
+                    f.write_bytes(b"corrupted")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=corrupt_then_verify):
+            results, _, _ = self._run([src], [dst])
+
+        assert results[0].errors
+
+
+# ---------------------------------------------------------------------------
+# run_offload — per-source eject signal
+#
+# A source is safe to eject (logically) only when every destination for that
+# source reaches DONE.  These tests verify that one destination failing does
+# not mask the failure — i.e. the result grid is honest about partial success.
+# ---------------------------------------------------------------------------
+
+class TestEjectSignal:
+    """
+    'Safe to eject' = all CellResults for that source are DONE.
+    Any FAILED or SKIPPED result means the source must not be ejected.
+    """
+
+    def _source_done(self, results, source_label: str) -> bool:
+        source_cells = [r for r in results if r.source_label == source_label]
+        return source_cells and all(r.state == CellState.DONE for r in source_cells)
+
+    def test_eject_safe_after_all_dests_pass(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"data"})
+        d1 = OffloadDest(label="NAS1", path=tmp_path / "nas1"); d1.path.mkdir()
+        d2 = OffloadDest(label="NAS2", path=tmp_path / "nas2"); d2.path.mkdir()
+
+        results, _, _ = run_offload(
+            [src], [d1, d2], _default_config(), MagicMock(), MagicMock()
+        )
+
+        assert self._source_done(results, "A001")
+
+    def test_eject_not_safe_when_one_dest_fails(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"data"})
+        d1 = OffloadDest(label="NAS1", path=tmp_path / "nas1"); d1.path.mkdir()
+        d2 = OffloadDest(label="NAS2", path=tmp_path / "nas2"); d2.path.mkdir()
+
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def fail_for_nas2(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            if dst_lbl == "NAS2":
+                for f in staging_dir.rglob("*"):
+                    if f.is_file():
+                        f.write_bytes(b"corrupt")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=fail_for_nas2):
+            results, _, _ = run_offload(
+                [src], [d1, d2], _default_config(), MagicMock(), MagicMock()
+            )
+
+        assert not self._source_done(results, "A001")
+
+    def test_eject_not_safe_when_all_dests_fail(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def always_fail(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            for f in staging_dir.rglob("*"):
+                if f.is_file():
+                    f.write_bytes(b"corrupt")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=always_fail):
+            results, _, _ = run_offload(
+                [src], [dst], _default_config(), MagicMock(), MagicMock()
+            )
+
+        assert not self._source_done(results, "A001")
+
+    def test_two_sources_eject_independently(self, tmp_path):
+        """Source A passing all dests must not be blocked by source B failing."""
+        src_a = _make_source_dir(tmp_path, "A001", {"clip_a.mov": b"data a"})
+        src_b = _make_source_dir(tmp_path, "B001", {"clip_b.mov": b"data b"})
+        dst   = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
+
+        original_verify = __import__("core.offload", fromlist=["verify_staging"]).verify_staging
+
+        def fail_for_b(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl):
+            if src_lbl == "B001":
+                for f in staging_dir.rglob("*"):
+                    if f.is_file():
+                        f.write_bytes(b"corrupt")
+            return original_verify(staging_dir, manifest, log_cb, status_cb, src_lbl, dst_lbl)
+
+        with patch("core.offload.verify_staging", side_effect=fail_for_b):
+            results, _, _ = run_offload(
+                [src_a, src_b], [dst], _default_config(), MagicMock(), MagicMock()
+            )
+
+        assert     self._source_done(results, "A001")
+        assert not self._source_done(results, "B001")

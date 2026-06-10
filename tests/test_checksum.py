@@ -135,3 +135,84 @@ class TestProgressCallback:
         # This test documents the current behaviour rather than asserting a
         # specific count so it catches any future regression.
         assert all(v <= 100 for v in calls)
+
+
+# ---------------------------------------------------------------------------
+# Verification semantics — the silent-OK failure mode
+#
+# compute_all() is the ground truth for offload verification.  These tests
+# confirm that comparing two hashes from compute_all() reliably catches
+# content mismatches — the exact property that verify_staging depends on.
+# ---------------------------------------------------------------------------
+
+class TestVerificationSemantics:
+    def test_hash_comparison_passes_for_identical_files(self, tmp_path):
+        data = b"production footage ground truth"
+        original = tmp_path / "original.mov"
+        copy     = tmp_path / "copy.mov"
+        original.write_bytes(data)
+        copy.write_bytes(data)
+        h1 = compute_all(original, include_xxhash=False)
+        h2 = compute_all(copy,     include_xxhash=False)
+        assert h1["sha256"] == h2["sha256"]
+
+    def test_hash_comparison_fails_for_different_files(self, tmp_path):
+        f1 = tmp_path / "a.mov"
+        f2 = tmp_path / "b.mov"
+        f1.write_bytes(b"real footage")
+        f2.write_bytes(b"different footage")
+        h1 = compute_all(f1, include_xxhash=False)
+        h2 = compute_all(f2, include_xxhash=False)
+        assert h1["sha256"] != h2["sha256"]
+
+    def test_single_appended_byte_detected(self, tmp_path):
+        data = b"clip data"
+        f1 = tmp_path / "orig.mov"
+        f2 = tmp_path / "extra.mov"
+        f1.write_bytes(data)
+        f2.write_bytes(data + b"\x00")
+        h1 = compute_all(f1, include_xxhash=False)
+        h2 = compute_all(f2, include_xxhash=False)
+        assert h1["sha256"] != h2["sha256"]
+
+    def test_truncated_file_detected(self, tmp_path):
+        data = b"x" * 1024
+        f1 = tmp_path / "full.mov"
+        f2 = tmp_path / "truncated.mov"
+        f1.write_bytes(data)
+        f2.write_bytes(data[:512])
+        h1 = compute_all(f1, include_xxhash=False)
+        h2 = compute_all(f2, include_xxhash=False)
+        assert h1["sha256"] != h2["sha256"]
+
+    def test_stored_hash_matches_recomputed_hash(self, tmp_path):
+        """Simulates the offload pre-hash → post-copy verify flow."""
+        src = tmp_path / "src.mov"
+        dst = tmp_path / "dst.mov"
+        src.write_bytes(b"camera card footage")
+
+        # Pre-hash (as prehash_source does)
+        pre = compute_all(src, include_xxhash=False)["sha256"]
+
+        # Copy (as copy_source_to_staging does)
+        import shutil
+        shutil.copy2(str(src), str(dst))
+
+        # Post-hash (as verify_staging does)
+        post = compute_all(dst, include_xxhash=False)["sha256"]
+
+        assert pre == post  # verification must pass
+
+    def test_stored_hash_catches_corruption_after_copy(self, tmp_path):
+        """If the destination file is corrupted after copy, verification must fail."""
+        src = tmp_path / "src.mov"
+        dst = tmp_path / "dst.mov"
+        src.write_bytes(b"camera card footage")
+        import shutil
+        shutil.copy2(str(src), str(dst))
+
+        pre = compute_all(src, include_xxhash=False)["sha256"]
+        dst.write_bytes(b"corrupted content")  # simulate post-copy corruption
+        post = compute_all(dst, include_xxhash=False)["sha256"]
+
+        assert pre != post  # verification must fail
