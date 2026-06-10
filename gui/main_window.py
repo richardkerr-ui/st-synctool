@@ -429,7 +429,7 @@ class MainWindow(QMainWindow):
                 "title":  "You're all set!",
                 "body":   (
                     "That's the full tour. Replay it anytime with the '? Tour' "
-                    "button in the top-right corner. Good luck on your shoot!"
+                    "button in the top-right corner. Happy creating."
                 ),
             },
         ]
