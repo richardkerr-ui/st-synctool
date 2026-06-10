@@ -6,11 +6,12 @@ Handles multi-GB video / audio / PSD / After Effects assets without re-uploading
 
 ## What it does
 
-Three things, each in its own tab:
+Four things, each in its own tab:
 
 - **Transfer** — push or pull a folder one-way, with integrity verification
 - **Merge** — reconcile diverged copies using a three-way diff and apply only the changes
 - **Verify** — confirm a folder still matches a saved manifest
+- **Offload** — ingest from camera cards and audio recorders with pre-hash verification, staging, contact sheet generation, and chain-of-custody logging
 
 ---
 
@@ -241,6 +242,106 @@ A verification report at `~/Documents/STSyncTool/logs/verify_<timestamp>.txt` wi
 
 ---
 
+## Offload tab
+
+**Use when:** cards come off camera or audio recorder and need to be copied to one or more destinations with verified integrity and a chain-of-custody record.
+
+### Design principles
+
+- **Source is read-only.** The source card is never written to or modified in any way — not even for filename normalisation.
+- **Checksum is mandatory.** Every file is hashed on the source before copying. After the copy, every destination file is re-hashed and compared against the source ground-truth. In-flight hash is not sufficient.
+- **Staging before commit.** Files land in `{dest}/{label}/.st_staging_{ts}/` first. Only after full verification is the staging folder renamed to its final path. On failure, staging is left in place with a failure report alongside it.
+- **Per-source eject signal.** A source is flagged safe to eject as soon as all its destinations verify — no need to wait for other sources.
+
+### Inputs
+
+- **Sources** — each source has a label (used as the destination subfolder name to prevent collisions), a path, and an enable toggle. Add as many as needed.
+- **Destinations** — same pattern. Files land at `{dest}/{source_label}/{files}`.
+
+### Options
+
+- **Filename normalisation** — detects sequential generic naming schemes (`IMG_XXXX`, `GH0XXXXX`, `DJI_XXXX`, etc.) where ≥60% of video files match the pattern, or where two sources share overlapping filenames. If detected, offers to append the first 8 characters of the file's SHA-256 hash to the stem (`IMG_1205.mov` → `IMG_1205_a3f9b2c1.mov`). The rename is deterministic — the same file always gets the same suffix. Source card is never touched; rename happens at the destination during staging.
+- **Generate contact sheet** — requires ffmpeg and Pillow (see dependencies below). Runs after the primary destination commits. See "Contact sheets" below.
+- **Continue on failure** — if a destination fails, continue with the remaining destinations for that source rather than aborting.
+
+### Execution order
+
+Sources are processed sequentially (source 1 → all destinations, then source 2, etc.). Within a source, all destinations copy in parallel. Per-file retries are 3 attempts with exponential backoff. Retryable errors (IO timeout, connection reset) are distinguished from non-retryable ones (disk full, permission denied).
+
+### Status matrix
+
+A live grid shows each source/destination pair as: pending / copying / verifying / done / failed.
+
+### Output
+
+For each offload, a chain-of-custody log is saved to `~/Documents/STSyncTool/offload_logs/`. It records source manifests, per-destination verification results, any filename renames, and contact sheet artifacts.
+
+---
+
+## Contact sheets
+
+After the primary destination commits and verifies, a contact sheet is generated for the source label. One row per clip. Saved to:
+
+- `{primary_dest}/{source_label}/_contact_sheet_{ts}.pdf`
+- `~/Documents/STSyncTool/contact_sheets/_contact_sheet_{ts}.pdf`
+
+**Thumbnail count (adaptive, 1–4 max):**
+
+| Duration | Frames |
+|----------|--------|
+| Under 5 s | 1 |
+| 5–30 s | 2 |
+| 30 s – 2 min | 3 |
+| Over 2 min | 4 |
+
+Frame positions: 15%, 38%, 62%, 85% of runtime (avoids head/tail black frames).
+
+**Metadata baked into each tile (from ffprobe):** filename, camera make/model, codec and profile, resolution, frame rate, bit depth, duration, timecode at frame, file size, date recorded.
+
+**Tile types:**
+
+- **Video** — thumbnail strip + metadata column
+- **R3D** — thumbnail strip via REDline (if installed) or rich metadata-only tile from the `.RMD` sidecar when REDline is absent. See "R3D support" below.
+- **BRAW** — metadata-only tile (thumbnail preview pending a clean CLI path); parses Blackmagic `.sidecar` XML for metadata
+- **Audio** — metadata-only card (format, sample rate, bit depth, channels, duration)
+
+If filename normalisation was applied, each tile shows the normalised destination name as primary and the original card filename as secondary.
+
+### Dependencies
+
+| Tool | Required for | Install |
+|------|-------------|---------|
+| ffmpeg + ffprobe | Video frame extraction and metadata probing | `brew install ffmpeg` |
+| Pillow | Tile compositor and PDF output | `pip install Pillow` |
+| REDline | R3D frame extraction (optional) | Install REDCINE-X PRO (free) from red.com |
+
+If ffmpeg or Pillow is absent, the contact sheet option is grayed out with an install hint in the tooltip. If REDline is absent, R3D clips still get a tile — just without thumbnail frames.
+
+---
+
+## R3D support
+
+RED camera footage has a folder-based clip structure. The `.RDC` folder is the logical clip unit — not the individual `.R3D` segment files inside it.
+
+```
+REEL001.RDM/
+  A001_C001_0101AB.RDC/       ← one clip
+    A001_C001_0101AB_001.R3D  ← segment 1
+    A001_C001_0101AB_001.RMD  ← metadata sidecar
+    A001_C001_0101AB_002.R3D  ← segment 2 (clips over ~4 GB)
+    A001_C001_0101AB_002.RMD
+```
+
+The offload and contact sheet logic treats each `.RDC` folder as a single clip. Multi-segment clips are handled transparently.
+
+**Metadata** is read from the `.RMD` sidecar XML (no SDK required): frame count, fps, resolution, ISO, white balance, aperture, focal length, timecode, camera model and serial, REDCODE compression ratio, color science version.
+
+**Frame extraction** uses REDline (ships free with REDCINE-X PRO from red.com). When REDline is absent, the contact sheet still generates a rich metadata tile with "Install REDCINE-X PRO (free) for R3D previews" in the thumbnail area.
+
+**Filename normalisation never applies to R3D.** RED naming already includes a date component and camera identifier (`A001_C001_210601_ABCD`), so it is unconditionally excluded from generic pattern detection.
+
+---
+
 ## Key concepts
 
 ### Manifests (`st_manifest.json`)
@@ -391,6 +492,9 @@ st_synctool/
     transfer.py            Local-to-local and rclone transfer orchestration
     rclone_bridge.py       Subprocess wrapper around rclone CLI
     merge_ops.py           Single-file push/pull/delete operations
+    offload.py             Camera card ingest: pre-hash, staging, verify, commit, COC log
+    thumbnail.py           Frame extraction, tile compositor, contact sheet PDF output
+    projects.py            Projects registry and destination preset persistence
     amphetamine.py         AppleScript wrapper for Amphetamine.app
   utils/
     file_utils.py          folder_size, free_space, format_bytes
@@ -400,6 +504,7 @@ st_synctool/
     transfer_tab.py        Transfer tab UI + worker
     merge_tab.py           Merge tab UI + worker
     verify_tab.py          Verify tab UI + worker
+    offload_tab.py         Offload tab UI + workers
     path_input_widget.py   Reusable path input with browse button
     log_widget.py          Reusable colored log output
     diff_table.py          Diff table with per-row dropdowns

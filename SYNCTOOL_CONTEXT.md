@@ -13,9 +13,9 @@ Use this file to orient Claude Code at the start of any session. It captures the
 | 5 | Offload Tab (items 22–40) | ✅ Complete |
 | 6 | Thumbnail Extraction + Contact Sheets (items 41–52) | ✅ Complete |
 | 7 | Filename Normalisation (items 53–61) | ✅ Complete |
-| 8 | R3D Support (items 62–68) | 🔲 Pending |
+| 8 | R3D Support (items 62–68) | ✅ Complete |
 
-**Next session start:** Phase 8, item 62 — R3D support: REDline detection + `.RDC` clip unit handling (`core/offload.py`, `core/thumbnail.py`).
+**All phases complete.**
 
 ---
 

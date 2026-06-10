@@ -23,8 +23,8 @@ from typing import Callable, Optional
 
 from core.checksum import compute_all
 from core.thumbnail import (
-    ffmpeg_available, pillow_available,
-    build_contact_sheet, classify_files,
+    ffmpeg_available, pillow_available, redline_available,
+    build_contact_sheet, classify_files, find_rdc_clips,
     VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, BRAW_EXTENSIONS,
 )
 
