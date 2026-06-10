@@ -23,7 +23,7 @@ from gui import theme
 from gui.log_widget import LogWidget
 from core.offload import (
     OffloadSource, OffloadDest, OffloadConfig, CellResult, CellState,
-    run_offload,
+    run_offload, scan_naming_patterns, detect_cross_source_duplicates,
 )
 from core.thumbnail import ffmpeg_available, pillow_available
 import core.projects as projects
@@ -386,6 +386,122 @@ class SummaryDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Filename normalisation prompt (Phase 7, item 55)
+# ---------------------------------------------------------------------------
+
+class NormalisationPromptDialog(QDialog):
+    """
+    Pre-offload dialog asking whether to normalise sequential camera filenames.
+
+    Shows the detected pattern, a concrete example transformation, and (when
+    applicable) a cross-source collision warning.  Exposes .normalize (bool)
+    and .remember (bool) after exec().
+    """
+
+    def __init__(
+        self,
+        pattern_name: str,
+        example_files: list,
+        cross_source_dupes: set,
+        forced: bool,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.normalize = False
+        self.remember  = False
+        self.setWindowTitle("Filename Normalisation")
+        self.setMinimumWidth(520)
+        self._pattern_name = pattern_name
+        self._build_ui(pattern_name, example_files, cross_source_dupes, forced)
+
+    def _build_ui(self, pattern_name, example_files, cross_source_dupes, forced):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        if forced:
+            header = QLabel("<b>Cross-source filename collision detected</b>")
+            header.setStyleSheet(f"color:{theme.ACCENT_CORAL};font-size:14px;")
+        else:
+            header = QLabel(f"<b>Sequential camera naming detected: {pattern_name}</b>")
+            header.setStyleSheet(f"color:{theme.ACCENT_GOLD};font-size:14px;")
+        header.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(header)
+
+        if forced:
+            body = (
+                "Files from different sources share identical names. Normalisation appends "
+                "a unique 8-character hash suffix derived from each file's content, making "
+                "every filename unambiguous in your NLE."
+            )
+        else:
+            body = (
+                f"Generic sequential filenames such as <code>{pattern_name.replace('X', '1')}"
+                f"</code> can cause false relinking in Premiere and DaVinci Resolve when "
+                f"footage from different shoots is combined. Normalisation appends a unique "
+                f"8-character content hash to each filename."
+            )
+        desc = QLabel(body)
+        desc.setTextFormat(Qt.TextFormat.RichText)
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        if cross_source_dupes:
+            sample = sorted(cross_source_dupes)[:5]
+            extra  = " …" if len(cross_source_dupes) > 5 else ""
+            dupe_lbl = QLabel(
+                "Shared filenames: <code>" + ", ".join(sample) + extra + "</code>"
+            )
+            dupe_lbl.setTextFormat(Qt.TextFormat.RichText)
+            dupe_lbl.setStyleSheet(f"color:{theme.ACCENT_CORAL};font-size:11px;")
+            dupe_lbl.setWordWrap(True)
+            layout.addWidget(dupe_lbl)
+
+        if example_files:
+            orig = example_files[0]
+            p    = Path(orig)
+            ex_lbl = QLabel(
+                f"Example: <code>{orig}</code> "
+                f"&nbsp;→&nbsp; <code>{p.stem}_????????{p.suffix}</code>"
+            )
+            ex_lbl.setTextFormat(Qt.TextFormat.RichText)
+            ex_lbl.setStyleSheet(f"color:{theme.MUTED_TEXT};font-size:12px;")
+            layout.addWidget(ex_lbl)
+
+        note = QLabel(
+            "The rename is applied at the destination only — your source card is never modified."
+        )
+        note.setStyleSheet(f"color:{theme.MUTED_TEXT};font-size:11px;font-style:italic;")
+        layout.addWidget(note)
+
+        layout.addSpacing(4)
+
+        self._remember_check = QCheckBox(
+            f"Remember this choice for {pattern_name} files"
+        )
+        layout.addWidget(self._remember_check)
+
+        buttons = QDialogButtonBox()
+        norm_btn = buttons.addButton(
+            "Normalize (Recommended)", QDialogButtonBox.ButtonRole.AcceptRole
+        )
+        skip_label = "Skip (not recommended)" if forced else "Skip"
+        skip_btn = buttons.addButton(skip_label, QDialogButtonBox.ButtonRole.RejectRole)
+        norm_btn.clicked.connect(self._on_normalize)
+        skip_btn.clicked.connect(self._on_skip)
+        layout.addWidget(buttons)
+
+    def _on_normalize(self):
+        self.normalize = True
+        self.remember  = self._remember_check.isChecked()
+        self.accept()
+
+    def _on_skip(self):
+        self.normalize = False
+        self.remember  = self._remember_check.isChecked()
+        self.reject()
+
+
+# ---------------------------------------------------------------------------
 # Main tab
 # ---------------------------------------------------------------------------
 
@@ -684,11 +800,14 @@ class OffloadTab(QWidget):
         dst_labels = [d.label for d in active_dst]
         self._matrix.configure(src_labels, dst_labels)
 
+        normalize = self._check_normalisation(active_src)
+
         config = OffloadConfig(
             max_retries=self._retries_spin.value(),
             stop_on_first_failure=self._stop_on_fail.isChecked(),
             generate_thumbnails=self._thumb_check.isChecked() and self._thumb_check.isEnabled(),
             thumbnail_max_frames=self._max_frames_spin.value(),
+            normalize_filenames=normalize,
         )
 
         self._worker = OffloadWorker(sources, dests, config)
@@ -710,6 +829,70 @@ class OffloadTab(QWidget):
         self._log.clear()
         self._log.log("Starting offload…", "info")
         self._thread.start()
+
+    def _check_normalisation(self, active_sources: list) -> bool:
+        """
+        Item 55. Scan source directories for sequential naming patterns and
+        cross-source duplicates, then prompt the user if action is warranted.
+
+        Returns True if normalisation should be applied for this offload run.
+        """
+        # Build lightweight filename-only manifests (hashes not yet known)
+        lightweight: dict = {}
+        for src in active_sources:
+            if not Path(src.path).is_dir():
+                continue
+            lightweight[src.label] = {
+                str(f.relative_to(src.path)): {"size": 0, "checksum": "", "algorithm": "sha256"}
+                for f in Path(src.path).rglob("*") if f.is_file()
+            }
+
+        if not lightweight:
+            return False
+
+        # Cross-source duplicate check (item 54 trigger — unconditional prompt)
+        dupes  = detect_cross_source_duplicates(lightweight)
+        forced = bool(dupes)
+
+        # Per-source sequential pattern detection (item 53)
+        best_scan: dict = {}
+        for mfst in lightweight.values():
+            scan = scan_naming_patterns(mfst)
+            if scan["detected"] or (forced and scan.get("pattern_name")):
+                if scan.get("match_ratio", 0) > best_scan.get("match_ratio", 0):
+                    best_scan = scan
+
+        if not best_scan and not forced:
+            return False
+
+        pattern_name  = best_scan.get("pattern_name", "sequential")
+        example_files = best_scan.get("example_files", [])
+
+        # Check stored preference (item 56) — skip preference check when forced
+        if not forced:
+            stored = projects.get_naming_preference(pattern_name)
+            if stored == "normalize":
+                return True
+            if stored == "skip":
+                return False
+            # stored == "ask" or None → fall through to dialog
+
+        dlg = NormalisationPromptDialog(
+            pattern_name=pattern_name,
+            example_files=example_files,
+            cross_source_dupes=dupes,
+            forced=forced,
+            parent=self,
+        )
+        dlg.exec()
+
+        if dlg.remember and pattern_name != "sequential":
+            projects.save_naming_preference(
+                pattern_name,
+                "normalize" if dlg.normalize else "skip",
+            )
+
+        return dlg.normalize
 
     def _cancel_offload(self):
         if self._worker:

@@ -12,8 +12,10 @@ Design principles (Phase 5, SYNCTOOL_CONTEXT.md):
 """
 
 import enum
+import re
 import shutil
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +32,34 @@ OFFLOAD_LOGS_DIR = Path.home() / "Documents" / "STSyncTool" / "offload_logs"
 MAX_RETRIES_DEFAULT = 3
 
 _RETRYABLE = (OSError, IOError, ConnectionResetError, TimeoutError)
+
+
+# ---------------------------------------------------------------------------
+# Filename normalisation constants (Phase 7, items 53-59)
+# ---------------------------------------------------------------------------
+
+# Known camera sequential naming patterns: (compiled regex for stem, display name)
+_KNOWN_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'^IMG_\d{4,5}$',   re.IGNORECASE), 'IMG_XXXX'),
+    (re.compile(r'^MVI_\d{4,5}$',   re.IGNORECASE), 'MVI_XXXX'),
+    (re.compile(r'^GH0\d{5}$',      re.IGNORECASE), 'GH0XXXXX'),
+    (re.compile(r'^DJI_\d{4}$',     re.IGNORECASE), 'DJI_XXXX'),
+    (re.compile(r'^CM[12]_\d{4}$',  re.IGNORECASE), 'CM1/2_XXXX'),
+    (re.compile(r'^CLIP_\d{4,5}$',  re.IGNORECASE), 'CLIP_XXXX'),
+    (re.compile(r'^VIDEO_\d{4,5}$', re.IGNORECASE), 'VIDEO_XXXX'),
+]
+# Generic fallback: 1–4 uppercase letters + underscore + 4–5 digits, no date component
+_GENERIC_SEQUENTIAL = re.compile(r'^[A-Z]{1,4}_\d{4,5}$', re.IGNORECASE)
+
+# R3D stems already contain date and camera identifier — never rename these
+_R3D_STEM = re.compile(r'^[A-Z]\d{3}_[A-Z]\d{3}_\d{6}', re.IGNORECASE)
+
+# Sidecar extensions that travel with a video clip (item 59)
+SIDECAR_EXTENSIONS: frozenset[str] = frozenset({
+    '.srt', '.thm', '.xml', '.lut', '.xmp', '.edl',
+})
+
+SEQUENTIAL_DETECTION_THRESHOLD = 0.60
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +102,7 @@ class OffloadConfig:
     stop_on_first_failure: bool = False
     generate_thumbnails: bool = False
     thumbnail_max_frames: int = 4
+    normalize_filenames: bool = False
 
 
 @dataclass
@@ -91,6 +122,194 @@ class CellResult:
 StatusCallback   = Callable[[str, Optional[str], "CellState"], None]
 LogCallback      = Callable[[str, str], None]
 ProgressCallback = Callable[[str, str, int, int], None]
+
+
+# ---------------------------------------------------------------------------
+# Normalisation helpers (Phase 7)
+# ---------------------------------------------------------------------------
+
+def _is_r3d_stem(stem: str) -> bool:
+    return bool(_R3D_STEM.match(stem))
+
+
+def _sequential_pattern_name(stem: str) -> Optional[str]:
+    """Return display name of the matched sequential scheme, or None."""
+    if _is_r3d_stem(stem):
+        return None
+    for pattern, name in _KNOWN_PATTERNS:
+        if pattern.match(stem):
+            return name
+    if _GENERIC_SEQUENTIAL.match(stem):
+        return 'XXXX_NNNN'
+    return None
+
+
+def scan_naming_patterns(source_manifest: dict) -> dict:
+    """
+    Item 53. Analyse video file stems in source_manifest for generic sequential naming.
+
+    Returns:
+      {
+        "detected": bool,
+        "pattern_name": str,       # most common matched pattern
+        "match_ratio": float,
+        "example_files": list[str] # up to 3 original filenames (before normalisation)
+      }
+    """
+    from core.thumbnail import VIDEO_EXTENSIONS
+    video_entries: list[tuple[str, str]] = []   # (rel, stem)
+    for rel in source_manifest:
+        if rel == "generated_artifacts":
+            continue
+        p = Path(rel)
+        if p.suffix.lower() in VIDEO_EXTENSIONS and not _is_r3d_stem(p.stem):
+            video_entries.append((rel, p.stem))
+
+    if not video_entries:
+        return {"detected": False, "pattern_name": "", "match_ratio": 0.0, "example_files": []}
+
+    pattern_hits: dict[str, list[str]] = {}
+    for rel, stem in video_entries:
+        pname = _sequential_pattern_name(stem)
+        if pname:
+            pattern_hits.setdefault(pname, []).append(rel)
+
+    if not pattern_hits:
+        return {"detected": False, "pattern_name": "", "match_ratio": 0.0, "example_files": []}
+
+    best = max(pattern_hits, key=lambda k: len(pattern_hits[k]))
+    hits = pattern_hits[best]
+    ratio = len(hits) / len(video_entries)
+    return {
+        "detected":      ratio >= SEQUENTIAL_DETECTION_THRESHOLD,
+        "pattern_name":  best,
+        "match_ratio":   ratio,
+        "example_files": [Path(h).name for h in hits[:3]],
+    }
+
+
+def detect_cross_source_duplicates(source_manifests: dict) -> set:
+    """
+    Item 54. Return basenames that appear in more than one source.
+    An empty source_manifests or a single source always returns an empty set.
+    """
+    counts: Counter = Counter()
+    for mfst in source_manifests.values():
+        seen: set[str] = set()
+        for rel in mfst:
+            if rel == "generated_artifacts":
+                continue
+            name = Path(rel).name
+            if name not in seen:
+                counts[name] += 1
+                seen.add(name)
+    return {name for name, cnt in counts.items() if cnt > 1}
+
+
+def build_normalization_plan(source_manifest: dict) -> dict:
+    """
+    Items 57, 59. Build {original_rel: normalized_rel} using sha256 already in source_manifest.
+
+    Video files whose stem matches a sequential pattern get _{sha256[:8]} appended before
+    the extension.  Sidecar files (.srt, .thm, .xml, .lut, .xmp, .edl) with the same stem
+    carry the same hash suffix (co-rename).  Files that do not match are omitted (identity).
+    R3D files are never included.
+    """
+    from core.thumbnail import VIDEO_EXTENSIONS
+
+    # First pass: stem → hash suffix for video files that will be renamed
+    stem_to_suffix: dict[str, str] = {}
+    for rel, info in source_manifest.items():
+        if rel == "generated_artifacts":
+            continue
+        p = Path(rel)
+        if p.suffix.lower() in VIDEO_EXTENSIONS and _sequential_pattern_name(p.stem):
+            stem_to_suffix[p.stem] = info["checksum"][:8]
+
+    plan: dict[str, str] = {}
+    for rel in source_manifest:
+        if rel == "generated_artifacts":
+            continue
+        p = Path(rel)
+        ext_lower = p.suffix.lower()
+
+        if ext_lower in VIDEO_EXTENSIONS and _sequential_pattern_name(p.stem):
+            suffix   = source_manifest[rel]["checksum"][:8]
+            new_name = f"{p.stem}_{suffix}{p.suffix}"
+            plan[rel] = str(p.parent / new_name)
+        elif ext_lower in SIDECAR_EXTENSIONS:
+            # Case-insensitive stem lookup
+            suffix = stem_to_suffix.get(p.stem) or stem_to_suffix.get(p.stem.upper()) or \
+                     stem_to_suffix.get(p.stem.lower())
+            if suffix:
+                new_name = f"{p.stem}_{suffix}{p.suffix}"
+                plan[rel] = str(p.parent / new_name)
+
+    return plan
+
+
+def apply_normalization_in_staging(
+    staging_dir: Path,
+    norm_plan: dict,
+    log_cb: LogCallback,
+) -> None:
+    """
+    Item 58. Rename files inside staging_dir according to norm_plan.
+    The source card is never touched.
+    """
+    if not norm_plan:
+        return
+    for original_rel, normalized_rel in norm_plan.items():
+        src = staging_dir / original_rel
+        dst = staging_dir / normalized_rel
+        if not src.exists():
+            log_cb(f"[Normalise] Not found in staging: {original_rel}", "warning")
+            continue
+        if src == dst:
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dst)
+        log_cb(f"[Normalise] {Path(original_rel).name} → {Path(normalized_rel).name}", "info")
+
+
+def build_normalized_manifest(source_manifest: dict, norm_plan: dict) -> tuple:
+    """
+    Item 60 (data layer). Return (normalized_manifest, normalization_block).
+
+    normalized_manifest keys are normalized paths; renamed entries carry
+    'original_filename', 'filename_hash_suffix', and 'hash_method' fields.
+    normalization_block is the top-level 'filename_normalization' dict.
+    """
+    if not norm_plan:
+        return dict(source_manifest), {"applied": False}
+
+    norm_manifest: dict = {}
+    renames_list: list[dict] = []
+
+    for rel, info in source_manifest.items():
+        if rel == "generated_artifacts":
+            norm_manifest[rel] = info
+            continue
+        normalized = norm_plan.get(rel, rel)
+        entry = dict(info)
+        if normalized != rel:
+            entry["original_filename"]    = Path(rel).name
+            entry["filename_hash_suffix"] = info.get("checksum", "")[:8]
+            entry["hash_method"]          = "sha256_prefix8"
+            renames_list.append({
+                "original":   Path(rel).name,
+                "normalized": Path(normalized).name,
+            })
+        norm_manifest[normalized] = entry
+
+    pattern_scan = scan_naming_patterns(source_manifest)
+    norm_block = {
+        "applied":          True,
+        "method":           "sha256_prefix8",
+        "detected_pattern": pattern_scan.get("pattern_name", ""),
+        "renames":          renames_list,
+    }
+    return norm_manifest, norm_block
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +632,21 @@ def run_offload(
                 status_cb(src.label, dst.label, CellState.FAILED)
             continue
 
+        # ── Filename normalisation (Phase 7, items 57-59) ────────────────
+        norm_plan: dict = {}
+        norm_block: dict = {"applied": False}
+        if config.normalize_filenames:
+            norm_plan = build_normalization_plan(mfst)
+            if norm_plan:
+                _, norm_block = build_normalized_manifest(mfst, norm_plan)
+                log_cb(
+                    f"[Offload] Normalising {len(norm_plan)} filename(s) for {src.label}",
+                    "info",
+                )
+
+        # Verified manifest uses normalised keys; original mfst used for copying
+        norm_mfst = build_normalized_manifest(mfst, norm_plan)[0] if norm_plan else mfst
+
         # ── Copy → Verify → Commit for each destination ──────────────────
         for dst in active_dests:
             if cancelled_cb and cancelled_cb():
@@ -429,8 +663,11 @@ def run_offload(
                 )
                 r.staging_path = staging
 
+                # Rename files in staging to normalised names (source never touched)
+                apply_normalization_in_staging(staging, norm_plan, log_cb)
+
                 errors = verify_staging(
-                    staging, mfst, log_cb, status_cb, src.label, dst.label,
+                    staging, norm_mfst, log_cb, status_cb, src.label, dst.label,
                 )
                 if errors:
                     r.state  = CellState.FAILED
@@ -448,10 +685,19 @@ def run_offload(
                 else:
                     final = commit_staging(staging, dst, src, log_cb, status_cb)
                     r.final_path   = final
-                    r.files_copied = len(mfst)
-                    r.bytes_copied = sum(v["size"] for v in mfst.values())
-                    r.state        = CellState.DONE
+                    r.files_copied = len(norm_mfst)
+                    r.bytes_copied = sum(
+                        v["size"] for v in norm_mfst.values()
+                        if isinstance(v, dict) and "size" in v
+                    )
+                    r.state = CellState.DONE
                     status_cb(src.label, dst.label, CellState.DONE)
+
+                    # Persist normalised manifest for chain-of-custody log
+                    if norm_plan:
+                        nm = dict(norm_mfst)
+                        nm["filename_normalization"] = norm_block
+                        source_manifests[src.label] = nm
 
                     # ── Thumbnail generation (primary dest only) ──────────
                     if (
@@ -463,6 +709,12 @@ def run_offload(
                         try:
                             status_cb(src.label, dst.label, CellState.THUMBNAILS)
                             from datetime import date as _date
+                            # Build orig-name lookup from normalised manifest
+                            fn_originals = {
+                                rel: info["original_filename"]
+                                for rel, info in norm_mfst.items()
+                                if isinstance(info, dict) and "original_filename" in info
+                            } if norm_plan else None
                             thumb_result = build_contact_sheet(
                                 source_label=src.label,
                                 offload_date=_date.today().isoformat(),
@@ -470,17 +722,18 @@ def run_offload(
                                 ts=ts,
                                 max_frames=config.thumbnail_max_frames,
                                 log_cb=log_cb,
+                                filename_originals=fn_originals,
                             )
                             r.thumbnail_result = thumb_result
-                            # Merge per-file thumbnail info into source manifest
+                            # Merge per-file thumbnail info into normalised manifest
                             for rel, ti in thumb_result.get("per_file", {}).items():
-                                if rel in mfst:
-                                    mfst[rel]["thumbnails"] = ti
-                            # Add generated_artifacts to source manifest
-                            mfst.setdefault("generated_artifacts", {})[
+                                if rel in norm_mfst:
+                                    norm_mfst[rel]["thumbnails"] = ti
+                            # Add generated_artifacts to normalised manifest
+                            norm_mfst.setdefault("generated_artifacts", {})[
                                 thumb_result["artifact_key"]
                             ] = thumb_result["artifact_info"]
-                            source_manifests[src.label] = mfst
+                            source_manifests[src.label] = norm_mfst
                             status_cb(src.label, dst.label, CellState.DONE)
                         except Exception as exc:
                             log_cb(

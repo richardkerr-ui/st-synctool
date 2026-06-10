@@ -15,6 +15,7 @@ _TOP_LEVEL_DEFAULTS = {
     "checksum_context": {},
     "server_path": "",
     "operation": "",
+    "filename_normalization": {"applied": False},
 }
 _FILE_ENTRY_DEFAULTS = {
     "gdrive_url": "",

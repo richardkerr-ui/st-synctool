@@ -1,9 +1,10 @@
 """
-Thumbnail extraction and contact sheet generation (Phase 6).
+Thumbnail extraction and contact sheet generation (Phases 6 and 8).
 
 Dependencies:
   - ffmpeg + ffprobe: frame extraction and metadata probing
   - Pillow (PIL): tile compositor and PDF/JPEG output
+  - REDline (REDCINE-X PRO, free): R3D frame extraction (optional)
 
 All entry points degrade gracefully: missing dependencies produce metadata-only
 tiles or raise ImportError with an install hint that the GUI surfaces as a tooltip.
@@ -19,6 +20,9 @@ from pathlib import Path
 from typing import Callable, Optional
 
 CONTACT_SHEETS_DIR = Path.home() / "Documents" / "STSyncTool" / "contact_sheets"
+
+# REDline ships inside REDCINE-X PRO (free download from red.com)
+_REDLINE_BUNDLE_PATH = Path("/Applications/REDCINE-X PRO.app/Contents/MacOS/REDline")
 
 # ---------------------------------------------------------------------------
 # Dependency detection
@@ -39,6 +43,23 @@ def pillow_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+def check_redline() -> Optional[Path]:
+    """
+    Return the Path to the REDline executable, or None if not found.
+
+    Checks the REDCINE-X PRO app bundle first, then PATH.
+    Item 62: surface None to callers so they can show an install prompt.
+    """
+    if _REDLINE_BUNDLE_PATH.exists():
+        return _REDLINE_BUNDLE_PATH
+    found = shutil.which("REDline")
+    return Path(found) if found else None
+
+
+def redline_available() -> bool:
+    return check_redline() is not None
 
 # ---------------------------------------------------------------------------
 # File classification (item 42)
@@ -356,6 +377,7 @@ def make_video_tile(
     probe_info: dict,
     width: int = TILE_WIDTH,
     height: int = TILE_HEIGHT,
+    original_filename: Optional[str] = None,
 ) -> "Image":
     """One row tile for a video clip: thumbnail strip left, metadata right."""
     from PIL import Image, ImageDraw
@@ -397,6 +419,9 @@ def make_video_tile(
 
     draw.text((mx, y), clip_path.name, font=font_bold, fill=_GOLD)
     y += 22
+    if original_filename and original_filename != clip_path.name:
+        draw.text((mx, y), f"orig: {original_filename}", font=font_sm, fill=_MUTED)
+        y += 16
 
     camera = " ".join(filter(None, [probe_info.get("camera_make"), probe_info.get("camera_model")])) or ""
     codec  = probe_info.get("codec") or "?"
@@ -433,6 +458,7 @@ def make_audio_tile(
     probe_info: dict,
     width: int = TILE_WIDTH,
     height: int = TILE_HEIGHT,
+    original_filename: Optional[str] = None,
 ) -> "Image":
     """Metadata-only tile for audio files (item 48)."""
     from PIL import Image, ImageDraw
@@ -447,21 +473,27 @@ def make_audio_tile(
 
     mx = icon_x2 + META_X_OFFSET
     draw.text((mx, 10), audio_path.name, font=font_bold, fill=_GOLD)
+    y_audio = 28
+    if original_filename and original_filename != audio_path.name:
+        draw.text((mx, y_audio), f"orig: {original_filename}", font=font_sm, fill=_MUTED)
+        y_audio += 16
 
     fmt   = probe_info.get("format_name") or probe_info.get("audio_codec") or "?"
     sr    = probe_info.get("sample_rate") or "?"
     ch    = probe_info.get("channels") or "?"
     depth = probe_info.get("bit_depth") or ""
     depth_str = f"  {depth}-bit" if depth else ""
-    draw.text((mx, 32), f"{fmt}  {sr} Hz  {ch} ch{depth_str}", font=font_sm, fill=_CREAM)
+    draw.text((mx, y_audio), f"{fmt}  {sr} Hz  {ch} ch{depth_str}", font=font_sm, fill=_CREAM)
+    y_audio += 20
 
     dur = _format_duration(probe_info.get("duration"))
     sz  = _format_size(audio_path)
-    draw.text((mx, 52), f"{dur}  {sz}", font=font_sm, fill=_MUTED)
+    draw.text((mx, y_audio), f"{dur}  {sz}", font=font_sm, fill=_MUTED)
+    y_audio += 20
 
     date = probe_info.get("date_recorded") or ""
     if date:
-        draw.text((mx, 72), date, font=font_sm, fill=_MUTED)
+        draw.text((mx, y_audio), date, font=font_sm, fill=_MUTED)
 
     draw.line([(0, height - 1), (width, height - 1)], fill=_DIVIDER, width=1)
     return img
@@ -542,7 +574,13 @@ def build_contact_sheet(
     max_frames: int = 4,
     log_cb: Optional[Callable[[str, str], None]] = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    filename_originals: Optional[dict] = None,
 ) -> dict:
+    """
+    filename_originals — optional mapping of {relative_path: original_filename} built
+    from the offload manifest's per-file 'original_filename' fields (Phase 7, item 61).
+    When present, tiles show the normalised name as primary and the card name as secondary.
+    """
     """
     Generate a contact sheet for one source from its committed destination directory.
 
@@ -611,6 +649,8 @@ def build_contact_sheet(
 
         tile_info: dict = {"generated": False, "frames": [], "contact_sheet": sheet_name}
 
+        orig_name = (filename_originals or {}).get(rel)
+
         try:
             ext = clip.suffix.lower()
             if ext in BRAW_EXTENSIONS:
@@ -622,7 +662,7 @@ def build_contact_sheet(
                 probe = probe_clip(clip) if ffmpeg_available() else {}
                 if probe.get("duration"):
                     total_duration += probe["duration"]
-                tiles.append(make_audio_tile(clip, probe))
+                tiles.append(make_audio_tile(clip, probe, original_filename=orig_name))
                 tile_info["generated"] = True
 
             else:
@@ -633,7 +673,7 @@ def build_contact_sheet(
                     total_duration += dur
                 n      = adaptive_frame_count(dur, max_frames)
                 frames = extract_frames(clip, thumbnails_dir, dur or 0, n, log_cb) if (ffmpeg_available() and dur) else []
-                tiles.append(make_video_tile(clip, frames, probe))
+                tiles.append(make_video_tile(clip, frames, probe, original_filename=orig_name))
                 tile_info["generated"] = True
                 tile_info["frames"]    = [str(f.relative_to(dest_dir)) for f in frames]
 

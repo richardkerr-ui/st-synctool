@@ -125,3 +125,21 @@ def delete_dest_preset(name: str) -> None:
     presets = _load_presets()
     presets.pop(name, None)
     _save_presets(presets)
+
+
+# ---------------------------------------------------------------------------
+# Filename normalisation preference memory (Phase 7, item 56)
+# Stored in projects.json under top-level key "naming_preferences".
+# Values: "normalize" | "skip" | "ask"
+# ---------------------------------------------------------------------------
+
+def get_naming_preference(pattern: str) -> Optional[str]:
+    """Return stored preference for a camera naming pattern, or None if not set."""
+    return _load().get("naming_preferences", {}).get(pattern)
+
+
+def save_naming_preference(pattern: str, choice: str) -> None:
+    """Persist user's normalisation choice for a naming pattern."""
+    data = _load()
+    data.setdefault("naming_preferences", {})[pattern] = choice
+    _save(data)
