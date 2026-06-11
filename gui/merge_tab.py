@@ -309,7 +309,7 @@ class ApplyWorker(QObject):
                     if isinstance(op_result, dict):
                         # MANIFEST-FIX (item 08): keep verified post-copy hashes so the
                         # post-merge manifest records the verification that just happened.
-                        dest_rel = op_result.get("renamed_to", rel_path)
+                        dest_rel = op_result.get("renamed_to") or rel_path
                         post = op_result.get("post")
                         if post:
                             verified_entries[dest_rel] = {
