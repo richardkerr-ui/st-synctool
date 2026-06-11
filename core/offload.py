@@ -27,6 +27,7 @@ from core.thumbnail import (
     build_contact_sheet, classify_files, find_rdc_clips,
     VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, BRAW_EXTENSIONS,
 )
+import core.media_verify as _media_verify
 
 OFFLOAD_LOGS_DIR = Path.home() / "Documents" / "STSyncTool" / "offload_logs"
 MAX_RETRIES_DEFAULT = 3
@@ -153,6 +154,10 @@ class CellResult:
     # per_file_verify maps relative path -> True (PASS) / False (FAIL) for the COC log.
     verified: Optional[bool] = None
     per_file_verify: dict = field(default_factory=dict)
+    # Format-specific media verification log lines written to the COC log.
+    # Each entry is a string like "MEDIA VERIFY OK: ..." or "MEDIA VERIFY ADVISORY: ..."
+    # or "MEDIA VERIFY FAILED: ...".
+    media_verify_log: list = field(default_factory=list)
 
 
 # Callback type aliases (not enforced at runtime, just for clarity)
@@ -728,6 +733,10 @@ def write_chain_of_custody_log(
             for rel in sorted(r.per_file_verify):
                 status = "PASS" if r.per_file_verify[rel] else "FAIL"
                 lines.append(f"      VERIFY: {status}  {rel}")
+        if getattr(r, "media_verify_log", None):
+            lines.append("    Media format verification:")
+            for entry in r.media_verify_log:
+                lines.append(f"      {entry}")
         if r.thumbnail_result:
             lines.append(f"    Contact sheet: {r.thumbnail_result.get('contact_sheet_path', '')}")
         if r.errors:
@@ -892,6 +901,39 @@ def run_offload(
                     )
                     r.state = CellState.DONE
                     status_cb(src.label, dst.label, CellState.DONE)
+
+                    # ── Format-specific media verification (additive) ─────
+                    _seq_dirs_seen: set = set()
+                    for rel, info in norm_mfst.items():
+                        if not (isinstance(info, dict) and "size" in info):
+                            continue
+                        src_file = src.path / rel
+                        dst_file = final / rel
+                        try:
+                            mv_result = _media_verify.verify_file(
+                                src_file, dst_file, _seq_dirs_seen
+                            )
+                        except Exception as mv_exc:
+                            log_cb(
+                                f"[MediaVerify] Unexpected error for {rel}: {mv_exc}",
+                                "warning",
+                            )
+                            continue
+                        if mv_result is None:
+                            continue
+                        if not mv_result.ok and not mv_result.advisory:
+                            label = f"MEDIA VERIFY FAILED: {rel} — {mv_result.detail}"
+                            r.media_verify_log.append(label)
+                            r.errors.append(label)
+                            r.state = CellState.FAILED
+                            log_cb(f"[MediaVerify] FAILED: {rel} — {mv_result.detail}", "error")
+                        elif mv_result.advisory:
+                            label = f"MEDIA VERIFY ADVISORY: {rel} — {mv_result.detail}"
+                            r.media_verify_log.append(label)
+                            log_cb(f"[MediaVerify] {label}", "warning")
+                        else:
+                            label = f"MEDIA VERIFY OK: {rel} — {mv_result.detail}"
+                            r.media_verify_log.append(label)
 
                     # Persist normalised manifest for chain-of-custody log
                     if norm_plan:
