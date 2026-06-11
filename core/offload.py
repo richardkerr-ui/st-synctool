@@ -926,6 +926,7 @@ def run_offload(
                             r.media_verify_log.append(label)
                             r.errors.append(label)
                             r.state = CellState.FAILED
+                            status_cb(src.label, dst.label, CellState.FAILED)
                             log_cb(f"[MediaVerify] FAILED: {rel} — {mv_result.detail}", "error")
                         elif mv_result.advisory:
                             label = f"MEDIA VERIFY ADVISORY: {rel} — {mv_result.detail}"
