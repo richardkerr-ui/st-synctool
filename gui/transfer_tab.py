@@ -67,6 +67,7 @@ class TransferTab(QWidget):
         super().__init__(parent)
         self._thread = None
         self._worker = None
+        self._cancelled = False
         self._build_ui()
 
     def _build_ui(self):
@@ -336,6 +337,7 @@ class TransferTab(QWidget):
             pass
 
     def _start_transfer(self):
+        self._cancelled = False
         src = self.src_input.text()
         dst = self.dst_input.text()
         if not src or not dst:
@@ -450,7 +452,11 @@ class TransferTab(QWidget):
 
     def _cancel_transfer(self):
         if self._thread and self._thread.isRunning():
-            # Kill the rclone subprocess if one is running
+            # Set flag BEFORE killing the subprocess. Killing it causes the
+            # worker to emit error() via a queued cross-thread signal. _on_error
+            # checks this flag so it won't show a "Transfer Failed" dialog or
+            # double-call end_session() / _reset_controls().
+            self._cancelled = True
             killed = rclone_bridge.cancel_current()
             if killed:
                 self.log.log("rclone subprocess terminated.", "warning")
@@ -459,6 +465,7 @@ class TransferTab(QWidget):
             end_session()
             self.log.log("Transfer cancelled by user.", "warning")
             self._reset_controls()
+            self._cancelled = False
 
     def _on_progress(self, pct, info):
         if isinstance(info, dict):
@@ -481,6 +488,8 @@ class TransferTab(QWidget):
             self.log.set_progress(pct, current_file=str(info) if info else "")
 
     def _on_finished(self, result):
+        if self._cancelled:
+            return  # _cancel_transfer already handled cleanup
         end_session()
         self.log.set_progress(100, current_file="Complete")
         self._reset_controls()
@@ -494,6 +503,8 @@ class TransferTab(QWidget):
         self._write_txt_log(result)
 
     def _on_error(self, msg):
+        if self._cancelled:
+            return  # _cancel_transfer already handled cleanup; skip spurious error dialog
         end_session()
         self._reset_controls()
         self.log.log(f"FATAL: {msg}", "error")

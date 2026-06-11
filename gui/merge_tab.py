@@ -1017,10 +1017,7 @@ class MergeTab(QWidget):
         self._apply_worker.log.connect(self.log.log)
         self._apply_worker.finished.connect(self._on_apply_done)
         self._apply_worker.rescan_conflict.connect(self._on_rescan_conflict)
-        self._apply_worker.error.connect(lambda e: (
-            self.log.log(f"Apply error: {e}", "error"),
-            QMessageBox.critical(self, "Apply Error", e),
-        ))
+        self._apply_worker.error.connect(self._on_apply_error)
         self._apply_worker.finished.connect(self._apply_thread.quit)
         self._apply_worker.rescan_conflict.connect(self._apply_thread.quit)
         self._apply_worker.error.connect(self._apply_thread.quit)
@@ -1053,6 +1050,16 @@ class MergeTab(QWidget):
         else:
             QMessageBox.warning(self, "Apply Finished with Errors",
                                 f"{s} succeeded, {f} failed. See log for details.")
+
+    def _on_apply_error(self, msg: str):
+        end_session()
+        self.scan_btn.setEnabled(True)
+        self.apply_btn.setEnabled(False)
+        self._apply_opacity.setOpacity(0.4)
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Apply failed — scan again to retry")
+        self.log.log(f"Apply error: {msg}", "error")
+        QMessageBox.critical(self, "Apply Error", msg)
 
     # ── Conflict detail panel ─────────────────────────────────────────────────
 
