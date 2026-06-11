@@ -17,3 +17,5 @@ oauth.json
 .env
 st_synctool/
 st_synctool_dependency_graph.html
+.claude/
+.code-review-graph/
