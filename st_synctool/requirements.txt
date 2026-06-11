@@ -1,5 +1,0 @@
-PyQt6>=6.6.0
-xxhash>=3.4.1
-humanize>=4.9.0
-pyperclip>=1.8.2
-requests>=2.31.0
