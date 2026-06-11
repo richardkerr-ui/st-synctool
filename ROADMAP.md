@@ -15,6 +15,19 @@
   MISSING/MISMATCH).
 - `.app` bundle confirmed working after refactor (`build_st_synctool.sh`).
 
+## Install UX
+
+`install.sh` (curl one-liner) was built to address friction observed on a real first-time install on a fresh Mac. All identified issues are resolved:
+
+- Homebrew not in PATH mid-script — `setup.sh` and `install.sh` eval shellenv immediately after install
+- Re-clone fails on existing directory — `install.sh` detects existing checkout and does `git pull` instead
+- rclone OAuth empty/failed token — `install.sh` validates with `rclone lsd gdrive:` post-config and surfaces a clear reconnect prompt; in-app setup wizard re-checks on every launch
+- No single install command — `install.sh` handles Xcode CLT, Homebrew, Python, rclone, clone/update, venv, and auth in one shot
+
+Remaining gap: no automated test of `install.sh` itself. Validate manually on a fresh VM before any major version release.
+
+---
+
 ## v2 work in progress
 
 - Phase 2: Live file-level progress + ETA. Actively next.

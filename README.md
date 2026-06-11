@@ -560,13 +560,20 @@ st_synctool/
 
 ### Testing
 
-There are no unit tests. The build process is test-by-running. Standard sandboxes used during development:
+Run the full test suite:
+
+```bash
+source .venv/bin/activate
+pytest
+```
+
+The suite covers core logic (manifest, comparison, transfer, merge_ops), rclone bridge, apply worker, and GUI smoke tests via pytest-qt. Integration tests use `/tmp/` fixtures — no Drive connection needed.
+
+Manual end-to-end sandboxes used during development:
 
 - Local↔Local Transfer: `/tmp/sync_test_src` → `/tmp/test/`
 - Local↔Local Merge: `/tmp/sync_test/merge_local` + `/tmp/sync_test_server/merge_local`
 - Drive transfers: a junk folder created in the browser, deleted after
-
-When adding new features, follow that pattern and document the test setup in a comment near the code.
 
 ### Extending to Drive ↔ Drive transfers
 
@@ -585,3 +592,38 @@ The current rclone config assumes a personal Drive. For shared drives:
 3. Set the `ST_SYNC_RCLONE_REMOTE` env var to your new remote name, or rename it `gdrive` to use defaults
 
 No code changes needed.
+
+### Key paths
+
+| Name | Path |
+|------|------|
+| `MANIFEST_FILENAME` | `st_manifest.json` — written to local + server root |
+| `LOCAL_MANIFEST_DIR` | `~/Documents/STSyncTool/manifests/` |
+| `APP_CONFIG` | `~/.config/st_synctool/config.json` |
+| `PROJECTS_REGISTRY` | `~/Documents/STSyncTool/projects.json` |
+| `CONTACT_SHEETS_DIR` | `~/Documents/STSyncTool/contact_sheets/` |
+| `OFFLOAD_LOGS_DIR` | `~/Documents/STSyncTool/offload_logs/` |
+
+### Checksum algorithm selection
+
+| Scenario | Algorithm |
+|----------|-----------|
+| Local-to-local transfer | SHA-256 pre + post copy |
+| rclone transfer, no paranoid | rclone `--checksum` internal |
+| rclone transfer, paranoid | SHA-256 local vs Drive's reported SHA-256 |
+| Merge push/pull via rclone | rclone `copyto --checksum` |
+| Merge push/pull local | SHA-256 pre + post |
+| Offload pre-hash | SHA-256 on source |
+| Offload destination verify | SHA-256 vs source ground-truth |
+
+GDrive does not always compute SHA-256 for all files. When it hasn't, paranoid mode falls back to rclone checksum and logs a warning via `checksum_context`.
+
+### External dependencies (consolidated)
+
+| Tool | Required for | Install |
+|------|-------------|---------|
+| rclone | GDrive transfers | `brew install rclone` |
+| ffmpeg + ffprobe | Contact sheet frame extraction | `brew install ffmpeg` |
+| Pillow | Contact sheet compositor | `pip install Pillow` |
+| REDline | R3D frame extraction (optional) | REDCINE-X PRO (free) from red.com |
+| pyobjc | Offload tab volume auto-detection (optional) | `pip install pyobjc-framework-AppKit` |
