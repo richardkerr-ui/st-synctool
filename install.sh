@@ -7,6 +7,10 @@ set -e
 REPO_URL="https://github.com/richardkerr-ui/st-synctool.git"
 INSTALL_DIR="$HOME/Applications/st-synctool"
 
+# Signal Theory Google OAuth app (Desktop type — safe to bundle per Google's docs)
+_GDRIVE_CLIENT_ID="371659471908-8kbtrluohvvjo02olfaism9nn7m5eal2.apps.googleusercontent.com"
+_GDRIVE_CLIENT_SECRET="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"
+
 echo ""
 echo "=== ST SyncTool Installer ==="
 echo ""
@@ -61,10 +65,12 @@ fi
 echo ""
 echo "Setting up Python environment..."
 cd "$INSTALL_DIR"
-[[ ! -d .venv ]] && python3 -m venv .venv
+# Use Homebrew Python explicitly — avoid picking up the macOS system Python 3.9
+_PYTHON=$(brew --prefix)/bin/python3
+[[ ! -d .venv ]] && "$_PYTHON" -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip -q
-pip install -v -r requirements.txt || { echo ""; echo "  ERROR: pip install failed."; echo "  Try: cd $INSTALL_DIR && source .venv/bin/activate && pip install -r requirements.txt"; exit 1; }
+pip install -r requirements.txt || { echo ""; echo "  ERROR: pip install failed."; echo "  Try: cd $INSTALL_DIR && source .venv/bin/activate && pip install -r requirements.txt"; exit 1; }
 
 # ── 6. rclone config — skip if a valid gdrive remote already exists ───────────
 _needs_config=false
@@ -82,19 +88,22 @@ fi
 
 if [[ "$_needs_config" == "true" ]]; then
     echo ""
-    echo "Quick rclone setup guide:"
-    echo "  1. Type 'n' → new remote"
-    echo "  2. Name: gdrive"
-    echo "  3. Storage type: look for 'Google Drive', type its number"
-    echo "  4. client_id, client_secret: press Enter (use defaults)"
-    echo "  5. Scope: type 1 and press Enter (full access)"
-    echo "  6. root_folder_id, service_account_file, advanced config: press Enter"
-    echo "  7. Auto config: y (browser opens)"
-    echo "  8. Sign in with your Signal Theory Google account"
-    echo "  9. Shared drive: n"
-    echo "  10. Save: y, then q to quit"
+    echo "Configuring Google Drive access..."
+
+    # Create the remote with ST credentials — no interactive prompts
+    rclone config create gdrive drive \
+        client_id="$_GDRIVE_CLIENT_ID" \
+        client_secret="$_GDRIVE_CLIENT_SECRET" \
+        scope=drive \
+        --non-interactive &>/dev/null || true
+
+    # Browser-only OAuth step: user signs in once, that's it
     echo ""
-    rclone config
+    echo "  A browser window will open — sign in with your Signal Theory Google account."
+    echo "  (If it doesn't open automatically, copy the URL printed below.)"
+    echo ""
+    rclone config reconnect gdrive: --auto-confirm
+
     echo ""
     echo "Validating Google Drive connection..."
     if rclone lsd gdrive: &>/dev/null; then
@@ -108,14 +117,36 @@ if [[ "$_needs_config" == "true" ]]; then
         echo "    rclone config reconnect gdrive:"
         echo ""
         echo "  Then launch the app:"
-        echo "    $INSTALL_DIR/run.sh"
+        echo "    st-synctool"
         echo ""
         exit 1
     fi
 fi
 
+# ── 7. Create st-synctool command ─────────────────────────────────────────────
+_BIN_DIR=""
+# Prefer Homebrew's bin (already on PATH after step 2)
+if [[ -d /opt/homebrew/bin ]]; then
+    _BIN_DIR=/opt/homebrew/bin
+elif [[ -d /usr/local/bin ]]; then
+    _BIN_DIR=/usr/local/bin
+fi
+
+if [[ -n "$_BIN_DIR" ]]; then
+    ln -sf "$INSTALL_DIR/run.sh" "$_BIN_DIR/st-synctool"
+    echo "✓ 'st-synctool' command installed"
+else
+    # Fallback: ~/.local/bin with PATH update
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$INSTALL_DIR/run.sh" "$HOME/.local/bin/st-synctool"
+    if ! grep -q '.local/bin' "$HOME/.zprofile" 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zprofile"
+    fi
+    echo "✓ 'st-synctool' command installed (open a new terminal first)"
+fi
+
 # ── 8. Done ───────────────────────────────────────────────────────────────────
 echo ""
-echo "  ST SyncTool is ready. To launch:"
-echo "    $INSTALL_DIR/run.sh"
+echo "  ST SyncTool is ready. Launch with:"
+echo "    st-synctool"
 echo ""
