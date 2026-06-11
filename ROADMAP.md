@@ -20,6 +20,47 @@
 - Phase 2: Live file-level progress + ETA. Actively next.
 - Phase 3: Conflict resolution UI for BOTH_CHANGED Merge rows. Planned.
 
+## Testing roadmap
+
+### Layer 1 — Manifest schema contract tests
+Parametrized tests that run every writer against every reader to catch schema mismatches (e.g. `checksum` vs `checksums`, missing fields).
+
+| Writers | Readers |
+|---------|---------|
+| `run_offload` | `three_way_diff` |
+| `transfer_folder` | `VerifyWorker._verify_local` |
+| `transfer_folder_rclone` | `write_chain_of_custody_log` |
+
+Estimated effort: ~1 day. Highest signal-to-effort ratio.
+
+### Layer 2 — Pipeline integration tests
+End-to-end pytest fixtures that run the full chain with real files:
+
+```
+src/  →  [offload]  →  dst1/, dst2/  →  [verify]
+local/ + server/   →  [three_way_diff]  →  [apply]  →  [verify]
+```
+
+Parametrize over the key axes:
+
+| Axis | Values |
+|------|--------|
+| File state | new / modified / deleted / renamed / conflicting |
+| Conflict handler | skip / rename / overwrite |
+| Checksum algorithm | sha256 / md5 / xxhash |
+| Manifest schema | prehash (offload) / schema-1.1 (merge) |
+| Paranoid verify | on / off |
+| Drive mode | local / gdrive (rclone-mocked) |
+
+Estimated effort: ~2-3 days.
+
+### Layer 3 — Property-based tests (hypothesis)
+For `three_way_diff` rename collapse logic: generate random manifest triples and assert invariants hold (every renamed file appears exactly once in output, no duplicate output paths). Catches whole classes of sort-order and edge-case bugs automatically.
+
+Estimated effort: ~half day for `three_way_diff`; more for `run_offload`.
+
+---
+
 ## v2 candidates (not yet committed)
 
 - Drive to Drive transfers. Plumbing mostly exists. Real ask: moving a
