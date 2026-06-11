@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
@@ -11,6 +12,7 @@ from core.manifest import load_manifest
 from core.checksum import compute_all
 from gui import theme
 from core import rclone_bridge
+import core.media_verify as _media_verify
 from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
 
 
@@ -45,6 +47,7 @@ class VerifyWorker(QObject):
         files = self.manifest.get("files", {})
         total = max(len(files), 1)
         results = []
+        _seq_dirs_seen: set = set()
 
         for i, (rel_path, entry) in enumerate(files.items()):
             self.progress.emit(int(i / total * 100), rel_path)
@@ -67,14 +70,44 @@ class VerifyWorker(QObject):
             expected_val = (expected_cs.get(algo) or "").lower()
             actual_val   = (actual.get(algo) or "").lower()
 
-            if expected_val == actual_val and expected_val:
-                results.append({"path": rel_path, "status": "OK",
-                                "detail": f"{algo}: {actual_val[:16]}..."})
+            hash_ok = expected_val == actual_val and bool(expected_val)
+            if hash_ok:
+                result = {"path": rel_path, "status": "OK",
+                          "detail": f"{algo}: {actual_val[:16]}..."}
                 self.log.emit(f"  OK: {rel_path}", "success")
             else:
-                results.append({"path": rel_path, "status": "MISMATCH",
-                                "detail": f"Expected {expected_val[:16]}... | Got {actual_val[:16]}..."})
+                result = {"path": rel_path, "status": "MISMATCH",
+                          "detail": f"Expected {expected_val[:16]}... | Got {actual_val[:16]}..."}
                 self.log.emit(f"  MISMATCH: {rel_path}", "error")
+
+            # ── Format-specific media verification (additive) ─────────────
+            try:
+                mv_result = _media_verify.verify_file(
+                    abs_path, abs_path, _seq_dirs_seen
+                )
+            except Exception as mv_exc:
+                logging.getLogger(__name__).warning(
+                    "[MediaVerify] Unexpected error for %s: %s", rel_path, mv_exc
+                )
+                mv_result = None
+
+            if mv_result is not None:
+                if not mv_result.ok and not mv_result.advisory:
+                    result["format_status"] = "FAILED"
+                    result["format_detail"] = mv_result.detail
+                    if hash_ok:
+                        result["status"] = "FORMAT_FAIL"
+                    self.log.emit(
+                        f"  FORMAT FAIL: {rel_path} — {mv_result.detail}", "error"
+                    )
+                elif mv_result.advisory:
+                    result["format_status"] = "ADVISORY"
+                    result["format_detail"] = mv_result.detail
+                else:
+                    result["format_status"] = "OK"
+                    result["format_detail"] = mv_result.detail
+
+            results.append(result)
 
         self.progress.emit(100, "Complete")
         self.finished.emit(results)
