@@ -155,6 +155,55 @@ class TestRenameCollapse:
         # BOTH_CHANGED (B vs A) is not SERVER_ONLY/LOCAL_ONLY/DELETED — must not collapse
         assert results["orig_rk.mov"].state != DiffState.RENAMED
 
+    def test_deleted_server_renamed_file_becomes_renamed(self):
+        # Rename target present locally but deleted on server → DELETED_SERVER → RENAMED
+        base   = self._base_with_rename("orig.mov", "orig_rk.mov")
+        yours  = {"files": {"orig.mov": _entry("A"), "orig_rk.mov": _entry("A")}}
+        server = {"files": {"orig.mov": _entry("A")}}  # orig_rk.mov absent on server
+        results = {r.path: r for r in three_way_diff(base, yours, server)}
+        assert results["orig_rk.mov"].state == DiffState.RENAMED
+        assert results["orig_rk.mov"].renamed_from == "orig.mov"
+
+    def test_deleted_local_renamed_file_becomes_renamed(self):
+        # Rename target present on server but deleted locally → DELETED_LOCAL → RENAMED
+        base   = self._base_with_rename("orig.mov", "orig_rk.mov")
+        yours  = {"files": {"orig.mov": _entry("A")}}  # orig_rk.mov absent locally
+        server = {"files": {"orig.mov": _entry("A"), "orig_rk.mov": _entry("A")}}
+        results = {r.path: r for r in three_way_diff(base, yours, server)}
+        assert results["orig_rk.mov"].state == DiffState.RENAMED
+        assert results["orig_rk.mov"].renamed_from == "orig.mov"
+
+    def test_unchanged_rename_target_not_collapsed(self):
+        # UNCHANGED is not one of the four collapsible states; must stay UNCHANGED
+        base   = self._base_with_rename("orig.mov", "orig_rk.mov")
+        yours  = {"files": {"orig.mov": _entry("A"), "orig_rk.mov": _entry("A")}}
+        server = {"files": {"orig.mov": _entry("A"), "orig_rk.mov": _entry("A")}}
+        results = {r.path: r for r in three_way_diff(base, yours, server)}
+        assert results["orig_rk.mov"].state == DiffState.UNCHANGED
+
+    def test_two_pass_rename_to_sorts_before_rename_from(self):
+        # "aaa_rk.mov" (renamed-to) sorts before "zzz.mov" (renamed-from).
+        # The two-pass logic must still suppress "zzz.mov" even though it is
+        # encountered after "aaa_rk.mov" in sorted order.
+        base = {
+            "files": {"zzz.mov": _entry("A")},
+            "renames": [{"from": "zzz.mov", "to": "aaa_rk.mov"}],
+        }
+        yours  = {"files": {"aaa_rk.mov": _entry("A")}}
+        server = {"files": {}}
+        results = {r.path: r for r in three_way_diff(base, yours, server)}
+        assert results["aaa_rk.mov"].state == DiffState.RENAMED
+        assert "zzz.mov" not in results
+
+    def test_empty_rename_map_returns_early_no_collapse(self):
+        # No renames key in base — the collapse pass is skipped entirely.
+        # A SERVER_ONLY file must remain SERVER_ONLY.
+        base   = {"files": {}}
+        yours  = {"files": {}}
+        server = {"files": {"new.mov": _entry("A")}}
+        results = {r.path: r for r in three_way_diff(base, yours, server)}
+        assert results["new.mov"].state == DiffState.SERVER_ONLY
+
 
 # ---------------------------------------------------------------------------
 # Ignored files
@@ -221,3 +270,19 @@ class TestChecksumFallback:
         server = {"files": {"f.mov": {"size": 1}}}
         results = {r.path: r.state for r in three_way_diff(base, yours, server)}
         assert results["f.mov"] == DiffState.UNCHANGED
+
+
+# ---------------------------------------------------------------------------
+# Edge cases — empty inputs
+# ---------------------------------------------------------------------------
+
+class TestEdgeCases:
+    def test_all_empty_manifests_produce_empty_result(self):
+        # All three sides have no files — result must be an empty list.
+        results = three_way_diff({"files": {}}, {"files": {}}, {"files": {}})
+        assert results == []
+
+    def test_missing_files_key_produces_empty_result(self):
+        # Manifests without a "files" key at all should also yield nothing.
+        results = three_way_diff({}, {}, {})
+        assert results == []
