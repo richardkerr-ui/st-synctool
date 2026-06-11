@@ -1,7 +1,10 @@
 #!/bin/bash
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve symlinks so this works when called via /opt/homebrew/bin/st-synctool
+_SCRIPT="$0"
+while [[ -L "$_SCRIPT" ]]; do _SCRIPT="$(readlink "$_SCRIPT")"; done
+SCRIPT_DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Activate Homebrew in this session so rclone is on PATH
