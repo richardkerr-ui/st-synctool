@@ -402,6 +402,17 @@ class MainWindow(QMainWindow):
             },
             {
                 "tab":    1,
+                "widget": lambda: mt.newer_wins_btn,
+                "title":  "Newer Wins",
+                "body":   (
+                    "One click resolves every conflict row automatically: "
+                    "Push if your file is newer, Pull if the server's is newer, "
+                    "or Skip if timestamps are equal. Great for batch resolving "
+                    "after a shoot day."
+                ),
+            },
+            {
+                "tab":    1,
                 "widget": lambda: mt.apply_btn,
                 "title":  "Apply Selected Actions",
                 "body":   (
