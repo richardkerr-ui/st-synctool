@@ -72,9 +72,7 @@ def pre_flight_checks(source, destination, is_gdrive_dest=False, log_cb=None):
                 )
             total_disk = shutil.disk_usage(dst_path).total
             if total_disk > 0:
-                used_after = sum(
-                    f.stat().st_size for f in dst_path.rglob("*") if f.is_file()
-                ) if dst_path.exists() else 0
+                used_after = shutil.disk_usage(dst_path).used
                 pct_after = (used_after + total) / total_disk * 100
             else:
                 pct_after = 0
