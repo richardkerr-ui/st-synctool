@@ -1,5 +1,43 @@
 # Changelog
 
+## Post-ship hardening — June 10–11, 2026
+
+### Manifest schema (schema 1.2)
+- Bumped `SCHEMA_VERSION` to 1.2; `load_manifest` migrates 1.0 and 1.1 files on read
+- Renamed `server_path` to `counterpart_path` throughout — clearer semantics, backfilled for older manifests
+- Transfer manifest entries now keyed by relative POSIX path (was basename — caused subdirectory files to collapse and break Verify/Merge)
+- Added `hash_algorithm`, `modtime`, `checksums` dict, `checksum_context`, and `gdrive_url` per entry
+- `build_offload_manifest` added to `core/offload.py` — persists a schema 1.2 manifest to `{dest}/{label}/st_manifest.json` and the archive after each offload commit
+- On-disk migration utility added (`migrate_manifests_on_disk`, opt-in, dry-run by default)
+
+### Chain-of-custody log
+- `OVERALL RESULT: COMPLETE` / `OVERALL RESULT: PARTIAL_FAILURE` verdict line added near top of every log
+- Per-file `VERIFY: PASS` / `VERIFY: FAIL` lines added (were only inferable from cell state before)
+- Collision-proof filename: `offload_<YYYYmmdd>_<HHMMSS>_<4hex>.txt`
+- Fixed `KeyError` crash when normalisation or thumbnails added non-file meta keys to the manifest — log writer now filters to real file entries
+
+### Offload pipeline
+- Added `SKIP_FILENAMES` frozenset (`.DS_Store`, `Thumbs.db`, `desktop.ini`) — OS junk filtered before pre-hash, copy, verify, manifest, and log
+- Subfolder collision detection: warns (non-blocking) when two sources resolve to the same effective subfolder; GUI shows a confirm dialog before the run
+- Sidecar→hash-suffix binding made deterministic (lexicographically first clip wins when two clips share a stem)
+
+### Merge / comparison
+- `ApplyWorker.run`: `op_result.get("renamed_to", rel_path)` replaced with `... or rel_path` — `None` value no longer drops post-copy checksums from the regenerated manifest
+- `three_way_diff` rename collapse now covers `DELETED_SERVER` and `DELETED_LOCAL` target states; two-pass sort-order edge case fixed
+
+### Transfer
+- Disk-usage warning in `pre_flight_checks` now uses `shutil.disk_usage` (was summing files in subfolder, not actual used space)
+
+### Verify tab
+- `VerifyWorker._verify_local` now calls `_media_verify.verify_file` after each hash check; result dicts carry `format_status` / `format_detail`; hash-OK files that fail format check surface as `FORMAT_FAIL`
+
+### Test suite
+- Grew from 122 → 459 tests across this period
+- New suites: `test_transfer_rclone.py` (29), `test_apply_worker.py` (22), `test_transfer_folder.py` (24), `test_comparison.py` additions (15), `test_gui_smoke.py` (21)
+- `pytest-qt` added as dev dependency for GUI smoke tests
+
+---
+
 ## v1 + Phase 1 of v2 — June 8, 2026
 
 This repo was initialized after v1 was complete and Phase 1 of v2 was

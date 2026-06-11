@@ -61,6 +61,16 @@ Estimated effort: ~half day for `three_way_diff`; more for `run_offload`.
 
 ---
 
+## Offload manifest custody block (SCHEMA_INTEROP_SPEC.md)
+
+The `offload` block specified in `SCHEMA_INTEROP_SPEC.md` is not yet implemented. The rest of that spec (schema 1.2, `counterpart_path`, `build_offload_manifest`, `modtime`, `checksums` dict, `renames[]`) is done. Outstanding:
+
+- Add `"offload": { "overall_result", "destinations": [...], "verified_files": {...} }` block to the JSON manifest produced by `build_offload_manifest` — makes the custody record machine-readable without parsing the prose `.txt` log
+- Add `"reason": "normalize"` to offload rename entries and `"reason": "preserve"` to merge preserve-rename entries
+- Write the 6 acceptance tests defined in `SCHEMA_INTEROP_SPEC.md`
+
+---
+
 ## v2 candidates (not yet committed)
 
 - Drive to Drive transfers. Plumbing mostly exists. Real ask: moving a
