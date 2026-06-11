@@ -1,0 +1,176 @@
+"""
+GUI smoke tests — each tab and MainWindow can instantiate without crashing,
+key widgets are present, and critical initial states are correct.
+
+Uses pytest-qt's qtbot fixture for widget lifecycle management.
+No workers are started; external I/O is mocked at the module boundary.
+"""
+
+import sys
+import pytest
+from unittest.mock import MagicMock
+
+
+# ---------------------------------------------------------------------------
+# TransferTab
+# ---------------------------------------------------------------------------
+
+class TestTransferTabSmoke:
+    @pytest.fixture
+    def tab(self, qtbot):
+        from gui.transfer_tab import TransferTab
+        t = TransferTab()
+        qtbot.addWidget(t)
+        return t
+
+    def test_instantiates(self, tab):
+        tab.show()
+
+    def test_key_widgets_present(self, tab):
+        for attr in ("src_input", "dst_input", "start_btn", "conflict_combo",
+                     "cancel_btn", "manifest_btn", "log"):
+            assert hasattr(tab, attr), f"TransferTab missing: {attr}"
+
+    def test_start_btn_label(self, tab):
+        assert "Transfer" in tab.start_btn.text()
+
+    def test_conflict_combo_has_at_least_three_options(self, tab):
+        assert tab.conflict_combo.count() >= 3
+
+
+# ---------------------------------------------------------------------------
+# MergeTab
+# ---------------------------------------------------------------------------
+
+class TestMergeTabSmoke:
+    @pytest.fixture
+    def tab(self, qtbot, monkeypatch):
+        import gui.merge_tab as mt
+        monkeypatch.setattr(mt.project_registry, "list_projects", lambda: [])
+        t = mt.MergeTab()
+        qtbot.addWidget(t)
+        return t
+
+    def test_instantiates(self, tab):
+        tab.show()
+
+    def test_key_widgets_present(self, tab):
+        for attr in ("scan_btn", "apply_btn", "newer_wins_btn", "diff_table",
+                     "project_combo", "local_input", "server_input", "base_input", "log"):
+            assert hasattr(tab, attr), f"MergeTab missing: {attr}"
+
+    def test_apply_btn_initially_disabled(self, tab):
+        assert not tab.apply_btn.isEnabled()
+
+    def test_scan_btn_initially_enabled(self, tab):
+        assert tab.scan_btn.isEnabled()
+
+
+# ---------------------------------------------------------------------------
+# OffloadTab
+# ---------------------------------------------------------------------------
+
+class TestOffloadTabSmoke:
+    @pytest.fixture
+    def tab(self, qtbot, monkeypatch):
+        import gui.offload_tab as ot
+        import core.projects as proj
+
+        def _mock_watcher(self):
+            self._watcher = MagicMock()
+            self._watcher.available = False
+
+        monkeypatch.setattr(ot.OffloadTab, "_start_volume_watcher", _mock_watcher)
+        monkeypatch.setattr(proj, "list_dest_presets", lambda: [])
+        t = ot.OffloadTab()
+        qtbot.addWidget(t)
+        return t
+
+    def test_instantiates(self, tab):
+        tab.show()
+
+    def test_key_widgets_present(self, tab):
+        for attr in ("_preset_combo", "_start_btn", "_cancel_btn", "_log"):
+            assert hasattr(tab, attr), f"OffloadTab missing: {attr}"
+
+    def test_one_source_row_created_at_init(self, tab):
+        assert len(tab._source_rows) == 1
+
+    def test_one_dest_row_created_at_init(self, tab):
+        assert len(tab._dest_rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# VerifyTab
+# ---------------------------------------------------------------------------
+
+class TestVerifyTabSmoke:
+    @pytest.fixture
+    def tab(self, qtbot):
+        from gui.verify_tab import VerifyTab
+        t = VerifyTab()
+        qtbot.addWidget(t)
+        return t
+
+    def test_instantiates(self, tab):
+        tab.show()
+
+    def test_key_widgets_present(self, tab):
+        for attr in ("folder_input", "manifest_input", "verify_btn", "cancel_btn",
+                     "status_label", "progress_bar", "log"):
+            assert hasattr(tab, attr), f"VerifyTab missing: {attr}"
+
+    def test_verify_btn_label(self, tab):
+        assert "Verif" in tab.verify_btn.text()
+
+
+# ---------------------------------------------------------------------------
+# MainWindow
+# ---------------------------------------------------------------------------
+
+class TestMainWindowSmoke:
+    @pytest.fixture
+    def window(self, qtbot, monkeypatch):
+        import gui.main_window as mw
+        import gui.offload_tab as ot
+        import gui.merge_tab as mt
+        import core.projects as proj
+
+        monkeypatch.setattr(mw, "should_show_wizard", lambda: False)
+        monkeypatch.setattr(mw, "check_rclone_auth",
+                            lambda *a, **kw: MagicMock(status=mw.CheckStatus.OK, message=""))
+        monkeypatch.setattr(mw, "get_active_remote", lambda: "gdrive")
+        monkeypatch.setattr(mw, "get_remote_account_email", lambda r: "")
+        monkeypatch.setattr(ot.OffloadTab, "_start_volume_watcher", lambda self: None)
+        monkeypatch.setattr(mt.project_registry, "list_projects", lambda: [])
+        monkeypatch.setattr(proj, "list_dest_presets", lambda: [])
+
+        w = mw.MainWindow()
+        qtbot.addWidget(w)
+        return w
+
+    def test_instantiates(self, window):
+        window.show()
+
+    def test_has_four_tabs(self, window):
+        assert window.tabs.count() == 4
+
+    def test_tab_titles(self, window):
+        titles = [window.tabs.tabText(i) for i in range(4)]
+        assert titles == ["Transfer", "Merge", "Offload", "Verify"]
+
+    def test_status_bar_ready(self, window):
+        assert "Ready" in window.statusBar().currentMessage()
+
+    def test_auth_banner_hidden_at_startup(self, window):
+        assert not window._auth_banner.isVisible()
+
+    def test_tab_widget_types(self, window):
+        from gui.transfer_tab import TransferTab
+        from gui.merge_tab import MergeTab
+        from gui.offload_tab import OffloadTab
+        from gui.verify_tab import VerifyTab
+        assert isinstance(window._transfer_tab, TransferTab)
+        assert isinstance(window._merge_tab, MergeTab)
+        assert isinstance(window._offload_tab, OffloadTab)
+        assert isinstance(window._verify_tab, VerifyTab)
