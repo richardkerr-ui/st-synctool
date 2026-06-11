@@ -493,28 +493,42 @@ class MergeTab(QWidget):
         self._build_ui()
 
     def _build_ui(self):
+        """Orchestrates the MergeTab layout. Each section is built by a focused
+        sub-builder that sets the relevant self.* attributes."""
         root = QVBoxLayout(self)
         root.setSpacing(10)
+        root.addLayout(self._build_project_row())
+        root.addWidget(self._build_paths_group())
+        root.addWidget(self._build_options_group())
+        self._build_action_row(root)
+        root.addWidget(self._build_diff_group(), stretch=1)
+        root.addWidget(self._build_conflict_panel())
+        self._build_log_panel(root)
+        # Wire diff_table → conflict panel after both exist
+        self.diff_table.conflict_selected.connect(self._on_conflict_selected)
+        self._refresh_project_combo()
 
-        # ── Project quick-loader ─────────────────────────────────
-        proj_row = QHBoxLayout()
-        proj_row.addWidget(QLabel("Quick Load:"))
+    def _build_project_row(self) -> QHBoxLayout:
+        """Quick-load project combo + refresh button."""
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Quick Load:"))
         self.project_combo = QComboBox()
         self.project_combo.setMinimumWidth(220)
         self.project_combo.addItem("— select project —")
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
-        proj_row.addWidget(self.project_combo, stretch=1)
+        row.addWidget(self.project_combo, stretch=1)
         refresh_btn = QPushButton("↺")
         refresh_btn.setFixedWidth(32)
         refresh_btn.setToolTip("Refresh project list")
         refresh_btn.clicked.connect(self._refresh_project_combo)
-        proj_row.addWidget(refresh_btn)
-        proj_row.addStretch()
-        root.addLayout(proj_row)
+        row.addWidget(refresh_btn)
+        row.addStretch()
+        return row
 
-        # ── Path inputs ──────────────────────────────────────────
-        input_group = QGroupBox("Paths")
-        ig = QVBoxLayout(input_group)
+    def _build_paths_group(self) -> QGroupBox:
+        """Base manifest, local folder, and server path inputs."""
+        group = QGroupBox("Paths")
+        layout = QVBoxLayout(group)
 
         brow = QHBoxLayout()
         brow.addWidget(QLabel("Base Manifest (.json):"))
@@ -529,14 +543,14 @@ class MergeTab(QWidget):
         self.stale_label = QLabel("")
         self.stale_label.setFixedWidth(90)
         brow.addWidget(self.stale_label)
-        ig.addLayout(brow)
+        layout.addLayout(brow)
 
         lrow = QHBoxLayout()
         lrow.addWidget(QLabel("Local Folder (Yours):  "))
         self.local_input = PathInputWidget("merge_local", self)
         self.local_input.pathChanged.connect(self._on_local_path_changed)
         lrow.addWidget(self.local_input)
-        ig.addLayout(lrow)
+        layout.addLayout(lrow)
 
         srow = QHBoxLayout()
         srow.addWidget(QLabel("Server (Theirs):       "))
@@ -550,27 +564,30 @@ class MergeTab(QWidget):
         health_btn.setToolTip("Quick-compare server manifest against local")
         health_btn.clicked.connect(self._check_server_health)
         srow.addWidget(health_btn)
-        ig.addLayout(srow)
+        layout.addLayout(srow)
 
-        root.addWidget(input_group)
+        return group
 
-        # ── Options ──────────────────────────────────────────────
-        opts_group = QGroupBox("Options")
-        ol = QVBoxLayout(opts_group)
+    def _build_options_group(self) -> QGroupBox:
+        """Preserve-on-overwrite and re-scan checkboxes."""
+        group = QGroupBox("Options")
+        layout = QVBoxLayout(group)
         self.preserve_chk = QCheckBox(
             "Preserve existing files on overwrite (rename incoming with date-initials suffix)"
         )
         self.preserve_chk.setChecked(True)
-        ol.addWidget(self.preserve_chk)
+        layout.addWidget(self.preserve_chk)
         self.rescan_chk = QCheckBox(
             "Re-scan before apply (catches drift since initial scan)"
         )
         self.rescan_chk.setChecked(True)
-        ol.addWidget(self.rescan_chk)
-        root.addWidget(opts_group)
+        layout.addWidget(self.rescan_chk)
+        return group
 
-        # ── Action buttons ───────────────────────────────────────
+    def _build_action_row(self, root: QVBoxLayout) -> None:
+        """Scan/Apply/Newer-Wins buttons, status label, and progress bar."""
         btn_row = QHBoxLayout()
+
         self.scan_btn = QPushButton("  Scan && Compare")
         self.scan_btn.setFixedHeight(36)
         self.scan_btn.setStyleSheet(theme.primary_button_style())
@@ -582,7 +599,6 @@ class MergeTab(QWidget):
         self.apply_btn.setEnabled(False)
         self.apply_btn.clicked.connect(self._apply_actions)
 
-        # Opacity effect dims apply button until a scan has results
         self._apply_opacity = QGraphicsOpacityEffect()
         self._apply_opacity.setOpacity(0.4)
         self.apply_btn.setGraphicsEffect(self._apply_opacity)
@@ -612,43 +628,41 @@ class MergeTab(QWidget):
         btn_row.addStretch()
         root.addLayout(btn_row)
 
-        # Progress bar — hidden until a scan/apply is running
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setVisible(False)
         root.addWidget(self.progress_bar)
 
-        # ── Changes panel (diff table) ───────────────────────────
-        changes_group = QGroupBox("Changes")
-        cg_layout = QVBoxLayout(changes_group)
-        cg_layout.setContentsMargins(4, 4, 4, 4)
+    def _build_diff_group(self) -> QGroupBox:
+        """Changes group box containing the diff table."""
+        group = QGroupBox("Changes")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(4, 4, 4, 4)
         self.diff_table = DiffTable(self)
-        cg_layout.addWidget(self.diff_table)
-        root.addWidget(changes_group, stretch=1)
+        layout.addWidget(self.diff_table)
+        return group
 
-        # ── Conflict detail panel ────────────────────────────────
-        # Shown only when a BOTH_CHANGED row is selected; hidden otherwise.
-        self._conflict_panel = QFrame(self)
-        self._conflict_panel.setFrameShape(QFrame.Shape.StyledPanel)
-        self._conflict_panel.setStyleSheet(
+    def _build_conflict_panel(self) -> QFrame:
+        """Side-by-side LOCAL/SERVER detail panel for BOTH_CHANGED rows.
+        Hidden by default; shown when a conflict row is selected."""
+        panel = QFrame(self)
+        panel.setFrameShape(QFrame.Shape.StyledPanel)
+        panel.setStyleSheet(
             f"QFrame {{ background:#1e1212; border:1px solid #5a2020;"
             f"  border-radius:4px; padding:4px; }}"
             f"QLabel {{ background:transparent; color:#cccccc; }}"
         )
-        cp_layout = QVBoxLayout(self._conflict_panel)
-        cp_layout.setContentsMargins(8, 6, 8, 6)
-        cp_layout.setSpacing(4)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
 
-        conflict_title = QLabel("Conflict detail")
-        conflict_title.setStyleSheet(
-            f"font-weight:bold; font-size:12px; color:{theme.CORAL};"
-        )
-        cp_layout.addWidget(conflict_title)
+        title = QLabel("Conflict detail")
+        title.setStyleSheet(f"font-weight:bold; font-size:12px; color:{theme.CORAL};")
+        layout.addWidget(title)
 
-        cols_layout = QHBoxLayout()
-        cols_layout.setSpacing(20)
+        cols = QHBoxLayout()
+        cols.setSpacing(20)
 
-        # Local column
         local_col = QVBoxLayout()
         local_col.setSpacing(2)
         local_col.addWidget(QLabel("<b>LOCAL</b>"))
@@ -658,15 +672,13 @@ class MergeTab(QWidget):
         for lbl in (self._cp_local_size, self._cp_local_mtime, self._cp_local_hash):
             lbl.setStyleSheet("font-family: monospace; font-size: 11px;")
             local_col.addWidget(lbl)
-        cols_layout.addLayout(local_col)
+        cols.addLayout(local_col)
 
-        # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
         sep.setStyleSheet("color:#5a2020;")
-        cols_layout.addWidget(sep)
+        cols.addWidget(sep)
 
-        # Server column
         server_col = QVBoxLayout()
         server_col.setSpacing(2)
         server_col.addWidget(QLabel("<b>SERVER</b>"))
@@ -676,28 +688,26 @@ class MergeTab(QWidget):
         for lbl in (self._cp_server_size, self._cp_server_mtime, self._cp_server_hash):
             lbl.setStyleSheet("font-family: monospace; font-size: 11px;")
             server_col.addWidget(lbl)
-        cols_layout.addLayout(server_col)
-        cols_layout.addStretch()
-        cp_layout.addLayout(cols_layout)
+        cols.addLayout(server_col)
+        cols.addStretch()
+        layout.addLayout(cols)
 
         self._cp_verdict = QLabel()
         self._cp_verdict.setStyleSheet(
             f"font-weight:bold; font-size:12px; color:{theme.ACCENT_GOLD};"
         )
-        cp_layout.addWidget(self._cp_verdict)
+        layout.addWidget(self._cp_verdict)
 
-        self._conflict_panel.setVisible(False)
-        root.addWidget(self._conflict_panel)
+        panel.setVisible(False)
+        self._conflict_panel = panel
+        return panel
 
-        # Wire diff_table selection signal to the conflict panel
-        self.diff_table.conflict_selected.connect(self._on_conflict_selected)
-
-        # ── Log panel ────────────────────────────────────────────
+    def _build_log_panel(self, root: QVBoxLayout) -> None:
+        """Merge log widget and the open-logs-folder link row."""
         self.log = LogWidget("Merge log", parent=self)
         self.log.setMaximumHeight(160)
         root.addWidget(self.log)
 
-        # Open logs folder link (replaces history panel)
         logs_row = QHBoxLayout()
         logs_row.addStretch()
         open_logs_btn = QPushButton("Open logs folder")
@@ -710,8 +720,6 @@ class MergeTab(QWidget):
         open_logs_btn.clicked.connect(self._open_logs_folder)
         logs_row.addWidget(open_logs_btn)
         root.addLayout(logs_row)
-
-        self._refresh_project_combo()
 
     # ── Project loader (item 15) ──────────────────────────────────────────────
 
