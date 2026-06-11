@@ -7,10 +7,6 @@ set -e
 REPO_URL="https://github.com/richardkerr-ui/st-synctool.git"
 INSTALL_DIR="$HOME/Applications/st-synctool"
 
-# Signal Theory Google OAuth app (Desktop type — safe to bundle per Google's docs)
-_GDRIVE_CLIENT_ID="371659471908-8kbtrluohvvjo02olfaism9nn7m5eal2.apps.googleusercontent.com"
-_GDRIVE_CLIENT_SECRET="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"
-
 echo ""
 echo "=== ST SyncTool Installer ==="
 echo ""
@@ -89,6 +85,10 @@ fi
 if [[ "$_needs_config" == "true" ]]; then
     echo ""
     echo "Configuring Google Drive access..."
+
+    # Read ST OAuth credentials from the cloned app — single source of truth
+    _GDRIVE_CLIENT_ID=$(grep '_DEFAULT_CLIENT_ID' "$INSTALL_DIR/core/oauth_config.py" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    _GDRIVE_CLIENT_SECRET=$(grep '_DEFAULT_CLIENT_SECRET' "$INSTALL_DIR/core/oauth_config.py" | head -1 | sed 's/.*"\(.*\)".*/\1/')
 
     # Create the remote with ST credentials — no interactive prompts
     rclone config create gdrive drive \
