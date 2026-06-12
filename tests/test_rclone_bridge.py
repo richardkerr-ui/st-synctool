@@ -361,3 +361,338 @@ class TestRunSubprocess:
         with self._patch(fake):
             _run(["copy", "a", "b"], timeout=1)
         assert rb._current_proc is None
+
+
+# ---------------------------------------------------------------------------
+# cancel_current — _current_proc locking and the cancel/run race (M1.3)
+# ---------------------------------------------------------------------------
+
+import threading
+import time
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from core.rclone_bridge import (
+    cancel_current, is_rclone_installed, lsjson, remote_size,
+    lsjson_to_manifest, sync, copyto, deletefile, path_exists,
+)
+
+
+class TestCancelCurrent:
+    def teardown_method(self):
+        with rb._current_proc_lock:
+            rb._current_proc = None
+
+    def test_returns_false_when_no_proc(self):
+        with rb._current_proc_lock:
+            rb._current_proc = None
+        assert cancel_current() is False
+
+    def test_returns_false_when_proc_already_finished(self):
+        proc = MagicMock()
+        proc.poll.return_value = 0          # already exited
+        with rb._current_proc_lock:
+            rb._current_proc = proc
+        assert cancel_current() is False
+        proc.terminate.assert_not_called()
+
+    def test_terminates_running_proc(self):
+        proc = MagicMock()
+        proc.poll.return_value = None       # still running
+        with rb._current_proc_lock:
+            rb._current_proc = proc
+        assert cancel_current() is True
+        proc.terminate.assert_called_once()
+
+    def test_kills_when_terminate_times_out(self):
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.wait.side_effect = subprocess.TimeoutExpired("rclone", 5)
+        with rb._current_proc_lock:
+            rb._current_proc = proc
+        assert cancel_current() is True
+        proc.kill.assert_called_once()
+
+    def test_returns_false_when_terminate_raises(self):
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.terminate.side_effect = OSError("gone")
+        with rb._current_proc_lock:
+            rb._current_proc = proc
+        assert cancel_current() is False
+
+    def test_cancel_during_run_race(self):
+        """cancel_current() fired from another thread while _run is blocked in
+        wait() must terminate the transfer and leave _current_proc cleared."""
+
+        class BlockingProc(FakeProc):
+            def __init__(self):
+                super().__init__()
+                self.returncode = None
+                self._done = threading.Event()
+
+            def wait(self, timeout=None):
+                if not self._done.wait(timeout=timeout if timeout else 60):
+                    raise subprocess.TimeoutExpired("rclone", timeout)
+                return self.returncode
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self):
+                self.returncode = -15
+                self._done.set()
+
+        proc = BlockingProc()
+        result = {}
+
+        def run():
+            with patch("core.rclone_bridge.subprocess.Popen", return_value=proc):
+                result["r"] = _run(["copy", "a", "b"], timeout=30)
+
+        t = threading.Thread(target=run)
+        t.start()
+        # Wait for _run to register the proc before cancelling
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with rb._current_proc_lock:
+                if rb._current_proc is proc:
+                    break
+            time.sleep(0.01)
+        else:
+            t.join(timeout=1)
+            pytest.fail("_run never registered _current_proc")
+
+        assert cancel_current() is True
+        t.join(timeout=5)
+        assert not t.is_alive()
+        assert result["r"].returncode == -15
+        assert rb._current_proc is None
+
+
+# ---------------------------------------------------------------------------
+# is_rclone_installed
+# ---------------------------------------------------------------------------
+
+class TestIsRcloneInstalled:
+    def test_true_when_on_path(self):
+        with patch("core.rclone_bridge.shutil.which", return_value="/usr/local/bin/rclone"):
+            assert is_rclone_installed() is True
+
+    def test_false_when_missing(self):
+        with patch("core.rclone_bridge.shutil.which", return_value=None):
+            assert is_rclone_installed() is False
+
+
+# ---------------------------------------------------------------------------
+# Command wrappers — lsjson, remote_size, copyto, deletefile, path_exists
+# All _run calls mocked; we assert argument construction and error paths.
+# ---------------------------------------------------------------------------
+
+def _result(returncode=0, stdout="", stderr=""):
+    return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+class TestLsjson:
+    def test_parses_json_on_success(self):
+        with patch("core.rclone_bridge._run", return_value=_result(stdout='[{"Path": "a"}]')) as m:
+            assert lsjson("remote:folder") == [{"Path": "a"}]
+
+    def test_includes_hash_flag_by_default(self):
+        with patch("core.rclone_bridge._run", return_value=_result(stdout="[]")) as m:
+            lsjson("remote:folder")
+        args = m.call_args[0][0]
+        assert "--hash" in args and "--recursive" in args
+        assert args[-1] == "remote:folder"
+
+    def test_no_hash_flag_when_disabled(self):
+        with patch("core.rclone_bridge._run", return_value=_result(stdout="[]")) as m:
+            lsjson("remote:folder", with_checksum=False)
+        assert "--hash" not in m.call_args[0][0]
+
+    def test_extra_flags_appended(self):
+        with patch("core.rclone_bridge._run", return_value=_result(stdout="[]")) as m:
+            lsjson("remote:", extra_flags=["--drive-root-folder-id", "X"])
+        args = m.call_args[0][0]
+        assert "--drive-root-folder-id" in args and "X" in args
+
+    def test_raises_runtime_error_on_failure(self):
+        with patch("core.rclone_bridge._run", return_value=_result(returncode=1, stderr="bad remote")):
+            with pytest.raises(RuntimeError, match="bad remote"):
+                lsjson("remote:folder")
+
+
+class TestRemoteSize:
+    def test_returns_bytes_and_count(self):
+        out = '{"bytes": 1048576, "count": 12}'
+        with patch("core.rclone_bridge._run", return_value=_result(stdout=out)):
+            assert remote_size("remote:f") == (1048576, 12)
+
+    def test_missing_keys_default_to_zero(self):
+        with patch("core.rclone_bridge._run", return_value=_result(stdout="{}")):
+            assert remote_size("remote:f") == (0, 0)
+
+    def test_raises_on_failure(self):
+        with patch("core.rclone_bridge._run", return_value=_result(returncode=1, stderr="denied")):
+            with pytest.raises(RuntimeError, match="denied"):
+                remote_size("remote:f")
+
+
+class TestCopyto:
+    def test_true_on_success_and_checksum_flag(self):
+        with patch("core.rclone_bridge._run", return_value=_result()) as m:
+            assert copyto("remote:a", "remote:b") is True
+        args = m.call_args[0][0]
+        assert args[:3] == ["copyto", "remote:a", "remote:b"]
+        assert "--checksum" in args
+
+    def test_false_on_failure(self):
+        with patch("core.rclone_bridge._run", return_value=_result(returncode=1)):
+            assert copyto("a", "b") is False
+
+    def test_side_flags_appended(self):
+        with patch("core.rclone_bridge._run", return_value=_result()) as m:
+            copyto("a", "b", src_flags=["--s"], dst_flags=["--d"])
+        args = m.call_args[0][0]
+        assert "--s" in args and "--d" in args
+
+
+class TestDeletefile:
+    def test_true_on_success(self):
+        with patch("core.rclone_bridge._run", return_value=_result()) as m:
+            assert deletefile("remote:x") is True
+        assert m.call_args[0][0][:2] == ["deletefile", "remote:x"]
+
+    def test_false_on_failure(self):
+        with patch("core.rclone_bridge._run", return_value=_result(returncode=1)):
+            assert deletefile("remote:x") is False
+
+
+class TestPathExists:
+    def test_true_when_size_succeeds(self):
+        with patch("core.rclone_bridge._run", return_value=_result()):
+            assert path_exists("remote:x") is True
+
+    def test_false_when_size_fails(self):
+        with patch("core.rclone_bridge._run", return_value=_result(returncode=3)):
+            assert path_exists("remote:x") is False
+
+
+# ---------------------------------------------------------------------------
+# lsjson_to_manifest — Drive listing to manifest conversion
+# ---------------------------------------------------------------------------
+
+def _lsjson_items():
+    return [
+        {"Path": "clips", "IsDir": True},
+        {"Path": "clips/a.mov", "Size": 100, "ModTime": "2026-06-01T00:00:00Z",
+         "ID": "abc123", "Hashes": {"SHA256": "AA11", "MD5": "BB22"}},
+        {"Path": "b.wav", "Size": 50, "ModTime": "2026-06-02T00:00:00Z",
+         "Hashes": {"xxHash": "CC33"}},
+        {"Path": "c.txt", "Size": 5, "ModTime": "", "ID": ""},
+    ]
+
+
+class TestLsjsonToManifest:
+    def _manifest(self, items=None):
+        with patch("core.rclone_bridge.lsjson", return_value=items if items is not None else _lsjson_items()):
+            return lsjson_to_manifest("remote:folder", label="server")
+
+    def test_directories_skipped(self):
+        m = self._manifest()
+        assert "clips" not in m["files"]
+        assert m["file_count"] == 3
+
+    def test_hashes_lowercased_and_mapped(self):
+        cs = self._manifest()["files"]["clips/a.mov"]["checksums"]
+        assert cs["sha256"] == "aa11"
+        assert cs["md5"] == "bb22"
+
+    def test_xxhash_mapped_to_xxhash3_64(self):
+        entry = self._manifest()["files"]["b.wav"]
+        assert entry["checksums"]["xxhash3_64"] == "cc33"
+        assert entry["hash_algorithm"] == "xxhash3_64"
+
+    def test_hash_algorithm_prefers_sha256(self):
+        assert self._manifest()["files"]["clips/a.mov"]["hash_algorithm"] == "sha256"
+
+    def test_no_hashes_falls_back_to_rclone_lsjson(self):
+        entry = self._manifest()["files"]["c.txt"]
+        assert entry["checksums"] == {}
+        assert entry["hash_algorithm"] == "rclone-lsjson"
+
+    def test_gdrive_url_built_from_id(self):
+        files = self._manifest()["files"]
+        assert files["clips/a.mov"]["gdrive_url"] == "https://drive.google.com/file/d/abc123/view"
+        assert files["c.txt"]["gdrive_url"] == ""
+
+    def test_top_level_fields(self):
+        m = self._manifest()
+        assert m["label"] == "server"
+        assert m["root"] == "remote:folder"
+        assert m["total_size_bytes"] == 155
+        assert m["checksum_context"]["gdrive_mode"] is True
+        assert m["checksum_context"]["method"] == "rclone"
+
+    def test_empty_listing_yields_empty_manifest(self):
+        m = self._manifest(items=[])
+        assert m["files"] == {} and m["file_count"] == 0 and m["total_size_bytes"] == 0
+
+
+# ---------------------------------------------------------------------------
+# sync — mode/conflict flag construction and failure logging
+# ---------------------------------------------------------------------------
+
+class TestSync:
+    def _call(self, run_result=None, **kwargs):
+        with patch("core.rclone_bridge._run", return_value=run_result or _result()) as m:
+            ok = sync("src:", "dst:", **kwargs)
+        return ok, m
+
+    def test_invalid_mode_raises(self):
+        with pytest.raises(ValueError, match="Invalid rclone mode"):
+            sync("a", "b", mode="move")
+
+    def test_copy_mode_uses_copy_command(self):
+        ok, m = self._call(mode="copy")
+        assert ok is True
+        assert m.call_args[0][0][0] == "copy"
+
+    def test_sync_mode_uses_sync_command(self):
+        ok, m = self._call(mode="sync")
+        assert m.call_args[0][0][0] == "sync"
+
+    def test_conflict_skip_adds_ignore_existing(self):
+        ok, m = self._call(conflict="skip")
+        assert "--ignore-existing" in m.call_args[0][0]
+
+    def test_conflict_update_adds_update(self):
+        ok, m = self._call(conflict="update")
+        assert "--update" in m.call_args[0][0]
+
+    def test_conflict_rename_warns_and_falls_back(self):
+        logged = []
+        ok, m = self._call(conflict="rename", log_cb=lambda msg, lvl: logged.append((msg, lvl)))
+        args = m.call_args[0][0]
+        assert "--ignore-existing" not in args and "--update" not in args
+        assert any(lvl == "warning" and "Rename copy" in msg for msg, lvl in logged)
+
+    def test_dry_run_flag(self):
+        ok, m = self._call(dry_run=True)
+        assert "--dry-run" in m.call_args[0][0]
+
+    def test_side_flags_appended(self):
+        ok, m = self._call(src_flags=["--sf"], dst_flags=["--df"])
+        args = m.call_args[0][0]
+        assert "--sf" in args and "--df" in args
+
+    def test_failure_returns_false_and_logs_error(self):
+        logged = []
+        ok, m = self._call(run_result=_result(returncode=5),
+                           log_cb=lambda msg, lvl: logged.append((msg, lvl)))
+        assert ok is False
+        assert any(lvl == "error" and "exited with code 5" in msg for msg, lvl in logged)
+
+    def test_checksum_always_present(self):
+        ok, m = self._call()
+        assert "--checksum" in m.call_args[0][0]
