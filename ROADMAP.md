@@ -188,11 +188,14 @@ Why Drive over Synology-direct: field DIT carts are not on the office network, b
 
 ### M9.1 Log shipping (small, high value during beta)
 `core/log_sync.py`: enumerate new files under `~/Documents/STSyncTool/` (logs + manifest archive), `rclone copy` them to the shared folder, remember what shipped (small state file), never delete anything remotely. Runs after each operation and on launch; fully silent on failure (retry next time), opt-out toggle in settings.
-**Done when:** unit tests with mocked rclone cover new-file detection, state tracking, retry after offline and the never-delete invariant; one manual end-to-end against a junk Drive folder; README updated.
+
+**Offline behavior (decided 2026-06-12):** offline is the normal case, not the edge case. The local log always writes first; custody never depends on network. A "shipped" ledger records which files are confirmed uploaded; anything not in the ledger is retried at every trigger (after each operation and on every app launch), so an offline offload ships automatically the next time the app opens with internet. Shipping is in-app only, no background daemon. Alerting is quiet on the cart, loud in the office: a passive status line in the app ("Activity log: N reports waiting to upload"), escalating to a gentle banner only when files have been pending 7+ days, never a popup. The never-reopened-app gap is covered org-side by M9.2 staleness flags ("Cart 3 hasn't reported since June 2"), not by nagging the user.
+
+**Done when:** unit tests with mocked rclone cover new-file detection, ledger tracking, retry after simulated offline, the never-delete invariant and the 7-day pending threshold; one manual end-to-end against a junk Drive folder; README updated.
 
 ### M9.2 Activity index (later)
-A small builder that walks the aggregated corpus into one SQLite file (operation, user, workstation, source, dests, file counts, bytes, verdict, timestamps) for dashboards and fast queries. Also becomes the retrieval layer for M8.3 log Q&A so answers can span the whole org, not just one machine.
-**Done when:** index builds idempotently from the corpus, query helpers tested, M8.3 reads from it when present.
+A small builder that walks the aggregated corpus into one SQLite file (operation, user, workstation, source, dests, file counts, bytes, verdict, timestamps) for dashboards and fast queries. Includes per-workstation staleness flags (last-reported date) to catch machines whose logs stopped flowing, which is the org-side answer to M9.1's never-reopened-app gap. Also becomes the retrieval layer for M8.3 log Q&A so answers can span the whole org, not just one machine.
+**Done when:** index builds idempotently from the corpus, query helpers tested, staleness flags computed, M8.3 reads from it when present.
 
 **Sequencing suggestion:** M9.1 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta; M9.2 alongside or after M8.
 
