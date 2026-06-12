@@ -96,9 +96,13 @@ Blackmagic offers no lightweight official CLI. Spike (max 1 day): evaluate (a) f
 
 ---
 
-## M5: Verify expansion (PROPOSAL, needs Richard sign-off before any work)
+## M5: Verify expansion (M5.1 + M5.2 APPROVED by Richard 2026-06-12, M5.3 parked)
 
-Intended outcome: move Verify from "spot-check on demand" toward archival assurance, in three independent steps. Approve any subset.
+Intended outcome: move Verify from "spot-check on demand" toward archival assurance, in three independent steps. Richard approved M5.1 and M5.2 on 2026-06-12; M5.3 stays parked unless archives fail in the field.
+
+### M5.0 Extract verify logic to core/ (prep, small)
+`VerifyWorker._verify_local` currently lives in `gui/verify_tab.py` (PyQt6), so its hash loop is only testable on macOS and is mirrored by hand in the contract tests. Move the verification loop into `core/` (e.g. `core/verify.py`), leave a thin Qt worker that emits signals. Prerequisite for M5.1 and M5.2 so their logic lands headlessly testable.
+**Done when:** verify logic imports cleanly without PyQt6, existing verify behavior unchanged, contract tests use the real function instead of the mirror and GUI tests still pass on the Mac.
 
 ### M5.1 Deep Drive verify (small)
 Optional "Deep verify (downloads files)" checkbox for Drive folders. Streams each file through rclone to a temp hash (`rclone cat | sha256`), no full local copy retained. Honest progress estimate shown up front since this is bandwidth-bound. Default remains the 1-second metadata check.
@@ -109,7 +113,7 @@ Verify multiple folder+manifest pairs in one run, fed by the projects registry (
 ### M5.3 Scheduled verification (larger, optional)
 launchd-based monthly verify of registered archive folders, writing reports to `~/Documents/STSyncTool/logs/` and surfacing failures in-app on next launch (banner: "2 archives failed verification on June 1"). No daemon, no background app, just a launchd plist the app installs on request.
 
-**Sequencing suggestion:** M5.1 and M5.2 are cheap and high value. M5.3 only if archives have actually bitten you before.
+**Sequencing:** M5.0 first (it unblocks headless testing), then M5.1 and M5.2 in either order. M5.3 only if archives have actually bitten you before; not approved, do not start.
 
 ---
 
@@ -123,8 +127,30 @@ launchd-based monthly verify of registered archive folders, writing reports to `
 
 ---
 
-## Suggested /loop order
+## M7: Beta distribution (approved 2026-06-12)
 
-M1.1 → M1.2 → M1.3 → M1.4 → M2 → M1.5 → M3 → M4.1 → M4.2 spike → (M5 pending sign-off) → M4.3/M6 as appetite allows.
+End goal: a finished app ready to hand to beta testers who are not developers. These items are required before recruiting any testers.
 
-M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
+### M7.1 One-click install (signed DMG)
+Package the app as a normal macOS .app inside a DMG (PyInstaller or Briefcase; evaluate both, pick the one that handles PyQt6 + bundled binaries with least friction). Code-sign and notarize so Gatekeeper shows no warnings. Requires an Apple Developer account ($99/year, Richard to set up; the build scripts can be written and tested unsigned before the account exists). Document the build in a `release.md` runbook.
+**Done when:** a fresh Mac can download the DMG, drag to Applications and launch with no security warnings and no terminal use. ffmpeg/rclone dependency handling decided and documented (bundle vs first-run install prompt).
+
+### M7.2 CI on GitHub Actions
+macOS runner executing the full pytest suite, including the pytest-qt GUI tests that cannot run in the local sandbox, on every push. Coverage report in the job output.
+**Done when:** a failing test fails the workflow on push to main and the README shows a status badge.
+
+### M7.3 Feedback and crash loop
+"Report a problem" menu item that zips recent logs from `~/Documents/STSyncTool/` plus the app version into one file the tester can email. Visible version number in the UI (About dialog or window title). Zip/collect logic in `core/` or `utils/`, thin GUI on top.
+**Done when:** the zip contains logs + version + OS info, core logic unit tested, manual GUI check on the Mac.
+
+### M7.4 Quick start guide
+One page with screenshots covering the three core flows: offload a card, merge a project, verify an archive. Lives in the repo (`docs/QUICKSTART.md`) and ships with the DMG.
+**Done when:** a non-developer can complete each flow following only the guide.
+
+---
+
+## Suggested /loop order (sequencing approved by Richard 2026-06-12)
+
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 → M1.5 → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M7.3 → M7.4 → recruit beta testers.
+
+M4.3 and M6 as appetite allows; they do not block beta. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
