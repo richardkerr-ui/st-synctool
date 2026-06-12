@@ -1,110 +1,124 @@
-# Roadmap
+# ST SyncTool Roadmap v2 (approved 2026-06-12)
 
-## Completed milestones
+Structured for execution via `/loop`. Milestones are ordered by dependency: hardening first, then features. Each work item lists scope, acceptance criteria and tests. **Tests are the definition of done for every item.** All new logic lives in `core/` or `utils/`, never in `gui/`.
 
-### Phase 1 — SHIPPED
-- Setup wizard (`gui/setup_wizard.py`) replaces manual rclone setup.
-- README documents brew install rclone, rclone config and the
-  `ST_SYNC_RCLONE_REMOTE` override.
-- Default exclude filter for `.DS_Store`, `Thumbs.db`, `desktop.ini`
-  (see `core/offload.py` `SKIP_FILENAMES`).
+## Current state (measured 2026-06-12)
 
-### v1 carry-forward tests — CLOSED
-- Drive-as-server Merge end-to-end validated.
-- Verify drift detection confirmed (rename in Drive web UI triggers
-  MISSING/MISMATCH).
-- `.app` bundle confirmed working after refactor (`build_st_synctool.sh`).
+- 996 non-GUI tests passing. GUI (pytest-qt) tests must run on macOS, they cannot run in the Linux sandbox (PyQt6 unavailable).
+- Coverage on `core/` + `utils/`: **77%** overall.
+- Weakest modules: `rclone_bridge.py` 11%, `merge_logic.py` 0%, `manifest_helpers.py` 37%, `setup_checks.py` 40%, `oauth_config.py` 43%, `gdrive_utils.py` 63%.
+- Top untested high-risk functions per code-review-graph: `amphetamine.end_session` (0.85), `projects._load`, `transfer.log`, `gdrive_utils.is_gdrive_url`, `gdrive_url_to_rclone`, `oauth_config.get_active_remote`, `rclone_bridge._run`, `TransferError`.
+- Shipped and closed: Phase 1 setup wizard, Phase 2 byte-level progress, Phase 3 conflict resolution UI, SCHEMA_INTEROP_SPEC, Layer 3 property-based tests, install.sh.
 
-## Install UX
+### Loop session notes
 
-`install.sh` (curl one-liner) was built to address friction observed on a real first-time install on a fresh Mac. All identified issues are resolved:
-
-- Homebrew not in PATH mid-script — `setup.sh` and `install.sh` eval shellenv immediately after install
-- Re-clone fails on existing directory — `install.sh` detects existing checkout and does `git pull` instead
-- rclone OAuth empty/failed token — `install.sh` validates with `rclone lsd gdrive:` post-config and surfaces a clear reconnect prompt; in-app setup wizard re-checks on every launch
-- No single install command — `install.sh` handles Xcode CLT, Homebrew, Python, rclone, clone/update, venv, and auth in one shot
-
-Remaining gap: no automated test of `install.sh` itself. Validate manually on a fresh VM before any major version release.
+- Rebuild the graph each session: `code-review-graph build --repo . --data-dir /tmp/crg_<uid>`. Stale `/tmp/crg_data` dirs from prior sessions may be owned by another uid and unwritable, so use a fresh uniquely named dir and query `graph.db` read-only.
+- Run `/cover-risk` at the start of any milestone touching `core/` to re-rank targets.
+- Any GUI changes get logic extracted into `core/` so it is testable headlessly, with a thin Qt layer on top.
 
 ---
 
-## v2 work in progress
+## M1: Test hardening (blocks everything else)
 
-- Phase 2: Live byte-level progress + ETA — SHIPPED. `copy_source_to_staging` now emits `(src, dst, bytes_done, bytes_total)`. The offload tab cell shows `"45% (1.2 GB/2.6 GB ~3m)"` during the COPYING phase. Next: per-chunk progress for very large individual files (currently per-file granularity).
-- Phase 3: Conflict resolution UI for BOTH_CHANGED Merge rows — SHIPPED. Added "Keep Local" / "Keep Server" quick-action buttons to the conflict detail panel, a live unresolved-conflict counter ("N/M conflicts unresolved" / "All resolved") that updates on every combo change, and Prev/Next conflict navigation buttons. 14 new tests across `TestSetActionForSelected`, `TestUnresolvedConflictCount`, `TestNavigateConflict`, `TestConflictActionChangedSignal`.
+### M1.1 Investigate `merge_logic.py` ✅ DONE 2026-06-12
+0% coverage, 16 statements, absent from the README architecture map. Determine whether it is dead code superseded by `comparison.py`/`merge_ops.py`.
+**Findings:** Not dead code — actively imported by `gui/merge_tab.py`. Contains `build_server_manifest`, which routes server-side manifest generation to either `rclone_bridge.lsjson_to_manifest` (GDrive) or `generate_manifest_fast` (local). Added `tests/test_merge_logic.py` (9 tests). Coverage: 0% → 100%.
+**Done when:** module is either deleted (with grep proof of zero imports) or documented and covered to 90%+.
 
-## Testing roadmap
+### M1.2 Cover high-risk untested functions
+Targets from the risk index above, in risk order. Mock subprocess, osascript and filesystem per the `/cover-risk` conventions.
+**Done when:** every production function with `caller_count > 5` shows `tested` in a fresh code-review-graph build, or has a written justification.
 
-### Layer 1 — Manifest schema contract tests
-Parametrized tests that run every writer against every reader to catch schema mismatches (e.g. `checksum` vs `checksums`, missing fields).
+### M1.3 rclone_bridge coverage (11% to 70%+)
+The entire Drive layer rests on this module and it is nearly untested. Test `_run`, progress regex parsing of `--stats-one-line` output, cancel/`_current_proc` locking, error classification. Mock the rclone binary with scripted stdout/stderr fixtures.
+**Done when:** coverage 70%+ and a cancellation race test passes. This is a prerequisite for M3 (Drive to Drive).
 
-| Writers | Readers |
-|---------|---------|
-| `run_offload` | `three_way_diff` |
-| `transfer_folder` | `VerifyWorker._verify_local` |
-| `transfer_folder_rclone` | `write_chain_of_custody_log` |
+### M1.4 Layer 1 manifest schema contract tests
+Parametrized writer x reader matrix from the old roadmap: writers (`run_offload`, `transfer_folder`, `transfer_folder_rclone`) against readers (`three_way_diff`, `VerifyWorker._verify_local`, `write_chain_of_custody_log`).
+**Done when:** all 9 pairs pass, including a deliberately broken-schema fixture that fails loudly.
 
-Estimated effort: ~1 day. Highest signal-to-effort ratio.
-
-### Layer 2 — Pipeline integration tests
-End-to-end pytest fixtures that run the full chain with real files:
-
-```
-src/  →  [offload]  →  dst1/, dst2/  →  [verify]
-local/ + server/   →  [three_way_diff]  →  [apply]  →  [verify]
-```
-
-Parametrize over the key axes:
-
-| Axis | Values |
-|------|--------|
-| File state | new / modified / deleted / renamed / conflicting |
-| Conflict handler | skip / rename / overwrite |
-| Checksum algorithm | sha256 / md5 / xxhash |
-| Manifest schema | prehash (offload) / schema-1.1 (merge) |
-| Paranoid verify | on / off |
-| Drive mode | local / gdrive (rclone-mocked) |
-
-Estimated effort: ~2-3 days.
-
-### Layer 3 — Property-based tests (hypothesis) — DONE
-8 structural invariant tests for `three_way_diff` rename collapse logic; hypothesis found and fixed a real chained-rename suppression bug in `comparison.py` in the process. `tests/test_three_way_diff_properties.py`.
+### M1.5 Layer 2 pipeline integration tests
+End-to-end fixtures with real files in `/tmp`: offload to two destinations then verify; local + server through diff, apply and verify. Parametrize over file state, conflict handler, checksum algorithm, manifest schema, paranoid on/off and local vs rclone-mocked Drive.
+**Done when:** the matrix runs green in CI-style invocation (`pytest -q`) and total core+utils coverage is 85%+.
 
 ---
 
-## Offload manifest custody block (SCHEMA_INTEROP_SPEC.md)
+## M2: Merge tab summary header (decided)
 
-Largely complete. The following are done:
+Add a summary line above the diff table: "3 conflicts need review · 44 files will sync automatically · 2 deletions held for you." Keep the full table as-is.
 
-- `"offload": { "overall_result", "destinations": [...], "verified_files": {...} }` block in the JSON manifest
-- `"reason": "normalize"` on offload rename entries (top-level `renames[]`)
-- `save_offload_manifest` writes to all committed destinations after the per-destination loop
-- All 6 SCHEMA_INTEROP_SPEC acceptance tests
+- Count computation lives in `core/comparison.py` (or a new `core/diff_summary.py`), returning a typed summary from a list of diff rows. The GUI only renders the string.
+- Counter updates live when the user changes per-row actions (reuse the Phase 3 unresolved-conflict signal).
 
-All items in this section are done. SCHEMA_INTEROP_SPEC.md is fully implemented.
+**Done when:** summary function fully unit tested (all 10 DiffStates plus action overrides), GUI smoke test confirms the label renders and updates, README Merge section updated.
 
 ---
 
-## v2 candidates (not yet committed)
+## M3: Drive to Drive transfers (committed)
 
-- Drive to Drive transfers. Plumbing mostly exists. Real ask: moving a
-  project between ST Drive folders without burning local disk space.
-- Local NAS server merge speed. Full hash walk on first scan; pre-filter
-  helps but still slow. Worth profiling.
+Real ask: move a project between ST Drive folders without burning local disk space.
+
+1. Remove the guard in `transfer_folder_rclone()`.
+2. Build per-side flag lists via `gdrive_url_to_rclone()` on each endpoint.
+3. Add `--drive-server-side-across-configs` handling and verify rclone behavior for same-remote folder to folder copies.
+4. Pre-flight: skip local free-space check, keep the 750 GB/day warning (applies to server-side copies too), label estimated time as server-side.
+5. Manifest handling: define where `st_manifest.json` is generated from (hash source: Drive metadata via rclone, paranoid mode unavailable, document it).
+6. UI: remove the "not supported" path in transfer tab routing.
+
+**Done when:** mocked-rclone unit tests cover routing, flags and failure paths; one manual end-to-end against a junk Drive folder is logged; README "Known limitations" updated.
 
 ---
 
-## Merge tab UX — under consideration
+## M4: Offload improvements
 
-The merge tab currently shows all 10 diff states (Unchanged, Local Only, Server Only, Local Changed, Server Changed, Conflict, Deleted Locally, Deleted Server, Deleted Both, Renamed). Most of these are auto-resolved — the app has already decided the action. Only `BOTH_CHANGED` rows require user input.
+### M4.1 Resume interrupted offload
+Today a failed offload leaves `.st_staging_{ts}/` plus a failure report and a restart recopies the whole card. Add resume: on start, detect existing staging for the same source/destination pair, re-verify already staged files against the source pre-hash manifest, copy only what is missing or mismatched, then commit normally.
 
-The full table is intentional: it lets users verify what the app is doing before committing, which builds trust. The open question is whether the UI makes the distinction obvious enough — do conflict rows stand out clearly from auto-resolved ones, or does everything feel like homework?
+- Logic in `core/offload.py`. Staging folder gains a small state file (source manifest reference + completed-file list) written atomically as files verify.
+- Chain-of-custody log records that the offload was resumed and which files were reused.
+- Source remains strictly read-only throughout.
 
-**Options under consideration:**
+**Done when:** integration tests cover interrupt-then-resume (mid-copy kill simulated), corrupted-staged-file re-copy and a clean no-op resume. UI shows "Resume available" rather than silently reusing.
 
-- **Progressive disclosure** — default view shows only rows needing a decision, with a "show all files" toggle for users who want the full picture. Preserves granular control without forcing it on everyone.
-- **Status grouping** — group rows into "Needs your decision" (top, expanded) and "Will be handled automatically" (collapsed below). Power users can inspect; everyone else ignores it.
-- **Summary header** — keep the full table but add a clear line above: "3 conflicts need review · 44 files will sync automatically." Lowest-effort, highest clarity gain.
-- **Confidence tiers** — configurable verbosity: always surface conflicts and deletions, optionally hide pure auto-resolved states.
+### M4.2 BRAW contact sheet thumbnails (time-boxed spike first)
+Blackmagic offers no lightweight official CLI. Spike (max 1 day): evaluate (a) ffmpeg builds with BRAW decode patches, (b) Blackmagic RAW SDK sample binaries (`braw` extract tools ship with the free SDK) and (c) shelling to DaVinci Resolve if installed, mirroring the REDline pattern (optional tool, graceful metadata-only fallback).
+**Spike output:** a written recommendation in this file. If a viable path exists, implement behind the same detect-or-fallback pattern as REDline with tests using a fixture sidecar + mocked extractor. If not, close the item with rationale and keep metadata-only tiles.
 
-**Decision pending real-world testing.** Run actual transfers and observe whether the table reads as "review before confirming" or "too much to parse." That result should drive which option gets built.
+### M4.3 Recommended additions (Claude's suggestions, cut freely)
+- **Offload presets:** save source-label/destination combos per project (extends `core/projects.py`) so a DIT can recall "Shoot day" config in one click.
+- **Card capacity sanity check** in pre-flight: warn when destination free space < total source size before copying starts (currently failure surfaces mid-copy as non-retryable disk-full).
+
+---
+
+## M5: Verify expansion (PROPOSAL, needs Richard sign-off before any work)
+
+Intended outcome: move Verify from "spot-check on demand" toward archival assurance, in three independent steps. Approve any subset.
+
+### M5.1 Deep Drive verify (small)
+Optional "Deep verify (downloads files)" checkbox for Drive folders. Streams each file through rclone to a temp hash (`rclone cat | sha256`), no full local copy retained. Honest progress estimate shown up front since this is bandwidth-bound. Default remains the 1-second metadata check.
+
+### M5.2 Batch verify (medium)
+Verify multiple folder+manifest pairs in one run, fed by the projects registry (`~/Documents/STSyncTool/projects.json`). One consolidated report: per-project OK / MISSING / MISMATCH counts. Core logic as a plain function over a list of pairs; the tab gains a "Verify all registered projects" button.
+
+### M5.3 Scheduled verification (larger, optional)
+launchd-based monthly verify of registered archive folders, writing reports to `~/Documents/STSyncTool/logs/` and surfacing failures in-app on next launch (banner: "2 archives failed verification on June 1"). No daemon, no background app, just a launchd plist the app installs on request.
+
+**Sequencing suggestion:** M5.1 and M5.2 are cheap and high value. M5.3 only if archives have actually bitten you before.
+
+---
+
+## M6: Backlog (not committed)
+
+- NAS merge first-scan speed: profile before optimizing. Candidate fix: persist a NAS-side manifest so the modtime+size fast path applies on first scan too.
+- Per-chunk progress for very large single files during offload COPYING.
+- Windows support (DIT carts): large effort, requires replacing pyobjc volume detection, path handling audit and an installer story. Park until there is a concrete user.
+- install.sh automated validation on a fresh macOS VM before major releases (still manual).
+- Merge tab progressive disclosure toggle: revisit only if the M2 summary header proves insufficient in field use.
+
+---
+
+## Suggested /loop order
+
+M1.1 → M1.2 → M1.3 → M1.4 → M2 → M1.5 → M3 → M4.1 → M4.2 spike → (M5 pending sign-off) → M4.3/M6 as appetite allows.
+
+M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
