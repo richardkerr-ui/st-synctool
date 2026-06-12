@@ -134,7 +134,7 @@ Three tabs across the top. Each has its own purpose.
 - **Source** — where the files are coming from. Either a local path (e.g., `/Volumes/Extreme SSD/projects/60318`) or a Google Drive folder URL (e.g., `https://drive.google.com/drive/folders/14cwfEbsoYOuiU_...`)
 - **Destination** — same format options
 
-The app auto-detects which side is local and which is Drive. **Drive → Drive is not supported** — download to local first, then upload.
+The app auto-detects which side is local and which is Drive. **Drive → Drive is supported** and runs server-side: paste Drive URLs in both fields and rclone copies directly between folders without touching local disk.
 
 ### Options
 
@@ -498,7 +498,7 @@ You probably paired the wrong manifest with the wrong Drive folder. Most common 
 
 ## Known limitations
 
-- **Drive → Drive transfers are not supported.** Download to local first, then upload to the other location.
+- **Drive → Drive transfers run server-side.** Paste a Drive URL in both Source and Destination; rclone copies directly between the folders with no local disk used. Paranoid verify is unavailable for this direction (there are no local files to hash); verification relies on Drive checksums. The manifest is built from the destination's Drive metadata and saved to the central archive only. The 750 GB/day limit applies to server-side copies too and is enforced in pre-flight.
 - **Local NAS merges hash every file on the first scan.** Subsequent scans use the modtime+size fast-path and are much faster.
 - **Manual merge is not implemented.** For `BOTH_CHANGED` conflicts you must choose Push or Pull — there is no diff-tool integration. Production binary assets do not benefit from text-merge tooling anyway.
 - **The 750 GB/day Drive upload limit** is enforced as a hard error in pre-flight check.

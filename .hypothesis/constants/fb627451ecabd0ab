@@ -1,0 +1,4 @@
+# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/gui/diff_table.py
+# hypothesis_version: 6.141.1
+
+['#0d2a45', '#132a05', '#2a0d0d', '#2a1a40', '#2a2a2a', '#555555', '#5a9a30', '#5a9fd4', '#888888', '#9070c0', '#c07070', 'Action', 'BOTH_CHANGED', 'Copy path', 'DELETED_BOTH', 'DELETED_LOCAL', 'DELETED_SERVER', 'LOCAL_CHANGED', 'LOCAL_ONLY', 'Open in Drive', 'Path', 'RENAMED', 'Renamed', 'SERVER_CHANGED', 'SERVER_ONLY', 'State', 'UNCHANGED', '_', 'file', 'gdrive_url', 'name', 'path', 'rel_path', 'relative_path']

@@ -86,6 +86,19 @@ def gdrive_url_to_rclone(url: str) -> Tuple[str, List[str]]:
     return f"{RCLONE_REMOTE}:", ["--drive-root-folder-id", fid]
 
 
+def gdrive_url_to_connstr(url: str) -> str:
+    """Connection-string remote for one side of a Drive-to-Drive transfer.
+
+    rclone's --drive-root-folder-id is a global flag, so two Drive endpoints
+    cannot use different root folders that way. Connection strings scope the
+    root folder to one path argument instead: "gdrive,root_folder_id=<id>:".
+    """
+    fid = parse_gdrive_id(url)
+    if not fid:
+        raise ValueError(f"Not a recognizable Google Drive folder URL: {url}")
+    return f"{RCLONE_REMOTE},root_folder_id={fid}:"
+
+
 def get_clipboard_gdrive_url() -> Optional[str]:
     try:
         import pyperclip

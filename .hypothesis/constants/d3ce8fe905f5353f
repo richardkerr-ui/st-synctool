@@ -1,0 +1,4 @@
+# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/merge_ops.py
+# hypothesis_version: 6.141.1
+
+['%Y-%m-%d', '-- choose --', '.', 'Delete Local', 'Delete Server', 'Pull from Server', 'Push to Server', 'Skip', 'error', 'info', 'method', 'post', 'pre', 'rclone-checksum', 'renamed_to', 'sha256', 'success', 'verified', 'warning']

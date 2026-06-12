@@ -192,3 +192,26 @@ class TestGetClipboardGdriveUrl:
     def test_none_when_clipboard_unavailable(self):
         with patch("pyperclip.paste", side_effect=RuntimeError):
             assert get_clipboard_gdrive_url() is None
+
+
+# ---------------------------------------------------------------------------
+# M3: connection-string helper for Drive-to-Drive
+# ---------------------------------------------------------------------------
+
+from utils.gdrive_utils import gdrive_url_to_connstr
+
+
+class TestGdriveUrlToConnstr:
+    def test_builds_connection_string(self, monkeypatch):
+        monkeypatch.setattr(gu, "RCLONE_REMOTE", "gdrive")
+        url = "https://drive.google.com/drive/folders/abc-123_X"
+        assert gdrive_url_to_connstr(url) == "gdrive,root_folder_id=abc-123_X:"
+
+    def test_custom_remote_name(self, monkeypatch):
+        monkeypatch.setattr(gu, "RCLONE_REMOTE", "teamdrive")
+        url = "https://drive.google.com/open?id=zzz999"
+        assert gdrive_url_to_connstr(url) == "teamdrive,root_folder_id=zzz999:"
+
+    def test_invalid_url_raises(self):
+        with pytest.raises(ValueError, match="Not a recognizable"):
+            gdrive_url_to_connstr("/local/path")

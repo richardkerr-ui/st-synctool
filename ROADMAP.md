@@ -62,7 +62,7 @@ Add a summary line above the diff table: "3 conflicts need review · 44 files wi
 
 ---
 
-## M3: Drive to Drive transfers (committed)
+## M3: Drive to Drive transfers (code complete 2026-06-12, manual end-to-end pending)
 
 Real ask: move a project between ST Drive folders without burning local disk space.
 
@@ -74,6 +74,7 @@ Real ask: move a project between ST Drive folders without burning local disk spa
 6. UI: remove the "not supported" path in transfer tab routing.
 
 **Done when:** mocked-rclone unit tests cover routing, flags and failure paths; one manual end-to-end against a junk Drive folder is logged; README "Known limitations" updated.
+**State (2026-06-12):** Code and tests complete; only the manual end-to-end remains. Guard removed; both sides resolve via new `gdrive_url_to_connstr()` (rclone connection strings `gdrive,root_folder_id=<id>:`), because the global `--drive-root-folder-id` flag cannot differ per side. `--drive-server-side-across-configs` passed on sync. Pre-flight: URL destination skips local free-space/mkdir as before, estimate labeled server-side, 750 GB/day enforced for server-side copies (TransferError re-raised out of the size-probe try block). Paranoid verify downgraded with a warning for Drive-to-Drive (no local files to hash); manifest built from destination Drive metadata and saved to the central archive only (`name_hint="drive_to_drive"`). 16 new tests (routing, connstr both sides, server-side flag, paranoid downgrade, archive-only save, failure paths, pre-flight matrix, connstr helper); obsolete guard test replaced. README Transfer + Known limitations updated. **Remaining for DONE: one manual end-to-end against a junk Drive folder on the Mac with real rclone, logged here.** Suggested check: create two junk folders in Drive, paste both URLs in the Transfer tab, confirm files appear and `~/Documents/STSyncTool/manifests/drive_to_drive/` gains a manifest.
 
 ---
 

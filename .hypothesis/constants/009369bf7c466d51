@@ -1,0 +1,4 @@
+# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/manifest_helpers.py
+# hypothesis_version: 6.141.1
+
+[1024, 86400, '%Y-%m-%d %H:%M', 'B', 'GB', 'KB', 'MB', 'TB', 'created_at', 'unknown']

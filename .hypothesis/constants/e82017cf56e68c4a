@@ -1,0 +1,4 @@
+# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/gui/log_widget.py
+# hypothesis_version: 6.141.1
+
+[100, '#4caf50', '#cccccc', '#f44336', '#ff9800', '%H:%M:%S', '-', '/', 'Clear', 'Courier New', 'LogFrame', '\\', 'background: #1e1e1e;', 'error', 'info', 'int | None', 'success', 'warning', '•', 'ℹ', '⚠', '✔', '✖']

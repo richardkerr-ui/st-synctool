@@ -1,0 +1,4 @@
+# file: /sessions/great-peaceful-einstein/mnt/ST SyncTool/core/projects.py
+# hypothesis_version: 6.155.2
+
+['Documents', 'STSyncTool', 'app_settings', 'conflicts', 'created_at', 'display_name', 'files_changed', 'history', 'last_merged_at', 'latest_manifest', 'local_path', 'manifest_path', 'merged_at', 'naming_preferences', 'offload_dest_presets', 'preserve_renames', 'project_id', 'projects.json', 'server_path']

@@ -1,0 +1,4 @@
+# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/amphetamine.py
+# hypothesis_version: 6.141.1
+
+['-e', 'Amphetamine Required', 'darwin', 'osascript', 'true']

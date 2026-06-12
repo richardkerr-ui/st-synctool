@@ -83,10 +83,14 @@ class TestGuardRails:
         with pytest.raises(TransferError, match="rclone is not installed"):
             transfer_folder_rclone(str(tmp_path), DRIVE_URL, log_cb=log_cb)
 
-    def test_raises_on_drive_to_drive(self, rclone, log_cb):
+    def test_drive_to_drive_no_longer_raises(self, rclone, log_cb, monkeypatch):
+        # M3 removed the Drive-to-Drive guard; both-URL transfers now route
+        # through connection-string remotes (see TestDriveToDrive below).
+        monkeypatch.setattr("core.transfer.gdrive_url_to_connstr",
+                            lambda u: "gdrive,root_folder_id=x:")
         other = "https://drive.google.com/drive/folders/xyz"
-        with pytest.raises(TransferError, match="Drive-to-Drive"):
-            transfer_folder_rclone(DRIVE_URL, other, log_cb=log_cb)
+        result = transfer_folder_rclone(DRIVE_URL, other, log_cb=log_cb)
+        assert "manifest" in result
 
     def test_raises_when_rclone_copy_fails(self, tmp_path, rclone, log_cb):
         rclone.sync.return_value = False
@@ -319,3 +323,120 @@ class TestGracefulDegradation:
         result = transfer_folder_rclone(str(tmp_path), DRIVE_URL, log_cb=log_cb)
         assert _any_warning(log_cb, "Could not save JSON manifest")
         assert "manifest" in result
+
+
+# ---------------------------------------------------------------------------
+# M3: Drive-to-Drive transfers
+# ---------------------------------------------------------------------------
+
+SRC_URL = "https://drive.google.com/drive/folders/srcID111"
+DST_URL = "https://drive.google.com/drive/folders/dstID222"
+
+
+@pytest.fixture
+def d2d(rclone, monkeypatch):
+    """rclone fixture plus a deterministic connection-string builder."""
+    monkeypatch.setattr(
+        "core.transfer.gdrive_url_to_connstr",
+        lambda u: f"gdrive,root_folder_id={u.rsplit('/', 1)[-1]}:",
+    )
+    return rclone
+
+
+class TestDriveToDrive:
+    def test_no_longer_guarded(self, d2d, log_cb):
+        result = transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)
+        assert "manifest" in result
+
+    def test_sync_called_with_connstr_both_sides(self, d2d, log_cb):
+        transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)
+        args, kwargs = d2d.sync.call_args
+        assert args[0] == "gdrive,root_folder_id=srcID111:"
+        assert args[1] == "gdrive,root_folder_id=dstID222:"
+
+    def test_server_side_flag_passed(self, d2d, log_cb):
+        transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)
+        kwargs = d2d.sync.call_args[1]
+        assert kwargs["src_flags"] == ["--drive-server-side-across-configs"]
+        assert kwargs["dst_flags"] is None
+
+    def test_announces_server_side_copy(self, d2d, log_cb):
+        transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)
+        assert _any(log_cb, "no local disk")
+
+    def test_paranoid_downgraded_with_warning(self, d2d, log_cb):
+        result = transfer_folder_rclone(SRC_URL, DST_URL,
+                                        paranoid_verify=True, log_cb=log_cb)
+        assert _any_warning(log_cb, "Paranoid verify is unavailable")
+        assert result["manifest"]["checksum_context"]["paranoid"] is False
+
+    def test_manifest_saved_to_archive_only(self, d2d, log_cb):
+        transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)
+        args, kwargs = d2d.save_manifest.call_args
+        assert kwargs.get("name_hint") == "drive_to_drive"
+        assert kwargs.get("source_dir") is None and kwargs.get("dest_dir") is None
+
+    def test_manifest_urls_and_operation(self, d2d, log_cb):
+        result = transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)
+        m = result["manifest"]
+        assert m["source_url"] == SRC_URL
+        assert m["dest_url"] == DST_URL
+        assert m["operation"] == "rclone-transfer"
+        assert m["checksum_context"]["gdrive_mode"] is True
+
+    def test_sync_failure_raises(self, d2d, log_cb):
+        d2d.sync.return_value = False
+        with pytest.raises(TransferError, match="rclone copy failed"):
+            transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)
+
+    def test_mirror_mode_uses_sync_command(self, d2d, log_cb):
+        transfer_folder_rclone(SRC_URL, DST_URL, mirror_mode=True, log_cb=log_cb)
+        assert d2d.sync.call_args[1]["mode"] == "sync"
+
+    def test_route_transfer_dispatches_to_rclone(self, d2d, log_cb):
+        from core.transfer import route_transfer
+        result = route_transfer(SRC_URL, DST_URL, log_cb=log_cb)
+        assert d2d.sync.called
+        assert "manifest" in result
+
+
+def _any(log_cb, substr):
+    return any(substr in c.args[0] for c in log_cb.call_args_list if c.args)
+
+
+class TestDriveToDrivePreflight:
+    def test_750gb_limit_enforced_server_side(self, monkeypatch, log_cb):
+        from core.transfer import pre_flight_checks, GDRIVE_DAILY_LIMIT_BYTES
+        monkeypatch.setattr("core.transfer.is_gdrive_url",
+                            lambda s: "drive.google.com" in str(s))
+        monkeypatch.setattr("core.transfer.gdrive_url_to_rclone",
+                            lambda s: ("gdrive:", []))
+        monkeypatch.setattr("core.transfer.rclone_bridge.remote_size",
+                            lambda *a, **k: (GDRIVE_DAILY_LIMIT_BYTES + 1, 10))
+        with pytest.raises(TransferError, match="750 GB"):
+            pre_flight_checks(SRC_URL, DST_URL, log_cb=log_cb)
+
+    def test_under_limit_flags_server_side(self, monkeypatch, log_cb):
+        from core.transfer import pre_flight_checks
+        monkeypatch.setattr("core.transfer.is_gdrive_url",
+                            lambda s: "drive.google.com" in str(s))
+        monkeypatch.setattr("core.transfer.gdrive_url_to_rclone",
+                            lambda s: ("gdrive:", []))
+        monkeypatch.setattr("core.transfer.rclone_bridge.remote_size",
+                            lambda *a, **k: (10 * 1024**3, 25))
+        summary = pre_flight_checks(SRC_URL, DST_URL, log_cb=log_cb)
+        assert summary["server_side"] is True
+        assert summary["source_size"] == 10 * 1024**3
+        assert _any(log_cb, "server-side copy")
+
+    def test_no_local_freespace_check_for_url_dest(self, monkeypatch, log_cb):
+        # A URL destination must not be mkdir'd or free-space checked
+        from core.transfer import pre_flight_checks
+        monkeypatch.setattr("core.transfer.is_gdrive_url",
+                            lambda s: "drive.google.com" in str(s))
+        monkeypatch.setattr("core.transfer.gdrive_url_to_rclone",
+                            lambda s: ("gdrive:", []))
+        monkeypatch.setattr("core.transfer.rclone_bridge.remote_size",
+                            lambda *a, **k: (1024, 1))
+        summary = pre_flight_checks(SRC_URL, DST_URL, log_cb=log_cb)
+        assert "destination_free" not in summary

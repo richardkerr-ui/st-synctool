@@ -5,7 +5,7 @@ from typing import Callable, Optional
 from core.checksum import compute_all
 from core.manifest import generate_manifest, save_manifest, SCHEMA_VERSION
 from utils.file_utils import folder_size, free_space, format_bytes
-from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
+from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone, gdrive_url_to_connstr
 from core import rclone_bridge
 
 GDRIVE_DAILY_LIMIT_BYTES = 750 * 1024 ** 3
@@ -39,8 +39,22 @@ def pre_flight_checks(source, destination, is_gdrive_dest=False, log_cb=None):
             secs = estimate_time_seconds(total)
             h = int(secs // 3600); m2 = int((secs % 3600) // 60); s = int(secs % 60)
             summary["estimated_human"] = f"{h}h {m2}m {s}s" if h else f"{m2}m {s}s"
-            log(f"Remote source: {format_bytes(total)} across {count} file(s) "
-                f"— est. {summary['estimated_human']} @ 150 MB/s")
+            if dst_is_url:
+                summary["server_side"] = True
+                log(f"Remote source: {format_bytes(total)} across {count} file(s) "
+                    f"— server-side copy (no local disk)")
+                if total is not None and total > GDRIVE_DAILY_LIMIT_BYTES:
+                    raise TransferError(
+                        f"Source is {format_bytes(total)}, which exceeds the Google Drive "
+                        "750 GB/day limit (it applies to server-side copies too).\n"
+                        "Please contact a Signal Theory Productions lead to schedule "
+                        "a direct CloudSync on Synology instead."
+                    )
+            else:
+                log(f"Remote source: {format_bytes(total)} across {count} file(s) "
+                    f"— est. {summary['estimated_human']} @ 150 MB/s")
+        except TransferError:
+            raise
         except Exception as e:
             log(f"Could not determine remote source size: {e}", "warning")
     if not src_is_url:
@@ -226,11 +240,23 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     src_is_url = is_gdrive_url(str(src))
     dst_is_url = is_gdrive_url(str(dst))
 
-    if src_is_url and dst_is_url:
-        raise TransferError("Drive-to-Drive transfers are not yet supported. Use local as an intermediate.")
-
     src_flags = dst_flags = None
-    if src_is_url:
+    if src_is_url and dst_is_url:
+        # M3: Drive-to-Drive — rclone copies server-side, no local disk used.
+        # Per-side root folders cannot be expressed with the global
+        # --drive-root-folder-id flag, so each side gets a connection-string
+        # remote instead ("gdrive,root_folder_id=<id>:").
+        src_str = gdrive_url_to_connstr(str(src))
+        dst_str = gdrive_url_to_connstr(str(dst))
+        src_flags = ["--drive-server-side-across-configs"]
+        label_root = dst_str
+        log("Drive-to-Drive transfer: copying server-side between Drive folders; "
+            "no local disk is used.", "info")
+        if paranoid_verify:
+            log("Paranoid verify is unavailable for Drive-to-Drive (no local files "
+                "to hash); relying on Drive checksums instead.", "warning")
+            paranoid_verify = False
+    elif src_is_url:
         src_str, src_flags = gdrive_url_to_rclone(str(src))
         dst_str = str(Path(dst))
         Path(dst).mkdir(parents=True, exist_ok=True)
@@ -296,7 +322,8 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     try:
         manifest = rclone_bridge.lsjson_to_manifest(
             label_root,
-            extra_flags=(src_flags if src_is_url else dst_flags),
+            extra_flags=(None if (src_is_url and dst_is_url)
+                         else (src_flags if src_is_url else dst_flags)),
             label=f"rclone-{mode}",
         )
     except Exception as e:
@@ -435,6 +462,11 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     # Save manifest JSON next to local side (and central log dir)
     saved_paths = []
     try:
+        if src_is_url and dst_is_url:
+            # No local side: keep the central archive copy only
+            saved_paths = save_manifest(manifest, name_hint="drive_to_drive")
+            log(f"  Manifest saved to {len(saved_paths)} location(s) (archive)", "info")
+            raise StopIteration  # skip the local-side save below
         local_side = Path(dst) if not dst_is_url else Path(src)
         if local_side.exists():
             name_hint = local_side.name if local_side.is_dir() else "rclone_transfer"
@@ -445,6 +477,8 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
                 name_hint=name_hint,
             )
             log(f"  Manifest saved to {len(saved_paths)} location(s)", "info")
+    except StopIteration:
+        pass
     except Exception as e:
         log(f"  Could not save JSON manifest: {e}", "warning")
 
