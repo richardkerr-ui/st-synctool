@@ -5,10 +5,10 @@ Returns MediaVerifyResult dataclass instances — never raises on tool absence.
 Callers should treat advisory=True results as warnings, not failures.
 
 Supported formats:
-  - R3D (.r3d / .RDC clips)        — via REDline (REDCINE-X PRO)
-  - ProRes / MXF (.mov, .mxf)      — frame count comparison via ffprobe
-  - Image sequences (.dpx, .exr)   — file count and frame-number gap detection
-  - ARRIRAW (.ari)                  — via ARRI ART tool (advisory if absent)
+  - R3D (.r3d / .RDC clips)             — via REDline (REDCINE-X PRO)
+  - ProRes / MXF / MP4 (.mov, .mxf, .mp4) — frame count comparison via ffprobe
+  - Image sequences (.dpx, .exr)        — file count and frame-number gap detection
+  - ARRIRAW (.ari)                       — via ARRI ART tool (advisory if absent)
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ _REDLINE_BUNDLE_PATH = Path("/Applications/REDCINE-X PRO.app/Contents/MacOS/REDl
 # Extensions that trigger image-sequence verification
 IMAGE_SEQUENCE_EXTENSIONS: tuple[str, ...] = (".dpx", ".exr")
 
-# Extensions that trigger ProRes/MXF verification
-PRORES_MXF_EXTENSIONS: tuple[str, ...] = (".mov", ".mxf")
+# Extensions that trigger ProRes/MXF/MP4 verification
+PRORES_MXF_EXTENSIONS: tuple[str, ...] = (".mov", ".mxf", ".mp4")
 
 
 # ---------------------------------------------------------------------------
