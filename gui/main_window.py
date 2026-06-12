@@ -18,7 +18,7 @@ from core.demo import (
     ensure_demo_merge_folders,
 )
 from gui                  import theme
-from core.setup_checks    import check_rclone_auth, CheckStatus, create_gdrive_remote
+from core.setup_checks    import check_rclone_auth, CheckStatus, create_gdrive_remote, run_all_checks
 from core.oauth_config    import get_active_remote, get_remote_account_email
 
 
@@ -42,10 +42,32 @@ class _AccountLabelWorker(QThread):
         self.remote = remote
 
     def run(self):
-        # _check_auth_health already ran rclone lsd which refreshes the token,
-        # so the config file has a fresh access_token by the time we get here.
         email = get_remote_account_email(self.remote) or ""
         self.result_ready.emit(self.remote, email)
+
+
+class _StartupCheckWorker(QThread):
+    """Runs run_all_checks() off the main thread so startup doesn't block."""
+    finished = pyqtSignal(list)  # List[CheckResult]
+
+    def __init__(self, remote: str):
+        super().__init__()
+        self.remote = remote
+
+    def run(self):
+        self.finished.emit(run_all_checks(self.remote))
+
+
+class _AuthHealthWorker(QThread):
+    """Runs check_rclone_auth() off the main thread for the periodic health check."""
+    finished = pyqtSignal(object)  # CheckResult
+
+    def __init__(self, remote: str):
+        super().__init__()
+        self.remote = remote
+
+    def run(self):
+        self.finished.emit(check_rclone_auth(self.remote, timeout=10))
 
 
 class MainWindow(QMainWindow):
@@ -56,8 +78,10 @@ class MainWindow(QMainWindow):
         self._force_setup = force_setup
         self._build_ui()
 
-        # Defer wizard until the window is on screen so the dialog has a parent.
-        QTimer.singleShot(100, self._maybe_launch_wizard)
+        # Run startup checks off the main thread so the window paints immediately.
+        self._startup_worker = _StartupCheckWorker(get_active_remote())
+        self._startup_worker.finished.connect(self._on_startup_checks_done)
+        QTimer.singleShot(100, self._startup_worker.start)
 
         # Periodic auth health check (every 10 minutes).
         self._auth_timer = QTimer(self)
@@ -201,12 +225,22 @@ class MainWindow(QMainWindow):
         banner.hide()
         return banner
 
-    def _maybe_launch_wizard(self):
-        if self._force_setup or should_show_wizard():
+    def _on_startup_checks_done(self, results):
+        """Called on the main thread when the off-thread startup checks finish."""
+        needs_wizard = self._force_setup or any(
+            r.status in (CheckStatus.MISSING, CheckStatus.ERROR) for r in results
+        )
+        if needs_wizard:
             self._launch_wizard()
         else:
-            self._check_auth_health()
-        # Offer tutorial to new users after wizard (or on first cold launch)
+            # Reuse the auth result already in `results` — no second network call.
+            auth_result = next(
+                (r for r in results if "authentication" in r.name), None
+            )
+            if auth_result is not None:
+                self._apply_auth_result(auth_result)
+            else:
+                self._check_auth_health()
         self._maybe_launch_tutorial()
 
     def _launch_wizard(self):
@@ -219,12 +253,21 @@ class MainWindow(QMainWindow):
         self._check_auth_health()
 
     def _check_auth_health(self):
+        """Spawn an off-thread worker to check Drive auth without blocking the UI."""
         remote = get_active_remote()
-        result = check_rclone_auth(remote, timeout=10)
+        existing = getattr(self, "_auth_health_worker", None)
+        if existing and existing.isRunning():
+            return
+        self._auth_health_worker = _AuthHealthWorker(remote)
+        self._auth_health_worker.finished.connect(self._apply_auth_result)
+        self._auth_health_worker.start()
+
+    def _apply_auth_result(self, result):
+        """Update the auth banner from a CheckResult (called on the main thread)."""
         if result.status == CheckStatus.OK:
             self._auth_banner.hide()
             self.status_bar.showMessage("Ready")
-            self._update_account_label(remote)
+            self._update_account_label(get_active_remote())
         else:
             self._account_label.setText("")
             _empty = "empty token" in result.message.lower()

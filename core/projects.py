@@ -28,7 +28,14 @@ def _save(data: dict) -> None:
 
 def list_projects() -> list:
     """All registered projects, sorted by display_name."""
-    return sorted(_load().values(), key=lambda p: p.get("display_name", "").lower())
+    projects = []
+    for p in _load().values():
+        if not isinstance(p, dict) or "project_id" not in p:
+            continue
+        if "display_name" not in p:
+            p = dict(p, display_name=Path(p.get("local_path", "")).name or p["project_id"])
+        projects.append(p)
+    return sorted(projects, key=lambda p: p["display_name"].lower())
 
 
 def get_project(project_id: str) -> Optional[dict]:
