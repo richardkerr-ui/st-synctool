@@ -152,6 +152,11 @@ def three_way_diff(base, yours, server) -> list:
 
     final = []
     for result in results:
+        # collapsed_paths wins: if this path is the 'from' of a rename whose 'to'
+        # is already being shown as RENAMED, suppress it even if it is itself a
+        # rename target (chained-rename case).
+        if result.path in collapsed_paths:
+            continue
         if result.path in rename_map:
             entry = rename_map[result.path]
             orig = entry["from"]
@@ -165,6 +170,5 @@ def three_way_diff(base, yours, server) -> list:
                     renamed_from=orig,
                 ))
                 continue
-        if result.path not in collapsed_paths:
-            final.append(result)
+        final.append(result)
     return final
