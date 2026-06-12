@@ -665,35 +665,49 @@ def build_offload_manifest(
     # Only populated when cell_results_for_source is provided (i.e. after all
     # destinations for this source have completed).
     if cell_results_for_source is not None:
-        overall_complete = all(
-            r.state in (CellState.DONE, CellState.THUMBNAILS)
-            for r in cell_results_for_source
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        _log.debug(
+            "[build_offload_manifest] cell_results_for_source count=%d states=%s",
+            len(cell_results_for_source),
+            [r.state for r in cell_results_for_source],
         )
-        destinations_block = []
-        for r in cell_results_for_source:
-            dest_complete = r.state in (CellState.DONE, CellState.THUMBNAILS)
-            verified_files: dict = {}
-            for rel, entry in files.items():
-                sha256 = entry.get("checksums", {}).get("sha256", "")
-                if r.per_file_verify:
-                    is_verified = r.per_file_verify.get(rel, False)
-                else:
-                    is_verified = bool(r.verified) and dest_complete
-                verified_files[rel] = {"verified": is_verified, "sha256": sha256}
-            destinations_block.append({
-                "label":          r.dest_label,
-                "final_path":     str(r.final_path) if r.final_path else "",
-                "primary":        (r.dest_label == cell_results_for_source[0].dest_label),
-                "files_verified": r.files_copied,
-                "bytes_verified": r.bytes_copied,
-                "result":         "COMPLETE" if dest_complete else "FAILED",
-                "verified_files": verified_files,
-                "errors":         list(r.errors),
-            })
-        manifest["offload"] = {
-            "overall_result": "COMPLETE" if overall_complete else "PARTIAL_FAILURE",
-            "destinations":   destinations_block,
-        }
+        try:
+            overall_complete = all(
+                r.state in (CellState.DONE, CellState.THUMBNAILS)
+                for r in cell_results_for_source
+            )
+            destinations_block = []
+            for r in cell_results_for_source:
+                dest_complete = r.state in (CellState.DONE, CellState.THUMBNAILS)
+                verified_files: dict = {}
+                for rel, entry in files.items():
+                    sha256 = entry.get("checksums", {}).get("sha256", "")
+                    if r.per_file_verify:
+                        is_verified = r.per_file_verify.get(rel, False)
+                    else:
+                        is_verified = bool(r.verified) and dest_complete
+                    verified_files[rel] = {"verified": is_verified, "sha256": sha256}
+                destinations_block.append({
+                    "label":          r.dest_label,
+                    "final_path":     str(r.final_path) if r.final_path else "",
+                    "primary":        (r.dest_label == cell_results_for_source[0].dest_label),
+                    "files_verified": r.files_copied,
+                    "bytes_verified": r.bytes_copied,
+                    "result":         "COMPLETE" if dest_complete else "FAILED",
+                    "verified_files": verified_files,
+                    "errors":         list(r.errors),
+                })
+            manifest["offload"] = {
+                "overall_result": "COMPLETE" if overall_complete else "PARTIAL_FAILURE",
+                "destinations":   destinations_block,
+            }
+        except Exception as _exc:
+            _log.error(
+                "[build_offload_manifest] Failed to build offload block: %s",
+                _exc,
+                exc_info=True,
+            )
 
     return manifest
 
@@ -720,10 +734,28 @@ def save_offload_manifest(
         return []
 
     primary = committed[0]
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    _log.debug(
+        "[save_offload_manifest] source=%s committed=%d states=%s",
+        source.label,
+        len(committed),
+        [r.state for r in committed],
+    )
     manifest = build_offload_manifest(
         source, source_manifest, primary.final_path,
         norm_block, committed_results, renames_full,
     )
+    # Guard: if cell_results were provided but offload block is still missing,
+    # something went wrong inside build_offload_manifest — log it clearly.
+    if committed_results is not None and "offload" not in manifest:
+        _log.error(
+            "[save_offload_manifest] offload block missing after build! "
+            "source=%s committed_results count=%d states=%s",
+            source.label,
+            len(committed_results),
+            [r.state for r in committed_results],
+        )
 
     # save_manifest writes to: archive (always) + dest_dir (st_manifest.json)
     saved = save_manifest(
