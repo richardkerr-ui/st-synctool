@@ -41,10 +41,10 @@ else
     echo "✓ Homebrew installed"
 fi
 
-# ── 3. Python and rclone ──────────────────────────────────────────────────────
+# ── 3. Python, rclone and ffmpeg ─────────────────────────────────────────────
 echo ""
-echo "Installing Python and rclone (this takes 1-3 minutes on a first install)..."
-brew install python rclone || { echo ""; echo "  ERROR: 'brew install python rclone' failed."; echo "  Try running it manually, then re-run this installer."; exit 1; }
+echo "Installing Python, rclone and ffmpeg (this takes 1-3 minutes on a first install)..."
+brew install python rclone ffmpeg || { echo ""; echo "  ERROR: 'brew install python rclone ffmpeg' failed."; echo "  Try running it manually, then re-run this installer."; exit 1; }
 
 # ── 4. Clone or update the repo ──────────────────────────────────────────────
 echo ""
