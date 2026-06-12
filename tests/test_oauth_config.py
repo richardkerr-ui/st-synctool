@@ -166,3 +166,130 @@ class TestSaveOauthCredentials:
         cid, csec = get_oauth_credentials()
         assert cid == "rt-id"
         assert csec == "rt-secret"
+
+
+# ---------------------------------------------------------------------------
+# M1.5 coverage top-up: rclone-facing helpers (subprocess + requests mocked)
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch as _patch
+
+import core.oauth_config as oc
+from core.oauth_config import (
+    get_remote_account_email, is_remote_using_default_rclone_creds,
+    list_drive_remotes, save_active_remote,
+)
+
+
+def _proc(stdout="", returncode=0):
+    return SimpleNamespace(stdout=stdout, returncode=returncode)
+
+
+class TestListDriveRemotes:
+    def test_filters_to_drive_type(self):
+        def fake_run(args, **kw):
+            if args[:2] == ["rclone", "listremotes"]:
+                return _proc("gdrive:\ns3backup:\n")
+            if args[-1] == "gdrive":
+                return _proc("[gdrive]\ntype = drive\n")
+            return _proc("[s3backup]\ntype = s3\n")
+        with _patch("core.oauth_config.subprocess.run", side_effect=fake_run):
+            assert list_drive_remotes() == ["gdrive"]
+
+    def test_listremotes_failure_returns_empty(self):
+        with _patch("core.oauth_config.subprocess.run", side_effect=OSError):
+            assert list_drive_remotes() == []
+
+    def test_config_show_failure_skips_remote(self):
+        def fake_run(args, **kw):
+            if args[:2] == ["rclone", "listremotes"]:
+                return _proc("gdrive:\n")
+            raise OSError
+        with _patch("core.oauth_config.subprocess.run", side_effect=fake_run):
+            assert list_drive_remotes() == []
+
+
+class TestGetRemoteAccountEmail:
+    def test_returns_email_on_success(self):
+        token = '{"access_token": "tok123"}'
+        show = _proc(f"[gdrive]\ntype = drive\ntoken = {token}\n")
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"email": "dit@signaltheory.com"}
+        with _patch("core.oauth_config.subprocess.run", return_value=show), \
+             _patch("requests.get", return_value=resp):
+            assert get_remote_account_email("gdrive") == "dit@signaltheory.com"
+
+    def test_no_token_line_returns_none(self):
+        with _patch("core.oauth_config.subprocess.run",
+                    return_value=_proc("[gdrive]\ntype = drive\n")):
+            assert get_remote_account_email("gdrive") is None
+
+    def test_bad_token_json_returns_none(self):
+        with _patch("core.oauth_config.subprocess.run",
+                    return_value=_proc("token = {broken\n")):
+            assert get_remote_account_email("gdrive") is None
+
+    def test_empty_access_token_returns_none(self):
+        with _patch("core.oauth_config.subprocess.run",
+                    return_value=_proc('token = {"access_token": ""}\n')):
+            assert get_remote_account_email("gdrive") is None
+
+    def test_http_error_returns_none(self):
+        show = _proc('token = {"access_token": "tok"}\n')
+        with _patch("core.oauth_config.subprocess.run", return_value=show), \
+             _patch("requests.get", side_effect=ConnectionError):
+            assert get_remote_account_email("gdrive") is None
+
+    def test_subprocess_failure_returns_none(self):
+        with _patch("core.oauth_config.subprocess.run", side_effect=OSError):
+            assert get_remote_account_email("gdrive") is None
+
+
+class TestSaveActiveRemote:
+    def test_writes_active_remote(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.json"
+        monkeypatch.setattr(oc, "_APP_CONFIG_PATH", cfg)
+        save_active_remote("teamdrive")
+        assert json.loads(cfg.read_text())["active_remote"] == "teamdrive"
+
+    def test_preserves_existing_keys(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.json"
+        cfg.write_text('{"other": 1}')
+        monkeypatch.setattr(oc, "_APP_CONFIG_PATH", cfg)
+        save_active_remote("gdrive")
+        data = json.loads(cfg.read_text())
+        assert data == {"other": 1, "active_remote": "gdrive"}
+
+    def test_corrupt_existing_file_is_replaced(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.json"
+        cfg.write_text("{broken")
+        monkeypatch.setattr(oc, "_APP_CONFIG_PATH", cfg)
+        save_active_remote("gdrive")
+        assert json.loads(cfg.read_text())["active_remote"] == "gdrive"
+
+
+class TestIsRemoteUsingDefaultRcloneCreds:
+    def test_custom_client_id_returns_false(self):
+        with _patch("core.oauth_config.subprocess.run",
+                    return_value=_proc("client_id = abc.apps.googleusercontent.com\n")):
+            assert is_remote_using_default_rclone_creds("gdrive") is False
+
+    def test_missing_client_id_returns_true(self):
+        with _patch("core.oauth_config.subprocess.run",
+                    return_value=_proc("[gdrive]\ntype = drive\n")):
+            assert is_remote_using_default_rclone_creds("gdrive") is True
+
+    def test_empty_client_id_returns_true(self):
+        with _patch("core.oauth_config.subprocess.run",
+                    return_value=_proc("client_id =\n")):
+            assert is_remote_using_default_rclone_creds("gdrive") is True
+
+    def test_nonzero_returncode_returns_none(self):
+        with _patch("core.oauth_config.subprocess.run",
+                    return_value=_proc("", returncode=1)):
+            assert is_remote_using_default_rclone_creds("gdrive") is None
+
+    def test_subprocess_failure_returns_none(self):
+        with _patch("core.oauth_config.subprocess.run", side_effect=OSError):
+            assert is_remote_using_default_rclone_creds("gdrive") is None

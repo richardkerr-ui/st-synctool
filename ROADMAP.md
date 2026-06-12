@@ -43,9 +43,10 @@ Parametrized writer x reader matrix from the old roadmap: writers (`run_offload`
 **Done when:** all 9 pairs pass, including a deliberately broken-schema fixture that fails loudly.
 **Findings:** New `tests/test_manifest_writer_reader_matrix.py` (16 tests). All three writers run their real pipelines end-to-end on tmp files (rclone faked at the lsjson layer with real sha256 hashes so the real `lsjson_to_manifest` path runs); manifests are loaded back from the persisted `st_manifest.json`, not taken from return values. All 9 pairs pass plus corruption-detection per writer and the broken-schema fixtures (non-mapping `files`, garbage sizes) which raise in every reader. Notes: (1) `VerifyWorker._verify_local` lives in `gui/verify_tab.py` (PyQt6) so its hash loop is mirrored headlessly, same approach as `test_manifest_schema_contract.py`; the real worker runs in `test_drive_verify.py` on macOS. (2) `write_chain_of_custody_log` consumes flat `{rel: {size, checksum}}` pre-hash manifests, not full schema manifests; full manifests are tolerated (meta keys filtered) — regression-tested.
 
-### M1.5 Layer 2 pipeline integration tests
+### M1.5 Layer 2 pipeline integration tests ✅ DONE 2026-06-12
 End-to-end fixtures with real files in `/tmp`: offload to two destinations then verify; local + server through diff, apply and verify. Parametrize over file state, conflict handler, checksum algorithm, manifest schema, paranoid on/off and local vs rclone-mocked Drive.
 **Done when:** the matrix runs green in CI-style invocation (`pytest -q`) and total core+utils coverage is 85%+.
+**Findings:** New `tests/test_pipeline_integration.py` (24 tests). Pipeline A: offload to 1 and 2 destinations with real files, every dest hash-verified against its persisted manifest, corruption detected, custody log covers both dests, source untouched. Pipeline B: diff → merge_ops apply → clean re-scan for every actionable DiffState including both conflict resolutions, preserve-on-overwrite (asserting the documented persistent-divergence semantics), deletion propagation both directions, a v1.0 base manifest migrating through `load_manifest` and per-algorithm verify (sha256/xxhash3_64/md5); Drive merge path covered with rclone mocked at the bridge. Pipeline C: `transfer_folder` over all three conflict handlers asserting on-disk outcomes plus manifest verification. Coverage top-ups for the weakest modules: `manifest_helpers` 37% → 100%, `oauth_config` 43% → 100%, `gdrive_utils` 61% → 100%. Suite 1115 → 1183 tests, core+utils coverage 83% → **87%**. Note: `utils/volume_watcher.py` (0%) is pyobjc/macOS-callback code exercised only by the excluded `test_volume_watcher.py` GUI file; it will be covered by M7.2 CI on a macOS runner.
 
 ---
 
@@ -179,6 +180,6 @@ Ask questions like "when was this card offloaded and to where?" against `~/Docum
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M7.3 → M7.4 → recruit beta testers.
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M7.3 → M7.4 → recruit beta testers.
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.

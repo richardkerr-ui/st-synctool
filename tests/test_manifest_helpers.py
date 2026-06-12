@@ -90,3 +90,81 @@ class TestEstimateTimeSeconds:
     def test_result_is_float(self):
         result = estimate_time_seconds(1024 * 1024)
         assert isinstance(result, float)
+
+
+# ---------------------------------------------------------------------------
+# M1.5 coverage top-up: full coverage of all four helpers
+# ---------------------------------------------------------------------------
+
+import json as _json
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+from core.manifest_helpers import (
+    fmt_date, fmt_size, manifest_age_days, manifest_age_days_from_iso,
+)
+
+
+class TestManifestAgeDaysFromIso:
+    def test_empty_string_is_zero(self):
+        assert manifest_age_days_from_iso("") == 0
+
+    def test_garbage_is_zero(self):
+        assert manifest_age_days_from_iso("not-a-date") == 0
+
+    def test_ten_days_ago(self):
+        iso = (_dt.now(_tz.utc) - _td(days=10)).isoformat()
+        assert manifest_age_days_from_iso(iso) == 10
+
+    def test_future_date_clamped_to_zero(self):
+        iso = (_dt.now(_tz.utc) + _td(days=5)).isoformat()
+        assert manifest_age_days_from_iso(iso) == 0
+
+
+class TestManifestAgeDays:
+    def test_reads_created_at_field(self, tmp_path):
+        iso = (_dt.now(_tz.utc) - _td(days=3)).isoformat()
+        p = tmp_path / "m.json"
+        p.write_text(_json.dumps({"created_at": iso}))
+        assert manifest_age_days(str(p)) == 3
+
+    def test_falls_back_to_mtime_on_bad_json(self, tmp_path):
+        p = tmp_path / "m.json"
+        p.write_text("{not json")
+        # freshly written file -> 0 days via mtime fallback
+        assert manifest_age_days(str(p)) == 0
+
+    def test_missing_file_is_zero(self, tmp_path):
+        assert manifest_age_days(str(tmp_path / "nope.json")) == 0
+
+
+class TestFmtDate:
+    def test_empty_is_empty(self):
+        assert fmt_date("") == ""
+
+    def test_valid_iso_renders_ymd_hm(self):
+        out = fmt_date("2026-06-12T10:30:00+00:00")
+        assert out.startswith("2026-06-1")  # local tz may shift the day
+        assert ":" in out
+
+    def test_garbage_truncated_to_16(self):
+        assert fmt_date("x" * 40) == "x" * 16
+
+
+class TestFmtSize:
+    def test_none_is_unknown(self):
+        assert fmt_size(None) == "unknown"
+
+    def test_non_numeric_passthrough(self):
+        assert fmt_size("lots") == "lots"
+
+    def test_bytes(self):
+        assert fmt_size(512) == "512 B"
+
+    def test_kilobytes(self):
+        assert fmt_size(4096) == "4.0 KB"
+
+    def test_gigabytes(self):
+        assert fmt_size(int(1.2 * 1024**3)) == "1.2 GB"
+
+    def test_petabytes(self):
+        assert fmt_size(3 * 1024**5).endswith("PB")

@@ -118,3 +118,77 @@ class TestGdriveUrlToRclone:
             "https://drive.google.com/drive/folders/ABC123"
         )
         assert remote == "my_drive:"
+
+
+# ---------------------------------------------------------------------------
+# M1.5 coverage top-up: remote detection and clipboard helpers
+# ---------------------------------------------------------------------------
+
+import json as _json
+from types import SimpleNamespace as _NS
+
+from utils.gdrive_utils import _detect_rclone_remote, get_rclone_remote, get_clipboard_gdrive_url
+
+
+class TestDetectRcloneRemote:
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ST_SYNC_RCLONE_REMOTE", raising=False)
+        monkeypatch.setattr("utils.gdrive_utils.Path.home", lambda: tmp_path)
+
+    def test_env_override_wins(self, monkeypatch):
+        monkeypatch.setenv("ST_SYNC_RCLONE_REMOTE", "enviro:")
+        assert _detect_rclone_remote() == "enviro"
+
+    def test_saved_config_used(self, tmp_path):
+        cfg = tmp_path / ".config" / "st_synctool" / "config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(_json.dumps({"active_remote": "saved_remote"}))
+        assert _detect_rclone_remote() == "saved_remote"
+
+    def test_corrupt_config_falls_through_to_listremotes(self, tmp_path):
+        cfg = tmp_path / ".config" / "st_synctool" / "config.json"
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text("{broken")
+        with patch("utils.gdrive_utils.subprocess.run",
+                   return_value=_NS(stdout="gdrive:\nother:\n")):
+            assert _detect_rclone_remote() == "gdrive"
+
+    def test_prefers_gdrive_among_remotes(self):
+        with patch("utils.gdrive_utils.subprocess.run",
+                   return_value=_NS(stdout="other:\ngdrive:\n")):
+            assert _detect_rclone_remote() == "gdrive"
+
+    def test_first_remote_when_no_gdrive(self):
+        with patch("utils.gdrive_utils.subprocess.run",
+                   return_value=_NS(stdout="teamdrive:\nbackup:\n")):
+            assert _detect_rclone_remote() == "teamdrive"
+
+    def test_default_when_rclone_missing(self):
+        with patch("utils.gdrive_utils.subprocess.run", side_effect=OSError):
+            assert _detect_rclone_remote() == "gdrive"
+
+    def test_default_when_no_remotes(self):
+        with patch("utils.gdrive_utils.subprocess.run", return_value=_NS(stdout="")):
+            assert _detect_rclone_remote() == "gdrive"
+
+
+class TestGetRcloneRemote:
+    def test_delegates_to_active_remote(self, monkeypatch):
+        monkeypatch.setattr("core.oauth_config.get_active_remote", lambda: "live_remote")
+        assert get_rclone_remote() == "live_remote"
+
+
+class TestGetClipboardGdriveUrl:
+    def test_returns_url_when_clipboard_has_one(self):
+        url = "https://drive.google.com/drive/folders/abc123"
+        with patch("pyperclip.paste", return_value=f"  {url}  ".strip() and url):
+            assert get_clipboard_gdrive_url() == url
+
+    def test_none_for_non_drive_text(self):
+        with patch("pyperclip.paste", return_value="hello world"):
+            assert get_clipboard_gdrive_url() is None
+
+    def test_none_when_clipboard_unavailable(self):
+        with patch("pyperclip.paste", side_effect=RuntimeError):
+            assert get_clipboard_gdrive_url() is None
