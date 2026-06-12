@@ -5,11 +5,22 @@ copy_file and save_manifest are mocked — no real file hashing or disk I/O
 beyond tmp_path fixture directories.
 """
 
+import zipfile
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
-from core.transfer import transfer_folder
+from core.transfer import (
+    transfer_folder,
+    pre_flight_checks,
+    copy_file,
+    resolve_folder_conflict,
+    extract_multipart_zip,
+    route_transfer,
+    _compute_local_hashes,
+    TransferError,
+    TransferWarning,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -301,3 +312,470 @@ class TestManifest:
         dst = tmp_path / "dst"
         transfer_folder(src, dst, log_cb=log_cb)
         mock_save_manifest.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestPreFlightChecks
+# ---------------------------------------------------------------------------
+
+class TestPreFlightChecks:
+    """Tests for pre_flight_checks — patches filesystem + rclone helpers."""
+
+    def _patched(self, monkeypatch, *, src_size=100, free=500, disk_total=1000,
+                 disk_used=200, src_is_url=False, dst_is_url=False):
+        """Return a context that wires monkeypatches and returns pre_flight_checks."""
+        monkeypatch.setattr("core.transfer.is_gdrive_url",
+                            lambda s: src_is_url if "drive.google.com/src" in s else dst_is_url)
+        monkeypatch.setattr("core.transfer.folder_size", lambda p: src_size)
+        monkeypatch.setattr("core.transfer.free_space", lambda p: free)
+        import shutil
+        fake_usage = MagicMock()
+        fake_usage.total = disk_total
+        fake_usage.used = disk_used
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: fake_usage)
+
+    def test_happy_path_returns_summary_with_source_size(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        dst = tmp_path / "dst"
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        monkeypatch.setattr("core.transfer.folder_size", lambda p: 1024 * 1024)
+        monkeypatch.setattr("core.transfer.free_space", lambda p: 10 * 1024 * 1024 * 1024)
+        import shutil
+        fake = MagicMock(); fake.total = 100 * 1024 ** 3; fake.used = 1 * 1024 ** 3
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: fake)
+        result = pre_flight_checks(src, dst)
+        assert "source_size" in result
+        assert result["source_size"] == 1024 * 1024
+
+    def test_raises_transfer_error_when_source_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        missing = tmp_path / "does_not_exist"
+        dst = tmp_path / "dst"
+        with pytest.raises(TransferError, match="Source does not exist"):
+            pre_flight_checks(missing, dst)
+
+    def test_raises_transfer_error_when_not_enough_free_space(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        dst = tmp_path / "dst"
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        monkeypatch.setattr("core.transfer.folder_size", lambda p: 200)
+        monkeypatch.setattr("core.transfer.free_space", lambda p: 50)
+        import shutil
+        fake = MagicMock(); fake.total = 1000; fake.used = 900
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: fake)
+        with pytest.raises(TransferError, match="Not enough space"):
+            pre_flight_checks(src, dst)
+
+    def test_raises_transfer_error_when_exceeds_gdrive_daily_limit(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        dst = "https://drive.google.com/drive/folders/abc"
+        monkeypatch.setattr("core.transfer.is_gdrive_url",
+                            lambda s: "drive.google.com" in s)
+        big = 800 * 1024 ** 3  # 800 GiB > 750 GiB limit
+        monkeypatch.setattr("core.transfer.folder_size", lambda p: big)
+        with pytest.raises(TransferError, match="750 GB"):
+            pre_flight_checks(src, dst, is_gdrive_dest=True)
+
+    def test_raises_transfer_warning_when_disk_over_90_pct(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        dst = tmp_path / "dst"
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        monkeypatch.setattr("core.transfer.folder_size", lambda p: 100)
+        monkeypatch.setattr("core.transfer.free_space", lambda p: 1000)
+        import shutil
+        # used=950, total=1000 -> (950 + 100) / 1000 = 105% > 90%
+        fake = MagicMock(); fake.total = 1000; fake.used = 950
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: fake)
+        with pytest.raises(TransferWarning, match="full after transfer"):
+            pre_flight_checks(src, dst)
+
+    def test_log_cb_called_when_provided(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        dst = tmp_path / "dst"
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        monkeypatch.setattr("core.transfer.folder_size", lambda p: 1024)
+        monkeypatch.setattr("core.transfer.free_space", lambda p: 10 * 1024 ** 3)
+        import shutil
+        fake = MagicMock(); fake.total = 100 * 1024 ** 3; fake.used = 1 * 1024 ** 3
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: fake)
+        log_cb = MagicMock()
+        pre_flight_checks(src, dst, log_cb=log_cb)
+        assert log_cb.called
+
+    def test_estimated_human_format_under_one_hour(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        dst = tmp_path / "dst"
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        # 150 MB -> ~1 second at 150 MB/s
+        monkeypatch.setattr("core.transfer.folder_size", lambda p: 150 * 1024 * 1024)
+        monkeypatch.setattr("core.transfer.free_space", lambda p: 10 * 1024 ** 3)
+        import shutil
+        fake = MagicMock(); fake.total = 100 * 1024 ** 3; fake.used = 0
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: fake)
+        result = pre_flight_checks(src, dst)
+        # Should be "Xm Xs" format (no leading hour component)
+        assert "h" not in result["estimated_human"]
+
+
+# ---------------------------------------------------------------------------
+# TestCopyFile
+# ---------------------------------------------------------------------------
+
+class TestCopyFile:
+    """Tests for copy_file — patches compute_all and shutil.copy2."""
+
+    CHECKSUMS_SHA = {"sha256": "deadbeef", "xxhash3_64": "cafebabe"}
+    CHECKSUMS_MD5 = {"md5": "abcdef01", "sha256": "deadbeef"}
+
+    def test_happy_path_returns_verified_true(self, tmp_path):
+        src = tmp_path / "file.txt"
+        src.write_text("hello")
+        dst = tmp_path / "out" / "file.txt"
+        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_SHA), \
+             patch("shutil.copy2"):
+            result = copy_file(src, dst)
+        assert result["verified"] is True
+
+    def test_happy_path_result_has_expected_keys(self, tmp_path):
+        src = tmp_path / "file.txt"
+        src.write_text("hello")
+        dst = tmp_path / "out" / "file.txt"
+        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_SHA), \
+             patch("shutil.copy2"):
+            result = copy_file(src, dst)
+        assert "source_checksums" in result
+        assert "dest_checksums" in result
+
+    def test_raises_transfer_error_on_checksum_mismatch(self, tmp_path):
+        src = tmp_path / "file.txt"
+        src.write_text("hello")
+        dst = tmp_path / "out" / "file.txt"
+        src_cs = {"sha256": "aaaa"}
+        dst_cs = {"sha256": "bbbb"}
+        with patch("core.transfer.compute_all", side_effect=[src_cs, dst_cs]), \
+             patch("shutil.copy2"):
+            with pytest.raises(TransferError, match="Checksum mismatch"):
+                copy_file(src, dst)
+
+    def test_gdrive_mode_uses_md5_key_for_verification(self, tmp_path):
+        src = tmp_path / "file.txt"
+        src.write_text("hello")
+        dst = tmp_path / "out" / "file.txt"
+        cs = {"md5": "match123"}
+        with patch("core.transfer.compute_all", return_value=cs), \
+             patch("shutil.copy2"):
+            result = copy_file(src, dst, gdrive_mode=True)
+        assert result["verified"] is True
+
+    def test_gdrive_mode_mismatch_raises(self, tmp_path):
+        src = tmp_path / "file.txt"
+        src.write_text("hello")
+        dst = tmp_path / "out" / "file.txt"
+        with patch("core.transfer.compute_all", side_effect=[{"md5": "aaa"}, {"md5": "bbb"}]), \
+             patch("shutil.copy2"):
+            with pytest.raises(TransferError, match="md5"):
+                copy_file(src, dst, gdrive_mode=True)
+
+    def test_progress_cb_lambda_passed_to_compute_all(self, tmp_path):
+        """compute_all should receive a progress_cb lambda when progress_cb is set."""
+        src = tmp_path / "file.txt"
+        src.write_text("hello")
+        dst = tmp_path / "out" / "file.txt"
+        pcb = MagicMock()
+        compute_calls = []
+
+        def capture_compute(path, **kwargs):
+            compute_calls.append(kwargs.get("progress_cb"))
+            return self.CHECKSUMS_SHA
+
+        with patch("core.transfer.compute_all", side_effect=capture_compute), \
+             patch("shutil.copy2"):
+            copy_file(src, dst, progress_cb=pcb)
+
+        # Both compute_all calls should have received a non-None callable
+        assert len(compute_calls) == 2
+        for cb in compute_calls:
+            assert callable(cb)
+
+    def test_dst_parent_created_if_missing(self, tmp_path):
+        src = tmp_path / "file.txt"
+        src.write_text("data")
+        dst = tmp_path / "deep" / "nested" / "file.txt"
+        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_SHA), \
+             patch("shutil.copy2"):
+            copy_file(src, dst)
+        assert dst.parent.exists()
+
+    def test_log_cb_called_for_hash_and_verify_steps(self, tmp_path):
+        src = tmp_path / "file.txt"
+        src.write_text("data")
+        dst = tmp_path / "out" / "file.txt"
+        log_cb = MagicMock()
+        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_SHA), \
+             patch("shutil.copy2"):
+            copy_file(src, dst, log_cb=log_cb)
+        messages = [c.args[0] for c in log_cb.call_args_list]
+        assert any("Hash" in m or "Hashing" in m for m in messages)
+
+
+# ---------------------------------------------------------------------------
+# TestResolveFolderConflict
+# ---------------------------------------------------------------------------
+
+class TestResolveFolderConflict:
+    """Tests for resolve_folder_conflict — pure logic, no I/O."""
+
+    def test_same_name_returns_dst_unchanged(self, tmp_path):
+        src = tmp_path / "project"
+        dst = tmp_path / "project"
+        result, same = resolve_folder_conflict(src, dst)
+        assert same is True
+        assert result == dst
+
+    def test_different_name_returns_dst_slash_src_name(self, tmp_path):
+        src = tmp_path / "project"
+        dst = tmp_path / "backup"
+        result, same = resolve_folder_conflict(src, dst)
+        assert same is False
+        assert result == dst / "project"
+
+    def test_edge_case_src_name_with_dots(self, tmp_path):
+        src = tmp_path / "my.project.v2"
+        dst = tmp_path / "archive"
+        result, same = resolve_folder_conflict(src, dst)
+        assert result == dst / "my.project.v2"
+        assert same is False
+
+    def test_edge_case_dst_equals_src_parent(self, tmp_path):
+        # dst is src's own parent — common when user picks containing folder
+        parent = tmp_path / "projects"
+        src = parent / "shoot"
+        result, same = resolve_folder_conflict(src, parent)
+        # "shoot" != "projects", so nesting applies
+        assert result == parent / "shoot"
+        assert same is False
+
+
+# ---------------------------------------------------------------------------
+# TestExtractMultipartZip
+# ---------------------------------------------------------------------------
+
+class TestExtractMultipartZip:
+    """Tests for extract_multipart_zip — uses real zip files in tmp_path."""
+
+    def _make_zip(self, zip_path, filenames):
+        """Create a zip archive containing the given filenames (with dummy content)."""
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for name in filenames:
+                zf.writestr(name, f"content of {name}")
+
+    def test_happy_path_extracts_zip_files(self, tmp_path):
+        self._make_zip(tmp_path / "batch.zip", ["a.txt", "b.txt"])
+        result = extract_multipart_zip(tmp_path)
+        assert len(result) == 1
+        out_dir = tmp_path / "batch"
+        assert out_dir.exists()
+        assert (out_dir / "a.txt").exists()
+
+    def test_returns_list_of_output_paths(self, tmp_path):
+        self._make_zip(tmp_path / "alpha.zip", ["x.txt"])
+        self._make_zip(tmp_path / "beta.zip", ["y.txt"])
+        result = extract_multipart_zip(tmp_path)
+        assert len(result) == 2
+        names = {p.name for p in result}
+        assert names == {"alpha", "beta"}
+
+    def test_bad_zip_logged_as_error_and_skipped(self, tmp_path):
+        (tmp_path / "corrupt.zip").write_text("this is not a zip")
+        log_cb = MagicMock()
+        result = extract_multipart_zip(tmp_path, log_cb=log_cb)
+        assert result == []
+        error_msgs = [c.args[0] for c in log_cb.call_args_list
+                      if len(c.args) >= 2 and c.args[1] == "error"]
+        assert any("corrupt.zip" in m for m in error_msgs)
+
+    def test_missing_directory_returns_empty_list(self, tmp_path):
+        missing = tmp_path / "nonexistent"
+        result = extract_multipart_zip(missing)
+        assert result == []
+
+    def test_no_zips_returns_empty_list(self, tmp_path):
+        (tmp_path / "not_a_zip.txt").write_text("hello")
+        result = extract_multipart_zip(tmp_path)
+        assert result == []
+
+    def test_log_cb_called_on_successful_extract(self, tmp_path):
+        self._make_zip(tmp_path / "test.zip", ["file.txt"])
+        log_cb = MagicMock()
+        extract_multipart_zip(tmp_path, log_cb=log_cb)
+        assert log_cb.called
+
+
+# ---------------------------------------------------------------------------
+# TestComputeLocalHashes
+# ---------------------------------------------------------------------------
+
+class TestComputeLocalHashes:
+    """Tests for _compute_local_hashes — patches compute_all to avoid disk I/O."""
+
+    def test_happy_path_returns_relpath_keyed_dict(self, tmp_path):
+        (tmp_path / "file.txt").write_text("hello")
+        with patch("core.transfer.compute_all", return_value={"sha256": "ABCDEF"}):
+            result = _compute_local_hashes(tmp_path)
+        assert "file.txt" in result
+        assert result["file.txt"] == "abcdef"
+
+    def test_sha256_values_are_lowercased(self, tmp_path):
+        (tmp_path / "upper.txt").write_text("data")
+        with patch("core.transfer.compute_all", return_value={"sha256": "UPPERCASE"}):
+            result = _compute_local_hashes(tmp_path)
+        assert result["upper.txt"] == "uppercase"
+
+    def test_subdir_files_keyed_by_relative_posix_path(self, tmp_path):
+        sub = tmp_path / "subdir"
+        sub.mkdir()
+        (sub / "clip.mov").write_text("video")
+        with patch("core.transfer.compute_all", return_value={"sha256": "aabbcc"}):
+            result = _compute_local_hashes(tmp_path)
+        assert "subdir/clip.mov" in result
+
+    def test_missing_sha256_in_compute_all_skips_entry(self, tmp_path):
+        (tmp_path / "file.txt").write_text("hello")
+        with patch("core.transfer.compute_all", return_value={"md5": "abc"}):
+            result = _compute_local_hashes(tmp_path)
+        assert result == {}
+
+    def test_missing_directory_returns_empty_dict(self, tmp_path):
+        result = _compute_local_hashes(tmp_path / "nonexistent")
+        assert result == {}
+
+    def test_empty_directory_returns_empty_dict(self, tmp_path):
+        result = _compute_local_hashes(tmp_path)
+        assert result == {}
+
+    def test_hash_failure_logs_warning_and_continues(self, tmp_path):
+        (tmp_path / "a.txt").write_text("a")
+        (tmp_path / "b.txt").write_text("b")
+        log_cb = MagicMock()
+        call_count = {"n": 0}
+
+        def flaky(path, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise OSError("permission denied")
+            return {"sha256": "good"}
+
+        with patch("core.transfer.compute_all", side_effect=flaky):
+            result = _compute_local_hashes(tmp_path, log_cb=log_cb)
+
+        # One file should succeed; one warned
+        warnings = [c.args[0] for c in log_cb.call_args_list
+                    if len(c.args) >= 2 and c.args[1] == "warning"]
+        assert any("Hash failed" in w for w in warnings)
+        assert len(result) == 1
+
+    def test_log_cb_reports_file_count_and_size(self, tmp_path):
+        (tmp_path / "file.txt").write_bytes(b"x" * 1024)
+        log_cb = MagicMock()
+        with patch("core.transfer.compute_all", return_value={"sha256": "abc123"}):
+            _compute_local_hashes(tmp_path, log_cb=log_cb)
+        msgs = [c.args[0] for c in log_cb.call_args_list]
+        assert any("Hashed" in m for m in msgs)
+
+
+# ---------------------------------------------------------------------------
+# TestRouteTransfer
+# ---------------------------------------------------------------------------
+
+class TestRouteTransfer:
+    """Tests for route_transfer dispatcher — mocks both branch functions."""
+
+    def _is_drive(self, s):
+        return "drive.google.com" in str(s)
+
+    def test_local_to_local_calls_transfer_folder(self, tmp_path, monkeypatch):
+        called = {}
+
+        def fake_transfer_folder(src, dst, **kwargs):
+            called["fn"] = "transfer_folder"
+            return {"manifest": {}, "errors": [], "actual_dest": str(dst),
+                    "same_name": False, "saved_manifest_paths": []}
+
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        monkeypatch.setattr("core.transfer.transfer_folder", fake_transfer_folder)
+        route_transfer(tmp_path / "src", tmp_path / "dst")
+        assert called["fn"] == "transfer_folder"
+
+    def test_drive_src_calls_transfer_folder_rclone(self, tmp_path, monkeypatch):
+        called = {}
+
+        def fake_rclone(src, dst, **kwargs):
+            called["fn"] = "transfer_folder_rclone"
+            return {"manifest": {}, "errors": [], "actual_dest": str(dst),
+                    "same_name": False, "saved_manifest_paths": []}
+
+        monkeypatch.setattr("core.transfer.is_gdrive_url", self._is_drive)
+        monkeypatch.setattr("core.transfer.transfer_folder_rclone", fake_rclone)
+        route_transfer("https://drive.google.com/drive/folders/abc", str(tmp_path))
+        assert called["fn"] == "transfer_folder_rclone"
+
+    def test_drive_dst_calls_transfer_folder_rclone(self, tmp_path, monkeypatch):
+        called = {}
+
+        def fake_rclone(src, dst, **kwargs):
+            called["fn"] = "transfer_folder_rclone"
+            return {"manifest": {}, "errors": [], "actual_dest": str(dst),
+                    "same_name": False, "saved_manifest_paths": []}
+
+        monkeypatch.setattr("core.transfer.is_gdrive_url", self._is_drive)
+        monkeypatch.setattr("core.transfer.transfer_folder_rclone", fake_rclone)
+        src = tmp_path / "src"
+        src.mkdir()
+        route_transfer(str(src), "https://drive.google.com/drive/folders/abc")
+        assert called["fn"] == "transfer_folder_rclone"
+
+    def test_gdrive_mode_flag_forwarded_to_transfer_folder(self, tmp_path, monkeypatch):
+        received = {}
+
+        def fake_transfer_folder(src, dst, gdrive_mode=False, **kwargs):
+            received["gdrive_mode"] = gdrive_mode
+            return {"manifest": {}, "errors": [], "actual_dest": str(dst),
+                    "same_name": False, "saved_manifest_paths": []}
+
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        monkeypatch.setattr("core.transfer.transfer_folder", fake_transfer_folder)
+        route_transfer(tmp_path / "src", tmp_path / "dst", gdrive_mode=True)
+        assert received["gdrive_mode"] is True
+
+    def test_mirror_mode_forwarded_to_rclone(self, tmp_path, monkeypatch):
+        received = {}
+
+        def fake_rclone(src, dst, mirror_mode=False, **kwargs):
+            received["mirror_mode"] = mirror_mode
+            return {"manifest": {}, "errors": [], "actual_dest": str(dst),
+                    "same_name": False, "saved_manifest_paths": []}
+
+        monkeypatch.setattr("core.transfer.is_gdrive_url", self._is_drive)
+        monkeypatch.setattr("core.transfer.transfer_folder_rclone", fake_rclone)
+        route_transfer("https://drive.google.com/drive/folders/abc", str(tmp_path),
+                       mirror_mode=True)
+        assert received["mirror_mode"] is True
+
+    def test_conflict_handler_forwarded_to_transfer_folder(self, tmp_path, monkeypatch):
+        received = {}
+
+        def fake_transfer_folder(src, dst, conflict_handler="skip", **kwargs):
+            received["conflict_handler"] = conflict_handler
+            return {"manifest": {}, "errors": [], "actual_dest": str(dst),
+                    "same_name": False, "saved_manifest_paths": []}
+
+        monkeypatch.setattr("core.transfer.is_gdrive_url", lambda s: False)
+        monkeypatch.setattr("core.transfer.transfer_folder", fake_transfer_folder)
+        route_transfer(tmp_path / "src", tmp_path / "dst", conflict_handler="rename")
+        assert received["conflict_handler"] == "rename"

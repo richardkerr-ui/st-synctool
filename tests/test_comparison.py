@@ -7,7 +7,7 @@ version; "B" means a different version.
 """
 
 import pytest
-from core.comparison import DiffState, DiffResult, three_way_diff, _is_ignored
+from core.comparison import DiffState, DiffResult, three_way_diff, _is_ignored, is_ignored_path, conflict_suggested_action
 
 
 # ---------------------------------------------------------------------------
@@ -286,3 +286,175 @@ class TestEdgeCases:
         # Manifests without a "files" key at all should also yield nothing.
         results = three_way_diff({}, {}, {})
         assert results == []
+
+
+# ---------------------------------------------------------------------------
+# is_ignored_path — public alias for _is_ignored
+# ---------------------------------------------------------------------------
+
+class TestIsIgnoredPath:
+    # Happy path: well-known ignored filenames at the root
+    def test_manifest_file_is_ignored(self):
+        assert is_ignored_path("st_manifest.json") is True
+
+    def test_ds_store_is_ignored(self):
+        assert is_ignored_path(".DS_Store") is True
+
+    def test_thumbs_db_is_ignored(self):
+        assert is_ignored_path("Thumbs.db") is True
+
+    def test_desktop_ini_is_ignored(self):
+        assert is_ignored_path("desktop.ini") is True
+
+    # Happy path: ignored prefixes
+    def test_contact_sheet_prefix_is_ignored(self):
+        assert is_ignored_path("_contact_sheet_20260101.pdf") is True
+
+    def test_st_staging_prefix_is_ignored(self):
+        assert is_ignored_path(".st_staging_20260101/some_file.mov") is True
+
+    def test_st_failure_prefix_is_ignored(self):
+        assert is_ignored_path(".st_failure_report.txt") is True
+
+    def test_st_offload_prefix_is_ignored(self):
+        assert is_ignored_path(".st_offload_metadata.json") is True
+
+    # Happy path: ignored directory segments
+    def test_thumbnails_dir_segment_is_ignored(self):
+        assert is_ignored_path("project/_thumbnails/frame001.jpg") is True
+
+    def test_thumbnails_at_root_is_ignored(self):
+        assert is_ignored_path("_thumbnails/frame001.jpg") is True
+
+    # Ignored prefix appearing as a mid-path directory segment
+    def test_contact_sheet_dir_segment_is_ignored(self):
+        assert is_ignored_path("some/dir/_contact_sheet_abc/page1.jpg") is True
+
+    # Failure path: normal media files must NOT be ignored
+    def test_regular_mov_not_ignored(self):
+        assert is_ignored_path("project/clip.mov") is False
+
+    def test_regular_jpg_not_ignored(self):
+        assert is_ignored_path("photos/hero.jpg") is False
+
+    def test_nested_real_file_not_ignored(self):
+        assert is_ignored_path("a/b/c/document.pdf") is False
+
+    # Edge cases
+    def test_empty_string_not_ignored(self):
+        # An empty path has no name match and no prefix match
+        assert is_ignored_path("") is False
+
+    def test_windows_separator_thumbnails_is_ignored(self):
+        # Backslash paths (e.g. from a Windows manifest) must still be handled
+        assert is_ignored_path("project\\_thumbnails\\frame001.jpg") is True
+
+    def test_partial_prefix_match_not_ignored(self):
+        # "contact_sheet_" without the leading underscore is NOT a match
+        assert is_ignored_path("contact_sheet_summary.pdf") is False
+
+    def test_name_containing_ignored_word_not_at_start_not_ignored(self):
+        # "my_thumbnails" is not the exact directory name "_thumbnails"
+        assert is_ignored_path("my_thumbnails/frame.jpg") is False
+
+
+# ---------------------------------------------------------------------------
+# conflict_suggested_action
+# ---------------------------------------------------------------------------
+
+class TestConflictSuggestedAction:
+    # Helper: build a minimal DiffResult for BOTH_CHANGED with given modtimes
+    @staticmethod
+    def _conflict(local_mt, server_mt):
+        return DiffResult(
+            path="clip.mov",
+            state=DiffState.BOTH_CHANGED,
+            yours_entry={"modtime": local_mt} if local_mt is not None else {},
+            server_entry={"modtime": server_mt} if server_mt is not None else {},
+        )
+
+    # Happy path: local is newer
+    def test_local_newer_suggests_push(self):
+        result = self._conflict("2026-06-12T10:00:00Z", "2026-06-10T08:00:00Z")
+        assert conflict_suggested_action(result) == "Push to Server"
+
+    # Happy path: server is newer
+    def test_server_newer_suggests_pull(self):
+        result = self._conflict("2026-06-10T08:00:00Z", "2026-06-12T10:00:00Z")
+        assert conflict_suggested_action(result) == "Pull from Server"
+
+    # Happy path: identical modtimes -> Skip
+    def test_equal_modtimes_suggests_skip(self):
+        result = self._conflict("2026-06-10T08:00:00Z", "2026-06-10T08:00:00Z")
+        assert conflict_suggested_action(result) == "Skip"
+
+    # Failure path: missing local modtime
+    def test_missing_local_modtime_suggests_skip(self):
+        result = DiffResult(
+            path="clip.mov",
+            state=DiffState.BOTH_CHANGED,
+            yours_entry={},
+            server_entry={"modtime": "2026-06-10T08:00:00Z"},
+        )
+        assert conflict_suggested_action(result) == "Skip"
+
+    # Failure path: missing server modtime
+    def test_missing_server_modtime_suggests_skip(self):
+        result = DiffResult(
+            path="clip.mov",
+            state=DiffState.BOTH_CHANGED,
+            yours_entry={"modtime": "2026-06-10T08:00:00Z"},
+            server_entry={},
+        )
+        assert conflict_suggested_action(result) == "Skip"
+
+    # Failure path: both entries are None
+    def test_none_entries_suggests_skip(self):
+        result = DiffResult(
+            path="clip.mov",
+            state=DiffState.BOTH_CHANGED,
+            yours_entry=None,
+            server_entry=None,
+        )
+        assert conflict_suggested_action(result) == "Skip"
+
+    # Failure path: uncomparable modtime types raise internally -> Skip
+    def test_incomparable_modtime_types_suggests_skip(self):
+        result = DiffResult(
+            path="clip.mov",
+            state=DiffState.BOTH_CHANGED,
+            yours_entry={"modtime": 12345},
+            server_entry={"modtime": "2026-06-10T08:00:00Z"},
+        )
+        # int vs str comparison raises TypeError; the except block returns Skip
+        assert conflict_suggested_action(result) == "Skip"
+
+    # Edge case: called on a non-BOTH_CHANGED row
+    def test_non_conflict_state_always_returns_skip(self):
+        for state in (
+            DiffState.UNCHANGED,
+            DiffState.LOCAL_ONLY,
+            DiffState.SERVER_ONLY,
+            DiffState.LOCAL_CHANGED,
+            DiffState.SERVER_CHANGED,
+            DiffState.DELETED_LOCAL,
+            DiffState.DELETED_SERVER,
+            DiffState.DELETED_BOTH,
+            DiffState.RENAMED,
+        ):
+            result = DiffResult(
+                path="clip.mov",
+                state=state,
+                yours_entry={"modtime": "2026-06-12T10:00:00Z"},
+                server_entry={"modtime": "2026-01-01T00:00:00Z"},
+            )
+            assert conflict_suggested_action(result) == "Skip", f"expected Skip for {state}"
+
+    # Edge case: integer modtimes (unix timestamps) work correctly
+    def test_integer_modtimes_local_newer(self):
+        result = self._conflict(1_700_000_100, 1_700_000_000)
+        assert conflict_suggested_action(result) == "Push to Server"
+
+    def test_integer_modtimes_server_newer(self):
+        result = self._conflict(1_700_000_000, 1_700_000_100)
+        assert conflict_suggested_action(result) == "Pull from Server"

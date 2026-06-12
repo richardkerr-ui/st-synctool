@@ -1,4 +1,3 @@
-import json
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -27,72 +26,14 @@ from core.merge_ops import (
 )
 from core import projects as project_registry
 from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
+from core.manifest_helpers import (
+    manifest_age_days_from_iso as _manifest_age_days_from_iso,
+    manifest_age_days as _manifest_age_days,
+    fmt_date as _fmt_date,
+    fmt_size as _fmt_size,
+)
+from core.merge_logic import build_server_manifest as _build_server_manifest
 from gui import theme
-
-
-# ── Module-level helpers ──────────────────────────────────────────────────────
-
-def _manifest_age_days_from_iso(iso_str: str) -> int:
-    if not iso_str:
-        return 0
-    try:
-        dt = datetime.fromisoformat(iso_str)
-        delta = datetime.now(timezone.utc) - dt
-        return max(0, delta.days)
-    except Exception:
-        return 0
-
-
-def _manifest_age_days(path: str) -> int:
-    """Days since manifest was created (reads created_at field, falls back to mtime)."""
-    try:
-        data = json.loads(Path(path).read_text())
-        return _manifest_age_days_from_iso(data.get("created_at", ""))
-    except Exception:
-        pass
-    try:
-        return int((datetime.now().timestamp() - Path(path).stat().st_mtime) / 86400)
-    except Exception:
-        return 0
-
-
-def _fmt_date(iso_str: str) -> str:
-    if not iso_str:
-        return ""
-    try:
-        return datetime.fromisoformat(iso_str).astimezone().strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        return iso_str[:16]
-
-
-def _fmt_size(size_bytes) -> str:
-    """Human-readable file size string (e.g. 1.2 GB, 340 MB, 4.0 KB)."""
-    if size_bytes is None:
-        return "unknown"
-    try:
-        n = int(size_bytes)
-    except (TypeError, ValueError):
-        return str(size_bytes)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024:
-            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
-        n /= 1024
-    return f"{n:.1f} PB"
-
-
-def _build_server_manifest(server_path: str, base_manifest=None, log_cb=None, progress_cb=None):
-    """Return a manifest for the server side, routing through rclone for GDrive URLs
-    or generate_manifest_fast for local paths."""
-    if is_gdrive_url(server_path):
-        if log_cb: log_cb("Server is Google Drive — fetching via rclone lsjson...", "info")
-        remote, flags = gdrive_url_to_rclone(server_path)
-        return rclone_bridge.lsjson_to_manifest(remote, extra_flags=flags, label="server")
-    p = Path(server_path)
-    if not p.exists():
-        raise RuntimeError(f"Server path does not exist: {server_path}")
-    if log_cb: log_cb(f"Scanning local server path: {p}", "info")
-    return generate_manifest_fast(p, base_manifest=base_manifest, label="server",
-                                  progress_cb=progress_cb)
 
 
 # ── Dialogs ───────────────────────────────────────────────────────────────────

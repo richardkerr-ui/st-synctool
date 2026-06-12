@@ -705,6 +705,8 @@ class TestEjectSignal:
 # ---------------------------------------------------------------------------
 
 import re as _re
+import json as _json
+import hashlib as _hashlib
 
 
 class TestChainOfCustodyLog:
@@ -882,3 +884,469 @@ class TestEffectiveSubfolder:
     def test_strips_whitespace_from_non_empty_subfolder(self):
         src = OffloadSource(label="A001", path=Path("/tmp/a"), subfolder="  Shared  ")
         assert src.effective_subfolder() == "Shared"
+
+
+# ---------------------------------------------------------------------------
+# _sha256
+# ---------------------------------------------------------------------------
+
+from core.offload import _sha256
+
+
+class TestSha256:
+    def test_returns_64_char_hex_string(self, tmp_path):
+        f = tmp_path / "file.bin"
+        f.write_bytes(b"hello world")
+        result = _sha256(f)
+        assert isinstance(result, str)
+        assert len(result) == 64
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_known_value(self, tmp_path):
+        f = tmp_path / "file.bin"
+        data = b"hello world"
+        f.write_bytes(data)
+        expected = _hashlib.sha256(data).hexdigest()
+        assert _sha256(f) == expected
+
+    def test_different_content_different_hash(self, tmp_path):
+        a = tmp_path / "a.bin"
+        b = tmp_path / "b.bin"
+        a.write_bytes(b"aaa")
+        b.write_bytes(b"bbb")
+        assert _sha256(a) != _sha256(b)
+
+    def test_empty_file_has_known_hash(self, tmp_path):
+        f = tmp_path / "empty.bin"
+        f.write_bytes(b"")
+        expected = _hashlib.sha256(b"").hexdigest()
+        assert _sha256(f) == expected
+
+
+# ---------------------------------------------------------------------------
+# _retryable
+# ---------------------------------------------------------------------------
+
+from core.offload import _retryable
+
+
+class TestRetryable:
+    def test_oserror_is_retryable(self):
+        assert _retryable(OSError("disk error")) is True
+
+    def test_ioerror_is_retryable(self):
+        assert _retryable(IOError("io error")) is True
+
+    def test_connection_reset_is_retryable(self):
+        assert _retryable(ConnectionResetError("reset")) is True
+
+    def test_timeout_is_retryable(self):
+        assert _retryable(TimeoutError("timeout")) is True
+
+    def test_valueerror_is_not_retryable(self):
+        assert _retryable(ValueError("bad value")) is False
+
+    def test_runtimeerror_is_not_retryable(self):
+        assert _retryable(RuntimeError("unexpected")) is False
+
+    def test_keyboardinterrupt_is_not_retryable(self):
+        assert _retryable(KeyboardInterrupt()) is False
+
+
+# ---------------------------------------------------------------------------
+# _copy_with_retries
+# ---------------------------------------------------------------------------
+
+from core.offload import _copy_with_retries
+
+
+class TestCopyWithRetries:
+    def test_copies_file_successfully(self, tmp_path):
+        src = tmp_path / "src.mov"
+        dst = tmp_path / "dest" / "sub" / "dst.mov"
+        src.write_bytes(b"video content")
+        _copy_with_retries(src, dst, max_retries=1, log_cb=MagicMock())
+        assert dst.exists()
+        assert dst.read_bytes() == b"video content"
+
+    def test_creates_destination_parent_dirs(self, tmp_path):
+        src = tmp_path / "src.bin"
+        src.write_bytes(b"x")
+        dst = tmp_path / "a" / "b" / "c" / "dst.bin"
+        _copy_with_retries(src, dst, max_retries=1, log_cb=MagicMock())
+        assert dst.exists()
+
+    def test_retries_on_transient_oserror(self, tmp_path):
+        src = tmp_path / "src.bin"
+        src.write_bytes(b"data")
+        dst = tmp_path / "dst.bin"
+        log_cb = MagicMock()
+        call_count = 0
+
+        original_copy2 = shutil.copy2
+
+        def flaky_copy(s, d):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise OSError("simulated transient error")
+            original_copy2(s, d)
+
+        with patch("core.offload.shutil.copy2", side_effect=flaky_copy):
+            with patch("core.offload.time.sleep"):
+                _copy_with_retries(src, dst, max_retries=3, log_cb=log_cb)
+
+        assert call_count == 2
+        log_cb.assert_called()
+
+    def test_raises_after_max_retries_on_persistent_oserror(self, tmp_path):
+        src = tmp_path / "src.bin"
+        src.write_bytes(b"data")
+        dst = tmp_path / "dst.bin"
+
+        with patch("core.offload.shutil.copy2", side_effect=OSError("persistent")):
+            with patch("core.offload.time.sleep"):
+                with pytest.raises(OSError, match="persistent"):
+                    _copy_with_retries(src, dst, max_retries=2, log_cb=MagicMock())
+
+    def test_non_retryable_error_raised_immediately(self, tmp_path):
+        src = tmp_path / "src.bin"
+        src.write_bytes(b"data")
+        dst = tmp_path / "dst.bin"
+        call_count = 0
+
+        def bad_copy(s, d):
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("not retryable")
+
+        with patch("core.offload.shutil.copy2", side_effect=bad_copy):
+            with pytest.raises(ValueError, match="not retryable"):
+                _copy_with_retries(src, dst, max_retries=3, log_cb=MagicMock())
+
+        # Must not retry a non-retryable exception
+        assert call_count == 1
+
+    def test_logs_warning_on_retry(self, tmp_path):
+        src = tmp_path / "src.bin"
+        src.write_bytes(b"data")
+        dst = tmp_path / "dst.bin"
+        log_cb = MagicMock()
+        call_count = 0
+
+        original_copy2 = shutil.copy2
+
+        def flaky_copy(s, d):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise OSError("transient")
+            original_copy2(s, d)
+
+        with patch("core.offload.shutil.copy2", side_effect=flaky_copy):
+            with patch("core.offload.time.sleep"):
+                _copy_with_retries(src, dst, max_retries=3, log_cb=log_cb)
+
+        warning_calls = [c for c in log_cb.call_args_list if "Retry" in str(c)]
+        assert len(warning_calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# _mark_remaining
+# ---------------------------------------------------------------------------
+
+from core.offload import _mark_remaining, CellResult
+
+
+class TestMarkRemaining:
+    def _make_grid(self, src_label, dest_labels):
+        return {
+            (src_label, d): CellResult(src_label, d)
+            for d in dest_labels
+        }
+
+    def test_marks_all_when_after_is_none(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"))
+        dests = [OffloadDest(label=d, path=Path(f"/tmp/{d}")) for d in ["D1", "D2", "D3"]]
+        grid = self._make_grid("A001", ["D1", "D2", "D3"])
+        status_cb = MagicMock()
+        _mark_remaining(grid, src, dests, CellState.SKIPPED, status_cb, after=None)
+        for d in ["D1", "D2", "D3"]:
+            assert grid[("A001", d)].state == CellState.SKIPPED
+
+    def test_marks_only_after_pivot(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"))
+        dests = [OffloadDest(label=d, path=Path(f"/tmp/{d}")) for d in ["D1", "D2", "D3"]]
+        grid = self._make_grid("A001", ["D1", "D2", "D3"])
+        pivot = dests[0]  # after D1 — only D2 and D3 should be marked
+        status_cb = MagicMock()
+        _mark_remaining(grid, src, dests, CellState.SKIPPED, status_cb, after=pivot)
+        assert grid[("A001", "D1")].state == CellState.PENDING   # pivot not touched
+        assert grid[("A001", "D2")].state == CellState.SKIPPED
+        assert grid[("A001", "D3")].state == CellState.SKIPPED
+
+    def test_status_cb_called_for_each_marked(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"))
+        dests = [OffloadDest(label=d, path=Path(f"/tmp/{d}")) for d in ["D1", "D2"]]
+        grid = self._make_grid("A001", ["D1", "D2"])
+        status_cb = MagicMock()
+        _mark_remaining(grid, src, dests, CellState.SKIPPED, status_cb, after=None)
+        assert status_cb.call_count == 2
+
+    def test_empty_dests_is_no_op(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"))
+        grid = {}
+        status_cb = MagicMock()
+        _mark_remaining(grid, src, [], CellState.SKIPPED, status_cb, after=None)
+        status_cb.assert_not_called()
+
+    def test_marks_failed_state(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"))
+        dests = [OffloadDest(label="D1", path=Path("/tmp/d1"))]
+        grid = self._make_grid("A001", ["D1"])
+        status_cb = MagicMock()
+        _mark_remaining(grid, src, dests, CellState.FAILED, status_cb, after=None)
+        assert grid[("A001", "D1")].state == CellState.FAILED
+
+
+# ---------------------------------------------------------------------------
+# _is_r3d_stem
+# ---------------------------------------------------------------------------
+
+from core.offload import _is_r3d_stem
+
+
+class TestIsR3dStem:
+    def test_valid_r3d_stem_matches(self):
+        assert _is_r3d_stem("A001_C001_210601") is True
+
+    def test_valid_r3d_stem_with_extra_suffix_matches(self):
+        assert _is_r3d_stem("A001_C001_210601_EXTRA") is True
+
+    def test_img_pattern_does_not_match(self):
+        assert _is_r3d_stem("IMG_0001") is False
+
+    def test_generic_sequential_does_not_match(self):
+        assert _is_r3d_stem("CLIP_0001") is False
+
+    def test_empty_string_does_not_match(self):
+        assert _is_r3d_stem("") is False
+
+    def test_lowercase_r3d_stem_matches(self):
+        # Regex uses re.IGNORECASE
+        assert _is_r3d_stem("a001_c001_210601") is True
+
+
+# ---------------------------------------------------------------------------
+# _sequential_pattern_name
+# ---------------------------------------------------------------------------
+
+from core.offload import _sequential_pattern_name
+
+
+class TestSequentialPatternName:
+    def test_img_pattern_returns_name(self):
+        assert _sequential_pattern_name("IMG_0001") == "IMG_XXXX"
+
+    def test_mvi_pattern_returns_name(self):
+        assert _sequential_pattern_name("MVI_0001") == "MVI_XXXX"
+
+    def test_dji_pattern_returns_name(self):
+        assert _sequential_pattern_name("DJI_0001") == "DJI_XXXX"
+
+    def test_gh0_pattern_returns_name(self):
+        assert _sequential_pattern_name("GH012345") == "GH0XXXXX"
+
+    def test_r3d_stem_returns_none(self):
+        assert _sequential_pattern_name("A001_C001_210601") is None
+
+    def test_unique_name_returns_none(self):
+        assert _sequential_pattern_name("INTERVIEW_WIDE_TAKE3") is None
+
+    def test_generic_sequential_returns_fallback(self):
+        # Matches _GENERIC_SEQUENTIAL: 1-4 uppercase + _ + 4-5 digits
+        result = _sequential_pattern_name("XYZ_1234")
+        assert result == "XXXX_NNNN"
+
+    def test_empty_string_returns_none(self):
+        assert _sequential_pattern_name("") is None
+
+
+# ---------------------------------------------------------------------------
+# build_normalized_manifest
+# ---------------------------------------------------------------------------
+
+from core.offload import build_normalized_manifest
+
+
+class TestBuildNormalizedManifest:
+    def _source_manifest(self, names_and_checksums):
+        return {
+            name: {"size": 100, "checksum": cs, "algorithm": "sha256"}
+            for name, cs in names_and_checksums
+        }
+
+    def test_empty_norm_plan_returns_source_unchanged(self):
+        manifest = self._source_manifest([("IMG_0001.mov", "a" * 64)])
+        result, norm_block, renames = build_normalized_manifest(manifest, {})
+        assert result == manifest
+        assert norm_block == {"applied": False}
+        assert renames == []
+
+    def test_renamed_entry_has_original_filename_field(self):
+        checksum = "abcdef12" + "0" * 56
+        manifest = self._source_manifest([("IMG_0001.mov", checksum)])
+        norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
+        result, norm_block, renames = build_normalized_manifest(manifest, norm_plan)
+        assert "IMG_0001_abcdef12.mov" in result
+        assert result["IMG_0001_abcdef12.mov"]["original_filename"] == "IMG_0001.mov"
+
+    def test_renamed_entry_has_hash_suffix_field(self):
+        checksum = "abcdef12" + "0" * 56
+        manifest = self._source_manifest([("IMG_0001.mov", checksum)])
+        norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
+        result, _, _ = build_normalized_manifest(manifest, norm_plan)
+        assert result["IMG_0001_abcdef12.mov"]["filename_hash_suffix"] == "abcdef12"
+
+    def test_renames_full_list_has_from_to_reason(self):
+        checksum = "abcdef12" + "0" * 56
+        manifest = self._source_manifest([("IMG_0001.mov", checksum)])
+        norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
+        _, _, renames_full = build_normalized_manifest(manifest, norm_plan)
+        assert len(renames_full) == 1
+        entry = renames_full[0]
+        assert entry["from"] == "IMG_0001.mov"
+        assert entry["to"] == "IMG_0001_abcdef12.mov"
+        assert entry["reason"] == "normalize"
+
+    def test_norm_block_applied_true_when_renames_present(self):
+        checksum = "abcdef12" + "0" * 56
+        manifest = self._source_manifest([("IMG_0001.mov", checksum)])
+        norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
+        _, norm_block, _ = build_normalized_manifest(manifest, norm_plan)
+        assert norm_block["applied"] is True
+        assert norm_block["method"] == "sha256_prefix8"
+
+    def test_generated_artifacts_key_passed_through(self):
+        checksum = "abcdef12" + "0" * 56
+        manifest = self._source_manifest([("IMG_0001.mov", checksum)])
+        manifest["generated_artifacts"] = {"contact_sheet.jpg": {"type": "thumbnail"}}
+        norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
+        result, _, _ = build_normalized_manifest(manifest, norm_plan)
+        assert "generated_artifacts" in result
+        assert result["generated_artifacts"] == {"contact_sheet.jpg": {"type": "thumbnail"}}
+
+    def test_unrenamed_files_preserved_unchanged(self):
+        checksum_a = "aaaa1234" + "0" * 56
+        checksum_b = "bbbb5678" + "0" * 56
+        manifest = self._source_manifest([
+            ("IMG_0001.mov", checksum_a),
+            ("interview.mov", checksum_b),
+        ])
+        norm_plan = {"IMG_0001.mov": "IMG_0001_aaaa1234.mov"}
+        result, _, _ = build_normalized_manifest(manifest, norm_plan)
+        # interview.mov has no entry in norm_plan — must survive as-is
+        assert "interview.mov" in result
+        assert "original_filename" not in result["interview.mov"]
+
+
+# ---------------------------------------------------------------------------
+# save_offload_manifest
+# ---------------------------------------------------------------------------
+
+from core.offload import save_offload_manifest, build_offload_manifest, CellResult, CellState
+
+
+class TestSaveOffloadManifest:
+    """save_offload_manifest writes manifest JSON to each committed final_path
+    and returns the list of paths saved. We patch save_manifest and direct
+    file writes to tmp_path so the real archive directory is never touched.
+    """
+
+    def _make_committed_result(self, tmp_path, dest_label="NAS"):
+        final = tmp_path / dest_label / "A001"
+        final.mkdir(parents=True, exist_ok=True)
+        r = CellResult(source_label="A001", dest_label=dest_label)
+        r.state = CellState.DONE
+        r.final_path = final
+        r.files_copied = 1
+        r.bytes_copied = 10
+        r.verified = True
+        return r
+
+    def _source_manifest(self):
+        return {
+            "clip.mov": {"size": 10, "checksum": "aa" * 32, "algorithm": "sha256"}
+        }
+
+    def test_returns_list_of_saved_paths(self, tmp_path):
+        src = OffloadSource(label="A001", path=tmp_path / "card")
+        r = self._make_committed_result(tmp_path)
+        mfst = self._source_manifest()
+
+        with patch("core.manifest.save_manifest") as mock_save:
+            mock_save.return_value = [r.final_path / "st_manifest.json"]
+            saved = save_offload_manifest(src, mfst, [r])
+
+        assert isinstance(saved, list)
+        assert len(saved) >= 1
+
+    def test_no_committed_results_returns_empty_list(self, tmp_path):
+        src = OffloadSource(label="A001", path=tmp_path / "card")
+        mfst = self._source_manifest()
+        # Results without final_path set — all filtered out
+        r = CellResult(source_label="A001", dest_label="NAS")
+        r.state = CellState.FAILED
+        saved = save_offload_manifest(src, mfst, [r])
+        assert saved == []
+
+    def test_writes_to_additional_destinations(self, tmp_path):
+        src = OffloadSource(label="A001", path=tmp_path / "card")
+        r1 = self._make_committed_result(tmp_path, "NAS1")
+        r2 = self._make_committed_result(tmp_path, "NAS2")
+        mfst = self._source_manifest()
+
+        with patch("core.manifest.save_manifest") as mock_save:
+            mock_save.return_value = [r1.final_path / "st_manifest.json"]
+            saved = save_offload_manifest(src, mfst, [r1, r2])
+
+        # Second destination manifest written directly via Path.write_text
+        dest2_manifest = r2.final_path / "st_manifest.json"
+        assert dest2_manifest.exists()
+        data = _json.loads(dest2_manifest.read_text())
+        assert data["label"] == "A001"
+
+    def test_manifest_written_to_second_dest_is_valid_json(self, tmp_path):
+        src = OffloadSource(label="A001", path=tmp_path / "card")
+        r1 = self._make_committed_result(tmp_path, "NAS1")
+        r2 = self._make_committed_result(tmp_path, "NAS2")
+        mfst = self._source_manifest()
+
+        with patch("core.manifest.save_manifest") as mock_save:
+            mock_save.return_value = [r1.final_path / "st_manifest.json"]
+            save_offload_manifest(src, mfst, [r1, r2])
+
+        raw = (r2.final_path / "st_manifest.json").read_text()
+        parsed = _json.loads(raw)
+        assert parsed.get("schema_version") is not None
+
+    def test_offload_block_present_when_cell_results_passed(self, tmp_path):
+        src = OffloadSource(label="A001", path=tmp_path / "card")
+        r1 = self._make_committed_result(tmp_path, "NAS1")
+        mfst = self._source_manifest()
+
+        captured = {}
+
+        def capture_save(manifest, **kwargs):
+            captured["manifest"] = manifest
+            dest = kwargs.get("dest_dir") or (tmp_path / "archive")
+            p = Path(dest) / "st_manifest.json"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(_json.dumps(manifest, indent=2))
+            return [p]
+
+        with patch("core.manifest.save_manifest", side_effect=capture_save):
+            save_offload_manifest(src, mfst, [r1])
+
+        assert "offload" in captured["manifest"]
+        assert captured["manifest"]["offload"]["overall_result"] == "COMPLETE"

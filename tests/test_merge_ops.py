@@ -20,6 +20,10 @@ from core.merge_ops import (
     pull_file,
     _local_copy_verify,
     _server_is_url,
+    delete_local,
+    delete_server,
+    _dest_exists_local,
+    _dest_exists_remote,
 )
 
 
@@ -273,3 +277,251 @@ class TestServerIsUrl:
 
     def test_non_gdrive_url_returns_false(self):
         assert _server_is_url("https://example.com/files") is False
+
+
+# ---------------------------------------------------------------------------
+# _dest_exists_local — checks whether rel_path exists under local_root
+# ---------------------------------------------------------------------------
+
+class TestDestExistsLocal:
+    def test_returns_true_when_file_exists(self, tmp_path):
+        (tmp_path / "clip.mov").write_bytes(b"data")
+        assert _dest_exists_local(tmp_path, "clip.mov") is True
+
+    def test_returns_false_when_file_missing(self, tmp_path):
+        assert _dest_exists_local(tmp_path, "ghost.mov") is False
+
+    def test_nested_path_found(self, tmp_path):
+        subdir = tmp_path / "a" / "b"
+        subdir.mkdir(parents=True)
+        (subdir / "clip.mov").write_bytes(b"nested")
+        assert _dest_exists_local(tmp_path, "a/b/clip.mov") is True
+
+    def test_nested_path_missing(self, tmp_path):
+        assert _dest_exists_local(tmp_path, "a/b/ghost.mov") is False
+
+    def test_empty_rel_path_resolves_to_root(self, tmp_path):
+        # Path(tmp_path / "") == tmp_path — a directory exists, so True
+        assert _dest_exists_local(tmp_path, "") is True
+
+
+# ---------------------------------------------------------------------------
+# _dest_exists_remote — local-path branch (no rclone involved)
+# ---------------------------------------------------------------------------
+
+class TestDestExistsRemote:
+    def test_local_server_returns_true_when_file_exists(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        (server / "clip.mov").write_bytes(b"data")
+        assert _dest_exists_remote(str(server), "clip.mov") is True
+
+    def test_local_server_returns_false_when_file_missing(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        assert _dest_exists_remote(str(server), "ghost.mov") is False
+
+    def test_local_server_nested_path_found(self, tmp_path):
+        server = tmp_path / "server"
+        subdir = server / "edits"
+        subdir.mkdir(parents=True)
+        (subdir / "seq.prproj").write_bytes(b"proj")
+        assert _dest_exists_remote(str(server), "edits/seq.prproj") is True
+
+    def test_gdrive_url_delegates_to_rclone_bridge_true(self):
+        gdrive_url = "https://drive.google.com/drive/folders/FAKE123"
+        with patch("core.merge_ops.rclone_bridge.path_exists", return_value=True) as mock_pe:
+            result = _dest_exists_remote(gdrive_url, "clip.mov")
+        assert result is True
+        mock_pe.assert_called_once()
+
+    def test_gdrive_url_delegates_to_rclone_bridge_false(self):
+        gdrive_url = "https://drive.google.com/drive/folders/FAKE123"
+        with patch("core.merge_ops.rclone_bridge.path_exists", return_value=False):
+            result = _dest_exists_remote(gdrive_url, "ghost.mov")
+        assert result is False
+
+    def test_gdrive_url_passes_extra_flags(self):
+        gdrive_url = "https://drive.google.com/drive/folders/FAKE123"
+        with patch("core.merge_ops.rclone_bridge.path_exists", return_value=True) as mock_pe:
+            _dest_exists_remote(gdrive_url, "clip.mov")
+        _, kwargs = mock_pe.call_args
+        assert "extra_flags" in kwargs
+
+
+# ---------------------------------------------------------------------------
+# delete_local — unlink rel_path under local_root
+# ---------------------------------------------------------------------------
+
+class TestDeleteLocal:
+    def test_happy_path_deletes_file(self, tmp_path):
+        target = tmp_path / "clip.mov"
+        target.write_bytes(b"footage")
+        result = delete_local("clip.mov", tmp_path)
+        assert result is True
+        assert not target.exists()
+
+    def test_already_absent_returns_true(self, tmp_path):
+        result = delete_local("ghost.mov", tmp_path)
+        assert result is True
+
+    def test_already_absent_calls_log_cb_with_warning(self, tmp_path):
+        log_calls = []
+        delete_local("ghost.mov", tmp_path, log_cb=lambda msg, lvl: log_calls.append((msg, lvl)))
+        assert any("warning" in lvl for _, lvl in log_calls)
+
+    def test_successful_delete_calls_log_cb_with_warning(self, tmp_path):
+        (tmp_path / "clip.mov").write_bytes(b"data")
+        log_calls = []
+        delete_local("clip.mov", tmp_path, log_cb=lambda msg, lvl: log_calls.append((msg, lvl)))
+        assert any("warning" in lvl for _, lvl in log_calls)
+
+    def test_permission_error_returns_false(self, tmp_path):
+        import pathlib
+        (tmp_path / "locked.mov").write_bytes(b"data")
+        with patch.object(pathlib.Path, "unlink", side_effect=PermissionError("denied")):
+            result = delete_local("locked.mov", tmp_path)
+        assert result is False
+
+    def test_permission_error_calls_log_cb_with_error(self, tmp_path):
+        target = tmp_path / "locked.mov"
+        target.write_bytes(b"data")
+        log_calls = []
+
+        import pathlib
+        with patch.object(pathlib.Path, "unlink", side_effect=OSError("read-only filesystem")):
+            delete_local(
+                "locked.mov", tmp_path,
+                log_cb=lambda msg, lvl: log_calls.append((msg, lvl))
+            )
+        assert any("error" in lvl for _, lvl in log_calls)
+
+    def test_nested_rel_path_deleted(self, tmp_path):
+        subdir = tmp_path / "edits"
+        subdir.mkdir()
+        target = subdir / "seq.prproj"
+        target.write_bytes(b"project")
+        result = delete_local("edits/seq.prproj", tmp_path)
+        assert result is True
+        assert not target.exists()
+
+    def test_no_log_cb_does_not_raise(self, tmp_path):
+        (tmp_path / "clip.mov").write_bytes(b"data")
+        result = delete_local("clip.mov", tmp_path, log_cb=None)
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# delete_server — unlink rel_path on local-path server or via rclone
+# ---------------------------------------------------------------------------
+
+class TestDeleteServer:
+    def test_happy_path_local_server_deletes_file(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        target = server / "clip.mov"
+        target.write_bytes(b"footage")
+        result = delete_server("clip.mov", str(server))
+        assert result is True
+        assert not target.exists()
+
+    def test_local_server_already_absent_returns_true(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        result = delete_server("ghost.mov", str(server))
+        assert result is True
+
+    def test_local_server_already_absent_logs_warning(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        log_calls = []
+        delete_server(
+            "ghost.mov", str(server),
+            log_cb=lambda msg, lvl: log_calls.append((msg, lvl))
+        )
+        assert any("warning" in lvl for _, lvl in log_calls)
+
+    def test_local_server_success_logs_warning(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        (server / "clip.mov").write_bytes(b"data")
+        log_calls = []
+        delete_server(
+            "clip.mov", str(server),
+            log_cb=lambda msg, lvl: log_calls.append((msg, lvl))
+        )
+        assert any("warning" in lvl for _, lvl in log_calls)
+
+    def test_local_server_nested_path_deleted(self, tmp_path):
+        server = tmp_path / "server"
+        subdir = server / "edits"
+        subdir.mkdir(parents=True)
+        target = subdir / "seq.prproj"
+        target.write_bytes(b"proj")
+        result = delete_server("edits/seq.prproj", str(server))
+        assert result is True
+        assert not target.exists()
+
+    def test_local_server_os_error_returns_false(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        (server / "locked.mov").write_bytes(b"data")
+
+        import pathlib
+        with patch.object(pathlib.Path, "unlink", side_effect=OSError("locked")):
+            outcome = delete_server("locked.mov", str(server))
+        assert outcome is False
+
+    def test_local_server_os_error_calls_log_cb(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        (server / "locked.mov").write_bytes(b"data")
+        log_calls = []
+
+        import pathlib
+        with patch.object(pathlib.Path, "unlink", side_effect=OSError("locked")):
+            delete_server(
+                "locked.mov", str(server),
+                log_cb=lambda msg, lvl: log_calls.append((msg, lvl))
+            )
+        assert any("error" in lvl for _, lvl in log_calls)
+
+    def test_gdrive_url_delegates_to_rclone_bridge_success(self):
+        gdrive_url = "https://drive.google.com/drive/folders/FAKE123"
+        with patch("core.merge_ops.rclone_bridge.deletefile", return_value=True) as mock_del:
+            result = delete_server("clip.mov", gdrive_url)
+        assert result is True
+        mock_del.assert_called_once()
+
+    def test_gdrive_url_delegates_to_rclone_bridge_failure(self):
+        gdrive_url = "https://drive.google.com/drive/folders/FAKE123"
+        with patch("core.merge_ops.rclone_bridge.deletefile", return_value=False):
+            result = delete_server("clip.mov", gdrive_url)
+        assert result is False
+
+    def test_gdrive_url_success_logs_warning(self):
+        gdrive_url = "https://drive.google.com/drive/folders/FAKE123"
+        log_calls = []
+        with patch("core.merge_ops.rclone_bridge.deletefile", return_value=True):
+            delete_server(
+                "clip.mov", gdrive_url,
+                log_cb=lambda msg, lvl: log_calls.append((msg, lvl))
+            )
+        assert any("warning" in lvl for _, lvl in log_calls)
+
+    def test_gdrive_url_failure_does_not_log_success(self):
+        gdrive_url = "https://drive.google.com/drive/folders/FAKE123"
+        log_calls = []
+        with patch("core.merge_ops.rclone_bridge.deletefile", return_value=False):
+            delete_server(
+                "clip.mov", gdrive_url,
+                log_cb=lambda msg, lvl: log_calls.append((msg, lvl))
+            )
+        assert not any("warning" in lvl for _, lvl in log_calls)
+
+    def test_no_log_cb_does_not_raise(self, tmp_path):
+        server = tmp_path / "server"
+        server.mkdir()
+        (server / "clip.mov").write_bytes(b"data")
+        result = delete_server("clip.mov", str(server), log_cb=None)
+        assert result is True

@@ -1,4 +1,4 @@
-"""Tests for gui/merge_tab.py — _manifest_age_days_from_iso.
+"""Tests for core/manifest_helpers.py — manifest_age_days_from_iso.
 
 This helper parses ISO timestamps and returns integer day deltas. It has
 no external dependencies but uses datetime.now(timezone.utc), which we
@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gui.merge_tab import _manifest_age_days_from_iso
+from core.manifest_helpers import manifest_age_days_from_iso as _manifest_age_days_from_iso
 
 
 def _iso(dt: datetime) -> str:
@@ -22,7 +22,7 @@ class TestManifestAgeDaysFromIso:
         return datetime(2026, 6, 11, 12, 0, 0, tzinfo=timezone.utc)
 
     def _call(self, iso_str: str) -> int:
-        with patch("gui.merge_tab.datetime") as mock_dt:
+        with patch("core.manifest_helpers.datetime") as mock_dt:
             mock_dt.fromisoformat.side_effect = datetime.fromisoformat
             mock_dt.now.return_value = self._now()
             return _manifest_age_days_from_iso(iso_str)
