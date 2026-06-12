@@ -193,16 +193,20 @@ Why Drive over Synology-direct: field DIT carts are not on the office network, b
 
 **Done when:** unit tests with mocked rclone cover new-file detection, ledger tracking, retry after simulated offline, the never-delete invariant and the 7-day pending threshold; one manual end-to-end against a junk Drive folder; README updated.
 
-### M9.2 Activity index (later)
-A small builder that walks the aggregated corpus into one SQLite file (operation, user, workstation, source, dests, file counts, bytes, verdict, timestamps) for dashboards and fast queries. Includes per-workstation staleness flags (last-reported date) to catch machines whose logs stopped flowing, which is the org-side answer to M9.1's never-reopened-app gap. Also becomes the retrieval layer for M8.3 log Q&A so answers can span the whole org, not just one machine.
-**Done when:** index builds idempotently from the corpus, query helpers tested, staleness flags computed, M8.3 reads from it when present.
+### M9.2 Per-machine activity summaries (the card index)
+Design decided 2026-06-12 after Richard raised in-app reload of older jobs: the app must never list or read raw logs over the network (thousands of small files, slow and rate-limited). Instead M9.1's shipping step also appends one summary line per job to a per-machine file (`activity_{workstation}.jsonl`: operation, timestamp, user, project, source, dests, file count, bytes, verdict, log filename). Each machine writes only its own file, so there are no write conflicts and no server. Org-wide queries read the merged summaries; raw logs are fetched individually only when a human opens one. Staleness flags (last-reported date per workstation) come free from the summaries and cover M9.1's never-reopened-app gap.
+**Done when:** summary line written atomically with each shipped job, merge-and-query helpers in `core/activity_index.py` unit tested, staleness computation tested, corrupt or partial shard files skipped loudly.
 
-**Sequencing (approved):** M9.1 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta; M9.2 alongside or after M8.
+### M9.3 In-app History browser (human-readable dropdowns)
+A History view that renders the merged card index: rows like "Jun 12 · Cart 3 · Offload — A001 → NAS, Shuttle · 312 files · 1.2 TB · VERIFIED" with dropdown filters for operation, workstation/user, project and date range. Own machine's history loads instantly from local files (offline-capable); "Refresh org activity" downloads only the other machines' summary files (kilobytes). No background polling. Selecting a job offers: open its custody log (fetched on demand), re-verify a destination against that job's manifest (uses M5.2) and recall the job's source/dest setup as a preset (promotes the M4.3 offload-presets idea from optional to required here). All query/merge logic in core/; the GUI renders rows and dropdowns only. M8.3 AI Q&A later reads the same merged index for org-wide answers.
+**Done when:** filter and row-formatting logic unit tested headlessly, GUI smoke test on the Mac, refresh works against a junk Drive folder end-to-end, README gains a History section.
+
+**Sequencing (approved):** M9.1 + M9.2 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta (the summary line is written by the same shipping step, so they land together); M9.3 post-beta, before or alongside M8.3 which depends on the same index.
 
 ---
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M9.1 → M7.3 → M7.4 → recruit beta testers (M9.2 post-beta, alongside or after M8).
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.3 → M7.4 → recruit beta testers (M9.3 post-beta, before M8.3).
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
