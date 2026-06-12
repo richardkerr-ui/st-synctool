@@ -49,7 +49,7 @@ End-to-end fixtures with real files in `/tmp`: offload to two destinations then 
 
 ---
 
-## M2: Merge tab summary header (decided)
+## M2: Merge tab summary header ✅ DONE 2026-06-12 (GUI smoke test needs one manual Mac run)
 
 Add a summary line above the diff table: "3 conflicts need review · 44 files will sync automatically · 2 deletions held for you." Keep the full table as-is.
 
@@ -57,6 +57,7 @@ Add a summary line above the diff table: "3 conflicts need review · 44 files wi
 - Counter updates live when the user changes per-row actions (reuse the Phase 3 unresolved-conflict signal).
 
 **Done when:** summary function fully unit tested (all 10 DiffStates plus action overrides), GUI smoke test confirms the label renders and updates, README Merge section updated.
+**Findings:** New `core/diff_summary.py`: `summarize_diff(results, actions)` returns a frozen `DiffSummary` dataclass; `to_text()` renders the header with pluralization and zero-segment omission. The action-options-per-state table moved from `gui/diff_table.py` into core as `ACTION_OPTIONS_BY_STATE` (single source of truth; the GUI imports it). `conflict_action_changed` now fires for every row's combo, not just conflicts, so the header stays live on any action change. 39 unit tests in `test_diff_summary.py` (all 10 states, defaults incl. mtime-based conflict suggestion, overrides, text rendering). Three GUI smoke tests added to `test_gui_smoke.py` (hidden before scan, renders counts, updates on combo change) — **pending one manual run on the Mac** since PyQt6 is unavailable in the sandbox; will also be covered automatically once M7.2 CI lands. README Merge section documents the header. Suite 1076 → 1115 tests, coverage 82% → 83%.
 
 ---
 
@@ -178,6 +179,6 @@ Ask questions like "when was this card offloaded and to where?" against `~/Docum
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 → M1.5 → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M7.3 → M7.4 → recruit beta testers.
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M7.3 → M7.4 → recruit beta testers.
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.

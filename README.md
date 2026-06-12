@@ -191,6 +191,14 @@ For each file, the tool determines its state and proposes a default action:
 | Deleted Server | Used to exist, deleted on server | **Skip** *(no auto-delete locally)* |
 | Deleted Both | Gone everywhere | *(nothing to do)* |
 
+### Summary header
+
+After a scan, a one-line summary appears above the Changes table, for example:
+
+> 3 conflicts need review · 44 files will sync automatically · 2 deletions held for you
+
+It updates live as you change per-row actions: resolving a conflict moves it from "need review" into "will sync automatically", choosing a Delete action shows "N deletions will be applied" and rows set to Skip are counted as skipped. "Deletions held for you" means a file was deleted on one side and the tool is defaulting to Skip rather than propagating the deletion without your say-so. When a scan finds no differences the header reads "Everything in sync, N files unchanged".
+
 ### Inputs
 
 - **Base Manifest** — optional. Auto-detects `st_manifest.json` in the local folder. Only override if you specifically want to compare against a different snapshot from `~/Documents/STSyncTool/manifests/`.

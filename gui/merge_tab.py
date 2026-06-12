@@ -583,10 +583,18 @@ class MergeTab(QWidget):
         root.addWidget(self.progress_bar)
 
     def _build_diff_group(self) -> QGroupBox:
-        """Changes group box containing the diff table."""
+        """Changes group box containing the summary header and the diff table."""
         group = QGroupBox("Changes")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(4, 4, 4, 4)
+        # M2 summary header: "3 conflicts need review · 44 files will sync
+        # automatically · 2 deletions held for you". Computed in core/diff_summary.
+        self.summary_label = QLabel()
+        self.summary_label.setStyleSheet(
+            "color:#cccccc; font-size:12px; font-weight:bold; padding:2px 4px;"
+        )
+        self.summary_label.setVisible(False)
+        layout.addWidget(self.summary_label)
         self.diff_table = DiffTable(self)
         layout.addWidget(self.diff_table)
         return group
@@ -928,6 +936,7 @@ class MergeTab(QWidget):
         visible = [r for r in results if r.state.name != "UNCHANGED"]
         self.diff_table.load_results(visible)
         self._update_unresolved_count()
+        self._update_summary()
 
         total     = len(results)
         changed   = len(visible)
@@ -1123,8 +1132,21 @@ class MergeTab(QWidget):
         self.diff_table.set_action_for_selected(ACT_PULL)
 
     def _on_conflict_action_changed(self, path: str, action: str):
-        """Update the unresolved count label whenever a BOTH_CHANGED combo changes."""
+        """Refresh the counts whenever any row's action combo changes."""
         self._update_unresolved_count()
+        self._update_summary()
+
+    def _update_summary(self):
+        """Recompute the M2 summary header from the last scan's diff results."""
+        from core.diff_summary import summarize_diff
+
+        results = getattr(self, "_diff_results", None)
+        if not results:
+            self.summary_label.setVisible(False)
+            return
+        summary = summarize_diff(results, self.diff_table.get_actions())
+        self.summary_label.setText(summary.to_text())
+        self.summary_label.setVisible(True)
 
     def _update_unresolved_count(self):
         n = self.diff_table.unresolved_conflict_count()

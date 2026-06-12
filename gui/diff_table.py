@@ -10,26 +10,17 @@ from core.merge_ops import (
     ACT_PUSH, ACT_PULL, ACT_DELETE_LOCAL, ACT_DELETE_SERVER, ACT_SKIP
 )
 from core.comparison import conflict_suggested_action
+from core.diff_summary import ACTION_OPTIONS_BY_STATE
 
 
 class DiffTable(QTableWidget):
     _COLUMNS = ["Path", "State", "Action"]
 
-    # For each state, list of actions. First item is the default selection.
-    # BOTH_CHANGED uses a smart per-row default (see load_results); this list
-    # defines the available options only — the initial selection is set by
-    # conflict_suggested_action() when rows are populated.
-    _ACTIONS_BY_STATE = {
-        "LOCAL_ONLY":     [ACT_PUSH,          ACT_DELETE_LOCAL,  ACT_SKIP],
-        "SERVER_ONLY":    [ACT_PULL,          ACT_DELETE_SERVER, ACT_SKIP],
-        "LOCAL_CHANGED":  [ACT_PUSH,          ACT_PULL,          ACT_SKIP],
-        "SERVER_CHANGED": [ACT_PULL,          ACT_PUSH,          ACT_SKIP],
-        "BOTH_CHANGED":   [ACT_SKIP,          ACT_PUSH,          ACT_PULL],
-        "DELETED_LOCAL":  [ACT_SKIP,          ACT_DELETE_SERVER, ACT_PULL],
-        "DELETED_SERVER": [ACT_SKIP,          ACT_DELETE_LOCAL,  ACT_PUSH],
-        "DELETED_BOTH":   [ACT_SKIP],
-        "RENAMED":        [ACT_SKIP,          ACT_PUSH,          ACT_PULL],
-    }
+    # Action options per state live in core/diff_summary.py: the single source
+    # of truth shared with the M2 summary header computation. First item is
+    # the default selection. BOTH_CHANGED uses a smart per-row default (see
+    # load_results); its list defines the available options only.
+    _ACTIONS_BY_STATE = ACTION_OPTIONS_BY_STATE
 
     _STATE_COLORS = theme.STATE_COLORS
 
@@ -52,8 +43,9 @@ class DiffTable(QTableWidget):
     # selection is cleared or a non-conflict row is selected.
     conflict_selected = pyqtSignal(object)
 
-    # Emitted when any BOTH_CHANGED row's action combo changes.
-    # Payload: (path, new_action_text) — lets the parent update unresolved count.
+    # Emitted when any row's action combo changes (M2: was BOTH_CHANGED only).
+    # Payload: (path, new_action_text). The parent uses it to refresh the
+    # unresolved-conflict count and the summary header live.
     conflict_action_changed = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
@@ -154,10 +146,10 @@ class DiffTable(QTableWidget):
             self.setCellWidget(row, 2, combo)
             self._action_combos[path_str] = combo
 
-            if state_name == "BOTH_CHANGED":
-                combo.currentTextChanged.connect(
-                    lambda text, p=path_str: self.conflict_action_changed.emit(p, text)
-                )
+            # Every row reports action changes so the summary header stays live
+            combo.currentTextChanged.connect(
+                lambda text, p=path_str: self.conflict_action_changed.emit(p, text)
+            )
 
         # ResizeToContents doesn't query setCellWidget() sizeHints automatically,
         # so force a column resize after all widgets are in place.

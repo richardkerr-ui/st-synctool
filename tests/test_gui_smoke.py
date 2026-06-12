@@ -65,6 +65,46 @@ class TestMergeTabSmoke:
     def test_scan_btn_initially_enabled(self, tab):
         assert tab.scan_btn.isEnabled()
 
+    # ── M2 summary header ────────────────────────────────────────────────
+
+    def test_summary_label_hidden_before_scan(self, tab):
+        assert hasattr(tab, "summary_label")
+        assert not tab.summary_label.isVisible()
+
+    def test_summary_label_renders_after_load(self, tab):
+        from core.comparison import DiffResult, DiffState
+
+        results = [
+            DiffResult(path="a.mov", state=DiffState.LOCAL_ONLY),
+            DiffResult(path="b.mov", state=DiffState.BOTH_CHANGED),
+            DiffResult(path="c.mov", state=DiffState.DELETED_LOCAL),
+        ]
+        tab._diff_results = results
+        tab.diff_table.load_results(results)
+        tab._update_summary()
+        tab.show()
+        assert tab.summary_label.isVisible()
+        text = tab.summary_label.text()
+        assert "1 conflict needs review" in text
+        assert "1 file will sync automatically" in text
+        assert "1 deletion held for you" in text
+
+    def test_summary_label_updates_on_action_change(self, tab):
+        from core.comparison import DiffResult, DiffState
+        from core.merge_ops import ACT_PUSH
+
+        results = [DiffResult(path="b.mov", state=DiffState.BOTH_CHANGED)]
+        tab._diff_results = results
+        tab.diff_table.load_results(results)
+        tab._update_summary()
+        assert "1 conflict needs review" in tab.summary_label.text()
+
+        # Changing the combo emits conflict_action_changed -> summary refresh
+        combo = tab.diff_table._action_combos["b.mov"]
+        combo.setCurrentText(ACT_PUSH)
+        assert "1 file will sync automatically" in tab.summary_label.text()
+        assert "conflict" not in tab.summary_label.text()
+
 
 # ---------------------------------------------------------------------------
 # OffloadTab
