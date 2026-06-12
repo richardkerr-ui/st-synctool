@@ -149,8 +149,35 @@ One page with screenshots covering the three core flows: offload a card, merge a
 
 ---
 
+## M8: AI assist features (approved 2026-06-12, post-beta)
+
+Optional Claude API integrations. Approved by Richard with the note that every Signal Theory user will have a Claude account. Token cost is negligible (cents per use with claude-haiku-4-5); the design decision is auth, settled as follows: **one Signal Theory workspace API key** configured centrally (env var `ST_SYNC_ANTHROPIC_KEY` or the existing `~/.config/st_synctool/config.json`), so end users never handle billing. A regular Claude.ai subscription does not include API access, so per-user keys would mean per-user developer accounts; central key avoids that entirely.
+
+Shared constraints for all three items:
+- All API logic in `core/ai_assist.py` via the official `anthropic` Python SDK. GUI stays thin.
+- Graceful degradation: if no key is configured the features are hidden, never an error. The app must work fully without them.
+- Privacy: send only metadata (filenames, sizes, hashes, log text), never file contents.
+- Default model `claude-haiku-4-5` (fast, cheapest, ample for summarization); model string in config, not hardcoded.
+- Tests mock the Anthropic client; no live API calls in the suite. One manual live check on the Mac per feature.
+
+### M8.1 Plain-language verify reports
+After a verify run, send the per-file OK/MISSING/MISMATCH results and get back a one-paragraph summary a producer can read ("All 312 files in the June archive match their checksums except two RED clips that are missing"). Rendered above the results table with a "AI summary" label.
+**Done when:** summary function unit tested with mocked client, truncation strategy for very large result sets defined and tested, GUI renders or hides cleanly based on key presence.
+
+### M8.2 Smart error explanations
+When a transfer or offload fails, pass the raw error text to Claude and show a human-readable explanation with a suggested fix next to the technical message. Cached per unique error string per session so repeats cost nothing.
+**Done when:** explanation function unit tested with mocked client and the raw error always remains visible (the AI text supplements, never replaces).
+
+### M8.3 Chain-of-custody log Q&A
+Ask questions like "when was this card offloaded and to where?" against `~/Documents/STSyncTool/offload_logs/`. Picks relevant log files by date/name, sends their text as context, shows the answer with the source log filename cited.
+**Done when:** log selection and prompt assembly unit tested, answers cite which log they came from, token use per question stays under a defined budget (~50K input).
+
+**Sequencing:** post-beta. M8.2 first (smallest, highest everyday value), then M8.1, then M8.3.
+
+---
+
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
 M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 → M1.5 → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M7.3 → M7.4 → recruit beta testers.
 
-M4.3 and M6 as appetite allows; they do not block beta. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
+M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
