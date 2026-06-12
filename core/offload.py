@@ -321,17 +321,20 @@ def apply_normalization_in_staging(
 
 def build_normalized_manifest(source_manifest: dict, norm_plan: dict) -> tuple:
     """
-    Item 60 (data layer). Return (normalized_manifest, normalization_block).
+    Item 60 (data layer). Return (normalized_manifest, normalization_block, renames_full).
 
     normalized_manifest keys are normalized paths; renamed entries carry
     'original_filename', 'filename_hash_suffix', and 'hash_method' fields.
     normalization_block is the top-level 'filename_normalization' dict.
+    renames_full is the canonical top-level renames list [{from, to, reason}]
+    consumed by three_way_diff for rename-collapse across the offload→merge boundary.
     """
     if not norm_plan:
-        return dict(source_manifest), {"applied": False}
+        return dict(source_manifest), {"applied": False}, []
 
     norm_manifest: dict = {}
-    renames_list: list[dict] = []
+    renames_list: list[dict] = []   # human-readable basenames for provenance
+    renames_full: list[dict] = []   # canonical {from, to, reason} for three_way_diff
 
     for rel, info in source_manifest.items():
         if rel == "generated_artifacts":
@@ -347,6 +350,11 @@ def build_normalized_manifest(source_manifest: dict, norm_plan: dict) -> tuple:
                 "original":   Path(rel).name,
                 "normalized": Path(normalized).name,
             })
+            renames_full.append({
+                "from":   rel,
+                "to":     normalized,
+                "reason": "normalize",
+            })
         norm_manifest[normalized] = entry
 
     pattern_scan = scan_naming_patterns(source_manifest)
@@ -356,7 +364,7 @@ def build_normalized_manifest(source_manifest: dict, norm_plan: dict) -> tuple:
         "detected_pattern": pattern_scan.get("pattern_name", ""),
         "renames":          renames_list,
     }
-    return norm_manifest, norm_block
+    return norm_manifest, norm_block, renames_full
 
 
 # ---------------------------------------------------------------------------
@@ -565,8 +573,19 @@ def build_offload_manifest(
     source_manifest: dict,
     dest_root: Path,
     norm_block: Optional[dict] = None,
+    cell_results_for_source: Optional[list] = None,
+    renames_full: Optional[list] = None,
 ) -> dict:
-    """Convert an offload ground-truth manifest into a schema-1.1 manifest dict."""
+    """Convert an offload ground-truth manifest into a schema-1.2 manifest dict.
+
+    cell_results_for_source: list of CellResult objects for this source (all
+        destinations). When provided, the manifest includes a machine-readable
+        'offload' block with overall_result, per-destination outcomes, and
+        per-file verification results (SCHEMA_INTEROP_SPEC Part 1).
+    renames_full: canonical [{from, to, reason}] list from build_normalized_manifest.
+        Written to the top-level 'renames' field so three_way_diff can collapse
+        normalize renames across the offload→merge boundary (SCHEMA_INTEROP_SPEC Part 2).
+    """
     import socket as _socket
     import getpass as _getpass
     from core.manifest import SCHEMA_VERSION
@@ -614,15 +633,13 @@ def build_offload_manifest(
         "label": source.label,
         "root": str(source.path),
         "destination": str(dest_root),
-        "counterpart_path": "",  # offload has no counterpart — destination IS the artifact; use destination field
-        # MANIFEST-FIX: operation label is "offload" (was "offload-ingest") so
-        # downstream consumers and the manifest archive use the canonical verb.
+        "counterpart_path": "",  # offload has no counterpart — destination IS the artifact
         "operation": "offload",
         "project_id": "",
         "workstation": _socket.gethostname(),
         "user": _getpass.getuser(),
         "file_count": len(files),
-        "renames": [],
+        "renames": list(renames_full) if renames_full else [],
         "checksum_context": {
             "algorithm": "sha256",
             "gdrive_mode": False,
@@ -635,24 +652,88 @@ def build_offload_manifest(
     }
     if generated_artifacts:
         manifest["generated_artifacts"] = generated_artifacts
+
+    # ── Offload custody block (SCHEMA_INTEROP_SPEC Part 1) ────────────────────
+    # Machine-readable overall result + per-destination verification outcomes.
+    # Only populated when cell_results_for_source is provided (i.e. after all
+    # destinations for this source have completed).
+    if cell_results_for_source is not None:
+        overall_complete = all(
+            r.state in (CellState.DONE, CellState.THUMBNAILS)
+            for r in cell_results_for_source
+        )
+        destinations_block = []
+        for r in cell_results_for_source:
+            dest_complete = r.state in (CellState.DONE, CellState.THUMBNAILS)
+            verified_files: dict = {}
+            for rel, entry in files.items():
+                sha256 = entry.get("checksums", {}).get("sha256", "")
+                if r.per_file_verify:
+                    is_verified = r.per_file_verify.get(rel, False)
+                else:
+                    is_verified = bool(r.verified) and dest_complete
+                verified_files[rel] = {"verified": is_verified, "sha256": sha256}
+            destinations_block.append({
+                "label":          r.dest_label,
+                "final_path":     str(r.final_path) if r.final_path else "",
+                "primary":        (r.dest_label == cell_results_for_source[0].dest_label),
+                "files_verified": r.files_copied,
+                "bytes_verified": r.bytes_copied,
+                "result":         "COMPLETE" if dest_complete else "FAILED",
+                "verified_files": verified_files,
+                "errors":         list(r.errors),
+            })
+        manifest["offload"] = {
+            "overall_result": "COMPLETE" if overall_complete else "PARTIAL_FAILURE",
+            "destinations":   destinations_block,
+        }
+
     return manifest
 
 
 def save_offload_manifest(
     source: "OffloadSource",
     source_manifest: dict,
-    dest_root: Path,
+    committed_results: list,
     norm_block: Optional[dict] = None,
+    renames_full: Optional[list] = None,
 ) -> list:
-    """Build and persist an offload manifest to the destination + central archive."""
-    from core.manifest import save_manifest
-    manifest = build_offload_manifest(source, source_manifest, dest_root, norm_block)
-    return save_manifest(
+    """Build and persist an offload manifest to all committed destinations + archive.
+
+    committed_results: list of CellResult objects whose final_path is set (DONE/
+        THUMBNAILS state). Writes st_manifest.json to each final_path and one
+        timestamped archive copy. The manifest includes the 'offload' custody block
+        covering all committed destinations.
+    """
+    import json as _json
+    from core.manifest import save_manifest, MANIFEST_FILENAME
+
+    committed = [r for r in committed_results if r.final_path]
+    if not committed:
+        return []
+
+    primary = committed[0]
+    manifest = build_offload_manifest(
+        source, source_manifest, primary.final_path,
+        norm_block, committed_results, renames_full,
+    )
+
+    # save_manifest writes to: archive (always) + dest_dir (st_manifest.json)
+    saved = save_manifest(
         manifest,
-        dest_dir=dest_root,
+        dest_dir=primary.final_path,
         name_hint=source.effective_subfolder(),
         operation="offload",
     )
+
+    # Write the same manifest to any additional committed destinations
+    for r in committed[1:]:
+        dest = r.final_path / MANIFEST_FILENAME
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(_json.dumps(manifest, indent=2))
+        saved.append(dest)
+
+    return saved
 
 
 def write_chain_of_custody_log(
@@ -833,17 +914,21 @@ def run_offload(
         # ── Filename normalisation (Phase 7, items 57-59) ────────────────
         norm_plan: dict = {}
         norm_block: dict = {"applied": False}
+        renames_full: list = []
         if config.normalize_filenames:
             norm_plan = build_normalization_plan(mfst)
             if norm_plan:
-                _, norm_block = build_normalized_manifest(mfst, norm_plan)
                 log_cb(
                     f"[Offload] Normalising {len(norm_plan)} filename(s) for {src.label}",
                     "info",
                 )
 
-        # Verified manifest uses normalised keys; original mfst used for copying
-        norm_mfst = build_normalized_manifest(mfst, norm_plan)[0] if norm_plan else mfst
+        # Verified manifest uses normalised keys; original mfst used for copying.
+        # build_normalized_manifest is called once to get all three return values.
+        if norm_plan:
+            norm_mfst, norm_block, renames_full = build_normalized_manifest(mfst, norm_plan)
+        else:
+            norm_mfst = mfst
 
         # ── Copy → Verify → Commit for each destination ──────────────────
         for dst in active_dests:
@@ -942,20 +1027,6 @@ def run_offload(
                         nm["filename_normalization"] = norm_block
                         source_manifests[src.label] = nm
 
-                    # MANIFEST-FIX (item 60): persist a schema-1.1 offload manifest to
-                    # the committed destination + archive so downstream merges have a
-                    # base manifest. Failure here must not fail the offload.
-                    try:
-                        save_offload_manifest(
-                            src, source_manifests.get(src.label, norm_mfst), final,
-                            norm_block if norm_plan else None,
-                        )
-                    except Exception as exc:
-                        log_cb(
-                            f"[Offload] Could not save manifest for {src.label} → {dst.label}: {exc}",
-                            "warning",
-                        )
-
                     # ── Thumbnail generation (primary dest only) ──────────
                     if (
                         config.generate_thumbnails
@@ -1007,6 +1078,23 @@ def run_offload(
                 if config.stop_on_first_failure:
                     _mark_remaining(cell_results, src, active_dests, CellState.SKIPPED, status_cb, after=dst)
                     break
+
+        # After all destinations for this source: persist the offload manifest once,
+        # covering all committed destinations in the offload custody block.
+        src_results = [cell_results[(src.label, d.label)] for d in active_dests]
+        try:
+            save_offload_manifest(
+                src,
+                source_manifests.get(src.label, norm_mfst),
+                src_results,
+                norm_block if norm_plan else None,
+                renames_full or None,
+            )
+        except Exception as exc:
+            log_cb(
+                f"[Offload] Could not save manifest for {src.label}: {exc}",
+                "warning",
+            )
 
     flat = list(cell_results.values())
     log_path = write_chain_of_custody_log(

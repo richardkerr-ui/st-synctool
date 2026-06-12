@@ -325,7 +325,7 @@ class ApplyWorker(QObject):
                             renames.append({
                                 "from":   rel_path,
                                 "to":     op_result["renamed_to"],
-                                "action": action,
+                                "reason": "preserve",
                             })
                 else:
                     results["failed"].append(rel_path)

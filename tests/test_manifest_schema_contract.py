@@ -8,9 +8,7 @@ Cross-producer/consumer compatibility is then checked:
   - three_way_diff consumes every manifest type without errors
   - The checksum format VerifyWorker._verify_local expects is always present
 
-Also covers the SCHEMA_INTEROP_SPEC.md acceptance tests that are currently
-testable (tests 1, 2-partial, 3, 4, 6 — test 5 is blocked on the offload
-custody block not yet being built; see ROADMAP).
+Also covers the SCHEMA_INTEROP_SPEC.md acceptance tests 1-6.
 """
 
 import hashlib
@@ -27,7 +25,7 @@ from core.manifest import (
     save_manifest,
 )
 from core.comparison import three_way_diff, DiffState
-from core.offload import OffloadSource, build_offload_manifest
+from core.offload import CellResult, CellState, OffloadSource, build_offload_manifest
 
 
 # ---------------------------------------------------------------------------
@@ -471,3 +469,130 @@ class TestOffloadManifestContract:
             assert "original_filename" in entry, (
                 f"{rel_path!r} missing original_filename after normalization"
             )
+
+
+# ---------------------------------------------------------------------------
+# 9. SCHEMA_INTEROP_SPEC acceptance test 5 — offload custody block
+#    overall_result and per-file verification in the offload block
+# ---------------------------------------------------------------------------
+
+class TestOffloadCustodyBlock:
+    """
+    SCHEMA_INTEROP_SPEC acceptance test 5: force one destination to fail.
+    Assert overall_result == 'PARTIAL_FAILURE', the failing destination's
+    result reflects it, and verified_files carries a per-file boolean for
+    the passing destination.
+    """
+
+    def _make_results(self, sample_dir, offload_source_manifest):
+        """Return (source, source_manifest, passing_result, failing_result)."""
+        source = OffloadSource(label="A001", path=sample_dir)
+        file_rels = list(offload_source_manifest.keys())
+
+        passing = CellResult(source_label="A001", dest_label="BackupA")
+        passing.state = CellState.DONE
+        passing.final_path = sample_dir
+        passing.verified = True
+        passing.files_copied = len(file_rels)
+        passing.bytes_copied = sum(
+            offload_source_manifest[r]["size"] for r in file_rels
+        )
+        passing.per_file_verify = {r: True for r in file_rels}
+
+        failing = CellResult(source_label="A001", dest_label="BackupB")
+        failing.state = CellState.FAILED
+        failing.final_path = None
+        failing.verified = False
+        failing.errors = ["Hash mismatch: video.mov"]
+
+        return source, offload_source_manifest, passing, failing
+
+    def test_overall_result_is_partial_failure(self, sample_dir, offload_source_manifest):
+        source, src_mfst, passing, failing = self._make_results(
+            sample_dir, offload_source_manifest
+        )
+        manifest = build_offload_manifest(
+            source, src_mfst, sample_dir,
+            cell_results_for_source=[passing, failing],
+        )
+        assert "offload" in manifest
+        assert manifest["offload"]["overall_result"] == "PARTIAL_FAILURE"
+
+    def test_overall_result_is_complete_when_all_pass(
+        self, sample_dir, offload_source_manifest
+    ):
+        source, src_mfst, passing, _ = self._make_results(
+            sample_dir, offload_source_manifest
+        )
+        second_passing = CellResult(source_label="A001", dest_label="BackupB")
+        second_passing.state = CellState.DONE
+        second_passing.final_path = sample_dir
+        second_passing.verified = True
+        manifest = build_offload_manifest(
+            source, src_mfst, sample_dir,
+            cell_results_for_source=[passing, second_passing],
+        )
+        assert manifest["offload"]["overall_result"] == "COMPLETE"
+
+    def test_failing_destination_result_is_failed(
+        self, sample_dir, offload_source_manifest
+    ):
+        source, src_mfst, passing, failing = self._make_results(
+            sample_dir, offload_source_manifest
+        )
+        manifest = build_offload_manifest(
+            source, src_mfst, sample_dir,
+            cell_results_for_source=[passing, failing],
+        )
+        dests = {d["label"]: d for d in manifest["offload"]["destinations"]}
+        assert dests["BackupA"]["result"] == "COMPLETE"
+        assert dests["BackupB"]["result"] == "FAILED"
+
+    def test_passing_destination_verified_files_all_true(
+        self, sample_dir, offload_source_manifest
+    ):
+        source, src_mfst, passing, failing = self._make_results(
+            sample_dir, offload_source_manifest
+        )
+        manifest = build_offload_manifest(
+            source, src_mfst, sample_dir,
+            cell_results_for_source=[passing, failing],
+        )
+        dests = {d["label"]: d for d in manifest["offload"]["destinations"]}
+        vf = dests["BackupA"]["verified_files"]
+        assert vf, "passing destination has no verified_files entries"
+        assert all(entry["verified"] is True for entry in vf.values()), (
+            f"passing destination has unverified files: {vf}"
+        )
+
+    def test_failing_destination_errors_present(
+        self, sample_dir, offload_source_manifest
+    ):
+        source, src_mfst, passing, failing = self._make_results(
+            sample_dir, offload_source_manifest
+        )
+        manifest = build_offload_manifest(
+            source, src_mfst, sample_dir,
+            cell_results_for_source=[passing, failing],
+        )
+        dests = {d["label"]: d for d in manifest["offload"]["destinations"]}
+        assert dests["BackupB"]["errors"] == ["Hash mismatch: video.mov"]
+
+    def test_custody_block_absent_without_cell_results(
+        self, sample_dir, offload_source_manifest
+    ):
+        source = OffloadSource(label="A001", path=sample_dir)
+        manifest = build_offload_manifest(source, offload_source_manifest, sample_dir)
+        assert "offload" not in manifest
+
+    def test_renames_full_written_to_top_level_renames(
+        self, sample_dir, offload_source_manifest
+    ):
+        source = OffloadSource(label="A001", path=sample_dir)
+        renames = [
+            {"from": "video.mov", "to": "video_abc12345.mov", "reason": "normalize"},
+        ]
+        manifest = build_offload_manifest(
+            source, offload_source_manifest, sample_dir, renames_full=renames
+        )
+        assert manifest["renames"] == renames

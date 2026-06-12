@@ -1,6 +1,6 @@
 # ST SyncTool — Offload Manifest + Rename Contract Spec
 
-> **Status:** Partially implemented. Schema 1.2, `counterpart_path`, `build_offload_manifest`, `checksums` dict, `modtime`, and `renames[]` are done. The `offload` custody block, `reason` field on rename entries, and the 6 acceptance tests at the bottom of this file are **not yet implemented**. See ROADMAP for context.
+> **Status:** Mostly implemented. Schema 1.2, `counterpart_path`, `build_offload_manifest`, `checksums` dict, `modtime`, `renames[]`, and the `offload` custody block (including `overall_result`, per-destination `verified_files`, and all 6 acceptance tests) are done. The remaining item is the `reason` field on merge preserve-rename entries (Part 2). See ROADMAP for context.
 
 Target: next implementation session. Goal is to make offload output consumable by Verify and Merge without a re-scan, and to give offload and merge one shared rename contract so a folder that crosses the offload to merge boundary does not trip the rename-divergence path.
 
