@@ -506,6 +506,7 @@ class MergeTab(QWidget):
         self._build_log_panel(root)
         # Wire diff_table → conflict panel after both exist
         self.diff_table.conflict_selected.connect(self._on_conflict_selected)
+        self.diff_table.conflict_action_changed.connect(self._on_conflict_action_changed)
         self._refresh_project_combo()
 
     def _build_project_row(self) -> QHBoxLayout:
@@ -621,9 +622,16 @@ class MergeTab(QWidget):
         self.status_label = QLabel("Scan first to enable apply")
         self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px;")
 
+        self._unresolved_lbl = QLabel()
+        self._unresolved_lbl.setStyleSheet(
+            f"color:{theme.ACCENT_CORAL}; font-size:12px; font-weight:bold;"
+        )
+        self._unresolved_lbl.setVisible(False)
+
         btn_row.addWidget(self.scan_btn)
         btn_row.addWidget(self.apply_btn)
         btn_row.addWidget(self.newer_wins_btn)
+        btn_row.addWidget(self._unresolved_lbl)
         btn_row.addWidget(self.status_label)
         btn_row.addStretch()
         root.addLayout(btn_row)
@@ -697,6 +705,50 @@ class MergeTab(QWidget):
             f"font-weight:bold; font-size:12px; color:{theme.ACCENT_GOLD};"
         )
         layout.addWidget(self._cp_verdict)
+
+        # Quick-action row: resolve this conflict without touching the dropdown
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+
+        keep_local_btn = QPushButton("Keep Local (Push)")
+        keep_local_btn.setToolTip("Push the local version to server for this conflict")
+        keep_local_btn.setStyleSheet(
+            f"QPushButton {{ background:{theme.ACCENT_INFO}; color:#000;"
+            f"  border-radius:3px; padding:3px 10px; font-size:11px; }}"
+            f"QPushButton:hover {{ background:#4ab0e8; }}"
+        )
+        keep_local_btn.clicked.connect(lambda: self._cp_keep_local())
+        action_row.addWidget(keep_local_btn)
+
+        keep_server_btn = QPushButton("Keep Server (Pull)")
+        keep_server_btn.setToolTip("Pull the server version to local for this conflict")
+        keep_server_btn.setStyleSheet(
+            f"QPushButton {{ background:{theme.ACCENT_GREEN}; color:#000;"
+            f"  border-radius:3px; padding:3px 10px; font-size:11px; }}"
+            f"QPushButton:hover {{ background:#5ec45e; }}"
+        )
+        keep_server_btn.clicked.connect(lambda: self._cp_keep_server())
+        action_row.addWidget(keep_server_btn)
+
+        action_row.addStretch()
+
+        prev_btn = QPushButton("Prev conflict")
+        prev_btn.setToolTip("Go to previous BOTH_CHANGED row")
+        prev_btn.setStyleSheet(
+            "QPushButton { padding:3px 8px; font-size:11px; }"
+        )
+        prev_btn.clicked.connect(lambda: self.diff_table.navigate_conflict(-1))
+        action_row.addWidget(prev_btn)
+
+        next_btn = QPushButton("Next conflict")
+        next_btn.setToolTip("Go to next BOTH_CHANGED row")
+        next_btn.setStyleSheet(
+            "QPushButton { padding:3px 8px; font-size:11px; }"
+        )
+        next_btn.clicked.connect(lambda: self.diff_table.navigate_conflict(+1))
+        action_row.addWidget(next_btn)
+
+        layout.addLayout(action_row)
 
         panel.setVisible(False)
         self._conflict_panel = panel
@@ -934,6 +986,7 @@ class MergeTab(QWidget):
         self._diff_results = results
         visible = [r for r in results if r.state.name != "UNCHANGED"]
         self.diff_table.load_results(visible)
+        self._update_unresolved_count()
 
         total     = len(results)
         changed   = len(visible)
@@ -1116,11 +1169,48 @@ class MergeTab(QWidget):
         self._cp_verdict.setText(f"  {verdict}")
         self._conflict_panel.setVisible(True)
 
+    # ── Conflict quick-action buttons (conflict detail panel) ─────────────────
+
+    def _cp_keep_local(self):
+        """Set the selected BOTH_CHANGED row's action to Push (keep local)."""
+        from core.merge_ops import ACT_PUSH
+        self.diff_table.set_action_for_selected(ACT_PUSH)
+
+    def _cp_keep_server(self):
+        """Set the selected BOTH_CHANGED row's action to Pull (keep server)."""
+        from core.merge_ops import ACT_PULL
+        self.diff_table.set_action_for_selected(ACT_PULL)
+
+    def _on_conflict_action_changed(self, path: str, action: str):
+        """Update the unresolved count label whenever a BOTH_CHANGED combo changes."""
+        self._update_unresolved_count()
+
+    def _update_unresolved_count(self):
+        n = self.diff_table.unresolved_conflict_count()
+        total = sum(
+            1 for s in self.diff_table.get_states().values() if s == "BOTH_CHANGED"
+        )
+        if total == 0:
+            self._unresolved_lbl.setVisible(False)
+        elif n == 0:
+            self._unresolved_lbl.setText(f"All {total} conflicts resolved")
+            self._unresolved_lbl.setStyleSheet(
+                f"color:{theme.ACCENT_GREEN}; font-size:12px; font-weight:bold;"
+            )
+            self._unresolved_lbl.setVisible(True)
+        else:
+            self._unresolved_lbl.setText(f"{n}/{total} conflicts unresolved")
+            self._unresolved_lbl.setStyleSheet(
+                f"color:{theme.ACCENT_CORAL}; font-size:12px; font-weight:bold;"
+            )
+            self._unresolved_lbl.setVisible(True)
+
     # ── Newer Wins batch action ───────────────────────────────────────────────
 
     def _on_newer_wins(self):
         """Apply the mtime-based default action to every BOTH_CHANGED row."""
         self.diff_table.apply_newer_wins()
+        self._update_unresolved_count()
         conflict_rows = [
             path for path, state in self.diff_table.get_states().items()
             if state == "BOTH_CHANGED"

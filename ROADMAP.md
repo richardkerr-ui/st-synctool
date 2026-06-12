@@ -31,7 +31,7 @@ Remaining gap: no automated test of `install.sh` itself. Validate manually on a 
 ## v2 work in progress
 
 - Phase 2: Live byte-level progress + ETA — SHIPPED. `copy_source_to_staging` now emits `(src, dst, bytes_done, bytes_total)`. The offload tab cell shows `"45% (1.2 GB/2.6 GB ~3m)"` during the COPYING phase. Next: per-chunk progress for very large individual files (currently per-file granularity).
-- Phase 3: Conflict resolution UI for BOTH_CHANGED Merge rows. Planned.
+- Phase 3: Conflict resolution UI for BOTH_CHANGED Merge rows — SHIPPED. Added "Keep Local" / "Keep Server" quick-action buttons to the conflict detail panel, a live unresolved-conflict counter ("N/M conflicts unresolved" / "All resolved") that updates on every combo change, and Prev/Next conflict navigation buttons. 14 new tests across `TestSetActionForSelected`, `TestUnresolvedConflictCount`, `TestNavigateConflict`, `TestConflictActionChangedSignal`.
 
 ## Testing roadmap
 

@@ -52,6 +52,10 @@ class DiffTable(QTableWidget):
     # selection is cleared or a non-conflict row is selected.
     conflict_selected = pyqtSignal(object)
 
+    # Emitted when any BOTH_CHANGED row's action combo changes.
+    # Payload: (path, new_action_text) — lets the parent update unresolved count.
+    conflict_action_changed = pyqtSignal(str, str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._action_combos = {}
@@ -150,6 +154,11 @@ class DiffTable(QTableWidget):
             self.setCellWidget(row, 2, combo)
             self._action_combos[path_str] = combo
 
+            if state_name == "BOTH_CHANGED":
+                combo.currentTextChanged.connect(
+                    lambda text, p=path_str: self.conflict_action_changed.emit(p, text)
+                )
+
         # ResizeToContents doesn't query setCellWidget() sizeHints automatically,
         # so force a column resize after all widgets are in place.
         self.resizeColumnToContents(1)
@@ -195,6 +204,48 @@ class DiffTable(QTableWidget):
             self.conflict_selected.emit(result)
         else:
             self.conflict_selected.emit(None)
+
+    def set_action_for_selected(self, action: str) -> None:
+        """Set the action combo for the currently selected row (any state)."""
+        row = self.currentRow()
+        if row < 0:
+            return
+        path_item = self.item(row, 0)
+        if not path_item:
+            return
+        combo = self._action_combos.get(path_item.text())
+        if combo is None:
+            return
+        options = [combo.itemText(i) for i in range(combo.count())]
+        if action in options:
+            combo.setCurrentIndex(options.index(action))
+
+    def unresolved_conflict_count(self) -> int:
+        """Return the number of BOTH_CHANGED rows whose action is still Skip."""
+        count = 0
+        for path, combo in self._action_combos.items():
+            if self._row_states.get(path) == "BOTH_CHANGED":
+                if combo.currentText() == ACT_SKIP:
+                    count += 1
+        return count
+
+    def navigate_conflict(self, direction: int) -> None:
+        """Select the next (+1) or previous (-1) BOTH_CHANGED row, wrapping around."""
+        conflict_rows = [
+            r for r in range(self.rowCount())
+            if self.item(r, 0) and self._row_states.get(self.item(r, 0).text()) == "BOTH_CHANGED"
+        ]
+        if not conflict_rows:
+            return
+        current = self.currentRow()
+        if direction > 0:
+            candidates = [r for r in conflict_rows if r > current]
+            target = candidates[0] if candidates else conflict_rows[0]
+        else:
+            candidates = [r for r in conflict_rows if r < current]
+            target = candidates[-1] if candidates else conflict_rows[-1]
+        self.selectRow(target)
+        self.scrollTo(self.model().index(target, 0))
 
     def _show_context_menu(self, pos):
         row = self.rowAt(pos.y())

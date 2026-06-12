@@ -7,6 +7,10 @@ Covers:
   3. mtime tie -> suggested action is Skip
   4. Missing mtime on one side -> graceful fallback to Skip
   5. "Newer wins" batch logic via DiffTable.apply_newer_wins()
+  6. set_action_for_selected — quick-action buttons (Phase 3 conflict panel)
+  7. unresolved_conflict_count — live counter
+  8. navigate_conflict — prev/next keyboard navigation
+  9. conflict_action_changed signal fires on BOTH_CHANGED combo change
 """
 
 import pytest
@@ -289,3 +293,187 @@ class TestNewerWinsBatch:
         assert post_actions["server_only.mov"] == server_only_default
         # Conflict row must have been updated
         assert post_actions["conflict.mov"] == ACT_PUSH
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 additions: quick-action, unresolved count, navigation, signal
+# ---------------------------------------------------------------------------
+
+class TestSetActionForSelected:
+    def _make_table_with_conflict(self, qapp, path="conflict.mov", action=ACT_SKIP):
+        from gui.diff_table import DiffTable
+        table = DiffTable()
+        rows = [
+            DiffResult(
+                path=path,
+                state=DiffState.BOTH_CHANGED,
+                yours_entry=_entry(modtime="2026-01-01T00:00:00Z"),
+                server_entry=_entry(modtime="2026-01-02T00:00:00Z"),
+            )
+        ]
+        table.load_results(rows)
+        table.selectRow(0)
+        return table
+
+    def test_set_action_push_for_selected_row(self, qapp):
+        table = self._make_table_with_conflict(qapp)
+        table.set_action_for_selected(ACT_PUSH)
+        assert table.get_actions()["conflict.mov"] == ACT_PUSH
+
+    def test_set_action_pull_for_selected_row(self, qapp):
+        table = self._make_table_with_conflict(qapp)
+        table.set_action_for_selected(ACT_PULL)
+        assert table.get_actions()["conflict.mov"] == ACT_PULL
+
+    def test_set_action_noop_when_no_selection(self, qapp):
+        from gui.diff_table import DiffTable
+        table = DiffTable()
+        rows = [DiffResult(path="x.mov", state=DiffState.BOTH_CHANGED,
+                           yours_entry=_entry(), server_entry=_entry())]
+        table.load_results(rows)
+        table.clearSelection()
+        table.set_action_for_selected(ACT_PUSH)
+        # Should not raise; action unchanged (still whatever the default is)
+
+
+class TestUnresolvedConflictCount:
+    def _make_table(self, qapp, rows):
+        from gui.diff_table import DiffTable
+        table = DiffTable()
+        table.load_results(rows)
+        return table
+
+    def _conflict(self, path, local_mt="2026-01-01T00:00:00Z", server_mt="2026-01-02T00:00:00Z"):
+        return DiffResult(
+            path=path, state=DiffState.BOTH_CHANGED,
+            yours_entry=_entry(modtime=local_mt),
+            server_entry=_entry(modtime=server_mt),
+        )
+
+    def test_all_skip_means_all_unresolved(self, qapp):
+        rows = [self._conflict("a.mov"), self._conflict("b.mov")]
+        # server newer -> default Pull (not Skip), override to Skip for test
+        table = self._make_table(qapp, rows)
+        table.apply_newer_wins()
+        # After newer wins, server-newer rows become Pull (resolved). Force back to Skip.
+        for combo in table._action_combos.values():
+            options = [combo.itemText(i) for i in range(combo.count())]
+            if ACT_SKIP in options:
+                combo.setCurrentIndex(options.index(ACT_SKIP))
+        assert table.unresolved_conflict_count() == 2
+
+    def test_resolved_rows_not_counted(self, qapp):
+        rows = [
+            DiffResult(
+                path="local_newer.mov", state=DiffState.BOTH_CHANGED,
+                yours_entry=_entry(modtime="2026-01-02T00:00:00Z"),
+                server_entry=_entry(modtime="2026-01-01T00:00:00Z"),
+            ),
+            self._conflict("server_newer.mov"),
+        ]
+        table = self._make_table(qapp, rows)
+        # local_newer.mov should get Push default (resolved); server_newer.mov gets Pull (resolved)
+        assert table.unresolved_conflict_count() == 0
+
+    def test_non_conflict_rows_not_counted(self, qapp):
+        rows = [
+            DiffResult(path="local.mov", state=DiffState.LOCAL_ONLY,
+                       yours_entry=_entry()),
+            self._conflict("both.mov"),
+        ]
+        table = self._make_table(qapp, rows)
+        # LOCAL_ONLY never counts as unresolved regardless of action
+        total = table.unresolved_conflict_count()
+        assert total <= 1
+
+
+class TestNavigateConflict:
+    def _make_table(self, qapp):
+        from gui.diff_table import DiffTable
+        table = DiffTable()
+        rows = [
+            DiffResult(path="a.mov", state=DiffState.LOCAL_ONLY,  yours_entry=_entry()),
+            DiffResult(path="b.mov", state=DiffState.BOTH_CHANGED,
+                       yours_entry=_entry(), server_entry=_entry()),
+            DiffResult(path="c.mov", state=DiffState.SERVER_ONLY, server_entry=_entry()),
+            DiffResult(path="d.mov", state=DiffState.BOTH_CHANGED,
+                       yours_entry=_entry(), server_entry=_entry()),
+        ]
+        table.load_results(rows)
+        return table
+
+    def test_navigate_forward_moves_to_next_conflict(self, qapp):
+        table = self._make_table(qapp)
+        table.selectRow(0)
+        table.navigate_conflict(+1)
+        assert table.currentRow() == 1  # b.mov (first BOTH_CHANGED)
+
+    def test_navigate_forward_from_first_conflict_to_second(self, qapp):
+        table = self._make_table(qapp)
+        table.selectRow(1)
+        table.navigate_conflict(+1)
+        assert table.currentRow() == 3  # d.mov (second BOTH_CHANGED)
+
+    def test_navigate_wraps_around_forward(self, qapp):
+        table = self._make_table(qapp)
+        table.selectRow(3)  # last BOTH_CHANGED
+        table.navigate_conflict(+1)
+        assert table.currentRow() == 1  # wraps to first BOTH_CHANGED
+
+    def test_navigate_backward_moves_to_prev_conflict(self, qapp):
+        table = self._make_table(qapp)
+        table.selectRow(3)
+        table.navigate_conflict(-1)
+        assert table.currentRow() == 1  # b.mov
+
+    def test_navigate_wraps_around_backward(self, qapp):
+        table = self._make_table(qapp)
+        table.selectRow(1)  # first BOTH_CHANGED
+        table.navigate_conflict(-1)
+        assert table.currentRow() == 3  # wraps to last BOTH_CHANGED
+
+    def test_navigate_noop_with_no_conflicts(self, qapp):
+        from gui.diff_table import DiffTable
+        table = DiffTable()
+        rows = [DiffResult(path="a.mov", state=DiffState.LOCAL_ONLY, yours_entry=_entry())]
+        table.load_results(rows)
+        table.selectRow(0)
+        table.navigate_conflict(+1)
+        # Should not raise
+
+
+class TestConflictActionChangedSignal:
+    def test_signal_fires_on_both_changed_combo_change(self, qapp):
+        from gui.diff_table import DiffTable
+        table = DiffTable()
+        rows = [
+            DiffResult(
+                path="x.mov", state=DiffState.BOTH_CHANGED,
+                yours_entry=_entry(modtime="2026-01-01T00:00:00Z"),
+                server_entry=_entry(modtime="2026-01-02T00:00:00Z"),
+            )
+        ]
+        table.load_results(rows)
+        fired = []
+        table.conflict_action_changed.connect(lambda p, a: fired.append((p, a)))
+        combo = table._action_combos["x.mov"]
+        options = [combo.itemText(i) for i in range(combo.count())]
+        new_action = ACT_PUSH if combo.currentText() != ACT_PUSH else ACT_PULL
+        combo.setCurrentIndex(options.index(new_action))
+        assert fired, "conflict_action_changed should have fired"
+        assert fired[0][0] == "x.mov"
+        assert fired[0][1] == new_action
+
+    def test_signal_does_not_fire_for_non_conflict_rows(self, qapp):
+        from gui.diff_table import DiffTable
+        table = DiffTable()
+        rows = [DiffResult(path="y.mov", state=DiffState.LOCAL_ONLY, yours_entry=_entry())]
+        table.load_results(rows)
+        fired = []
+        table.conflict_action_changed.connect(lambda p, a: fired.append((p, a)))
+        combo = table._action_combos.get("y.mov")
+        if combo:
+            options = [combo.itemText(i) for i in range(combo.count())]
+            if len(options) > 1:
+                combo.setCurrentIndex(1)
+        assert not fired, "signal should not fire for LOCAL_ONLY rows"
