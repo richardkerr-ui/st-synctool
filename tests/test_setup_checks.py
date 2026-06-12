@@ -87,3 +87,62 @@ class TestCheckStatus:
 
     def test_warning_value(self):
         assert CheckStatus.WARNING.value == "warning"
+
+
+# ---------------------------------------------------------------------------
+# check_rclone_auth
+# ---------------------------------------------------------------------------
+
+class TestCheckRcloneAuth:
+    def _run(self, returncode, stdout="", stderr=""):
+        from unittest.mock import MagicMock, patch
+        from core.setup_checks import check_rclone_auth
+        mock = MagicMock(returncode=returncode, stdout=stdout, stderr=stderr)
+        with patch("subprocess.run", return_value=mock):
+            return check_rclone_auth("gdrive", timeout=5)
+
+    def test_ok_when_returncode_zero(self):
+        result = self._run(0, stdout="  folder1\n  folder2\n")
+        assert result.status == CheckStatus.OK
+
+    def test_ok_message_includes_folder_count(self):
+        result = self._run(0, stdout="  folder1\n  folder2\n")
+        assert "2" in result.message
+
+    def test_empty_stdout_ok_with_zero_folders(self):
+        result = self._run(0, stdout="")
+        assert result.status == CheckStatus.OK
+        assert "0" in result.message
+
+    def test_nonzero_returncode_gives_error(self):
+        result = self._run(1, stderr="Token expired")
+        assert result.status == CheckStatus.ERROR
+
+    def test_error_message_includes_stderr(self):
+        result = self._run(1, stderr="Token expired")
+        assert "Token expired" in result.message
+
+    def test_timeout_gives_error(self):
+        import subprocess
+        from unittest.mock import patch
+        from core.setup_checks import check_rclone_auth
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="rclone", timeout=5)):
+            result = check_rclone_auth("gdrive", timeout=5)
+        assert result.status == CheckStatus.ERROR
+        assert "timed out" in result.message.lower()
+
+    def test_os_error_gives_error(self):
+        from unittest.mock import patch
+        from core.setup_checks import check_rclone_auth
+        with patch("subprocess.run", side_effect=OSError("rclone not found")):
+            result = check_rclone_auth("gdrive", timeout=5)
+        assert result.status == CheckStatus.ERROR
+
+    def test_result_name_includes_remote(self):
+        result = self._run(0)
+        assert "gdrive" in result.name
+
+    def test_long_stderr_truncated_to_200_chars(self):
+        long_err = "x" * 500
+        result = self._run(1, stderr=long_err)
+        assert len(result.message) < 400  # truncated, not raw 500-char dump

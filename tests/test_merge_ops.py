@@ -19,6 +19,7 @@ from core.merge_ops import (
     push_file,
     pull_file,
     _local_copy_verify,
+    _server_is_url,
 )
 
 
@@ -254,3 +255,21 @@ class TestPullFilePreserve:
         local.mkdir(); server.mkdir()
         result = pull_file("ghost.mov", local, str(server), preserve_on_overwrite=False)
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# _server_is_url — thin wrapper around is_gdrive_url
+# ---------------------------------------------------------------------------
+
+class TestServerIsUrl:
+    def test_gdrive_url_returns_true(self):
+        assert _server_is_url("https://drive.google.com/drive/folders/abc123") is True
+
+    def test_local_path_returns_false(self):
+        assert _server_is_url("/Volumes/NAS/Projects") is False
+
+    def test_empty_string_returns_false(self):
+        assert _server_is_url("") is False
+
+    def test_non_gdrive_url_returns_false(self):
+        assert _server_is_url("https://example.com/files") is False

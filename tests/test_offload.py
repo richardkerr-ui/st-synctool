@@ -860,3 +860,25 @@ class TestSubfolderCollision:
         merged = dst.path / "Shared"
         assert (merged / "a.mov").exists()
         assert (merged / "b.mov").exists()
+
+
+# ---------------------------------------------------------------------------
+# OffloadSource.effective_subfolder
+# ---------------------------------------------------------------------------
+
+class TestEffectiveSubfolder:
+    def test_uses_label_when_subfolder_empty(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"))
+        assert src.effective_subfolder() == "A001"
+
+    def test_uses_subfolder_when_set(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"), subfolder="Production")
+        assert src.effective_subfolder() == "Production"
+
+    def test_strips_whitespace_before_checking_empty(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"), subfolder="   ")
+        assert src.effective_subfolder() == "A001"
+
+    def test_strips_whitespace_from_non_empty_subfolder(self):
+        src = OffloadSource(label="A001", path=Path("/tmp/a"), subfolder="  Shared  ")
+        assert src.effective_subfolder() == "Shared"

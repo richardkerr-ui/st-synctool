@@ -91,3 +91,20 @@ All items in this section are done. SCHEMA_INTEROP_SPEC.md is fully implemented.
   project between ST Drive folders without burning local disk space.
 - Local NAS server merge speed. Full hash walk on first scan; pre-filter
   helps but still slow. Worth profiling.
+
+---
+
+## Merge tab UX — under consideration
+
+The merge tab currently shows all 10 diff states (Unchanged, Local Only, Server Only, Local Changed, Server Changed, Conflict, Deleted Locally, Deleted Server, Deleted Both, Renamed). Most of these are auto-resolved — the app has already decided the action. Only `BOTH_CHANGED` rows require user input.
+
+The full table is intentional: it lets users verify what the app is doing before committing, which builds trust. The open question is whether the UI makes the distinction obvious enough — do conflict rows stand out clearly from auto-resolved ones, or does everything feel like homework?
+
+**Options under consideration:**
+
+- **Progressive disclosure** — default view shows only rows needing a decision, with a "show all files" toggle for users who want the full picture. Preserves granular control without forcing it on everyone.
+- **Status grouping** — group rows into "Needs your decision" (top, expanded) and "Will be handled automatically" (collapsed below). Power users can inspect; everyone else ignores it.
+- **Summary header** — keep the full table but add a clear line above: "3 conflicts need review · 44 files will sync automatically." Lowest-effort, highest clarity gain.
+- **Confidence tiers** — configurable verbosity: always surface conflicts and deletions, optionally hide pure auto-resolved states.
+
+**Decision pending real-world testing.** Run actual transfers and observe whether the table reads as "review before confirming" or "too much to parse." That result should drive which option gets built.

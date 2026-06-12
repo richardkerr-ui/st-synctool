@@ -132,3 +132,84 @@ class TestFindByLocalPath:
     def test_does_not_match_substring(self):
         proj.upsert_project("fp2", "/my/project", "/s")
         assert proj.find_by_local_path("/my") is None
+
+
+# ── Destination presets ────────────────────────────────────────────────────────
+
+class TestDestPresets:
+    def test_list_presets_empty_initially(self):
+        assert proj.list_dest_presets() == []
+
+    def test_save_and_list_preset(self):
+        dests = [{"label": "NAS", "path": "/Volumes/NAS"}]
+        proj.save_dest_preset("Shoot Day", dests)
+        assert "Shoot Day" in proj.list_dest_presets()
+
+    def test_get_preset_returns_saved_dests(self):
+        dests = [{"label": "A", "path": "/a"}, {"label": "B", "path": "/b"}]
+        proj.save_dest_preset("Two Drives", dests)
+        assert proj.get_dest_preset("Two Drives") == dests
+
+    def test_get_missing_preset_returns_empty_list(self):
+        assert proj.get_dest_preset("Ghost") == []
+
+    def test_save_preset_overwrites_existing(self):
+        proj.save_dest_preset("P", [{"label": "old", "path": "/old"}])
+        proj.save_dest_preset("P", [{"label": "new", "path": "/new"}])
+        assert proj.get_dest_preset("P") == [{"label": "new", "path": "/new"}]
+
+    def test_delete_preset_removes_it(self):
+        proj.save_dest_preset("ToDelete", [{"label": "x", "path": "/x"}])
+        proj.delete_dest_preset("ToDelete")
+        assert "ToDelete" not in proj.list_dest_presets()
+        assert proj.get_dest_preset("ToDelete") == []
+
+    def test_delete_missing_preset_is_noop(self):
+        proj.delete_dest_preset("NeverExisted")
+
+    def test_list_presets_sorted_alphabetically(self):
+        proj.save_dest_preset("Zebra", [])
+        proj.save_dest_preset("Alpha", [])
+        proj.save_dest_preset("Mango", [])
+        assert proj.list_dest_presets() == ["Alpha", "Mango", "Zebra"]
+
+    def test_presets_coexist_with_projects(self):
+        proj.upsert_project("p1", "/local", "/server")
+        proj.save_dest_preset("Drive Set", [{"label": "D", "path": "/d"}])
+        assert proj.get_project("p1") is not None
+        assert proj.get_dest_preset("Drive Set") == [{"label": "D", "path": "/d"}]
+
+
+# ── Naming preferences ─────────────────────────────────────────────────────────
+
+class TestNamingPreferences:
+    def test_returns_none_when_not_set(self):
+        assert proj.get_naming_preference("A001_*") is None
+
+    def test_save_and_get_preference(self):
+        proj.save_naming_preference("A001_*", "normalize")
+        assert proj.get_naming_preference("A001_*") == "normalize"
+
+    def test_overwrite_preference(self):
+        proj.save_naming_preference("B002_*", "skip")
+        proj.save_naming_preference("B002_*", "ask")
+        assert proj.get_naming_preference("B002_*") == "ask"
+
+
+# ── App settings ───────────────────────────────────────────────────────────────
+
+class TestAppSettings:
+    def test_returns_default_when_not_set(self):
+        assert proj.get_app_setting("theme", "dark") == "dark"
+
+    def test_returns_none_default_when_not_set(self):
+        assert proj.get_app_setting("missing") is None
+
+    def test_save_and_get_setting(self):
+        proj.save_app_setting("last_tab", 2)
+        assert proj.get_app_setting("last_tab") == 2
+
+    def test_overwrite_setting(self):
+        proj.save_app_setting("flag", True)
+        proj.save_app_setting("flag", False)
+        assert proj.get_app_setting("flag") is False
