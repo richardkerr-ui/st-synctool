@@ -240,6 +240,19 @@ class StatusMatrixWidget(QTableWidget):
         c = dst_labels.index(dst_label)
         self._set_cell(r, c, state)
 
+    def update_cell_progress(self, src_label: str, dst_label: str, text: str) -> None:
+        """Overwrite the cell text without changing its color (preserves last state color)."""
+        from PyQt6.QtGui import QColor
+        src_labels = [self.verticalHeaderItem(r).text() for r in range(self.rowCount())]
+        dst_labels = [self.horizontalHeaderItem(c).text() for c in range(self.columnCount())]
+        if src_label not in src_labels or dst_label not in dst_labels:
+            return
+        r = src_labels.index(src_label)
+        c = dst_labels.index(dst_label)
+        item = self.item(r, c)
+        if item:
+            item.setText(text)
+
     def _set_cell(self, row: int, col: int, state: CellState) -> None:
         from PyQt6.QtGui import QColor
         color, text = _STATE_STYLE.get(state, ("#555", state.value))
@@ -558,6 +571,8 @@ class OffloadTab(QWidget):
         self._dest_rows:   list[DestRowWidget]   = []
         self._thread: Optional[QThread] = None
         self._worker: Optional[OffloadWorker] = None
+        # (src_label, dst_label) -> monotonic start time for the COPYING phase
+        self._copy_start: dict[tuple, float] = {}
         # mount_path -> VolumeBanner, for volumes currently showing a banner
         self._banners: dict[str, VolumeBanner] = {}
         # mount_paths the user dismissed this session (cleared on unmount)
@@ -997,6 +1012,7 @@ class OffloadTab(QWidget):
             normalize_filenames=normalize,
         )
 
+        self._copy_start.clear()
         self._worker = OffloadWorker(sources, dests, config)
         self._thread = QThread()
         self._worker.moveToThread(self._thread)
@@ -1091,12 +1107,35 @@ class OffloadTab(QWidget):
     def _on_status_changed(self, src_label: str, dst_label: str, state: CellState):
         if dst_label:
             self._matrix.update_cell(src_label, dst_label, state)
+            if state == CellState.COPYING:
+                import time as _time
+                self._copy_start[(src_label, dst_label)] = _time.monotonic()
 
-    def _on_progress(self, src_label: str, dst_label: str, done: int, total: int):
-        pct = int(done / total * 100) if total else 0
-        self._log.log(
-            f"[{src_label} → {dst_label}] {done}/{total} files ({pct}%)", "info"
-        )
+    def _on_progress(self, src_label: str, dst_label: str, bytes_done: int, bytes_total: int):
+        import time as _time
+        pct = int(bytes_done / bytes_total * 100) if bytes_total else 0
+
+        def _fmt(n: int) -> str:
+            if n >= 1 << 30:
+                return f"{n / (1 << 30):.1f} GB"
+            if n >= 1 << 20:
+                return f"{n / (1 << 20):.0f} MB"
+            return f"{n / (1 << 10):.0f} KB"
+
+        elapsed = _time.monotonic() - self._copy_start.get((src_label, dst_label), _time.monotonic())
+        rate = bytes_done / elapsed if elapsed > 0.5 else 0
+        if rate > 0 and bytes_total > bytes_done:
+            secs_left = (bytes_total - bytes_done) / rate
+            if secs_left >= 60:
+                eta = f"{int(secs_left // 60)}m {int(secs_left % 60)}s"
+            else:
+                eta = f"{int(secs_left)}s"
+            eta_str = f" ~{eta}"
+        else:
+            eta_str = ""
+
+        cell_text = f"{pct}% ({_fmt(bytes_done)}/{_fmt(bytes_total)}{eta_str})"
+        self._matrix.update_cell_progress(src_label, dst_label, cell_text)
 
     def _on_finished(self, results: list, manifests: dict, log_path: str):
         done   = sum(1 for r in results if r.state == CellState.DONE)

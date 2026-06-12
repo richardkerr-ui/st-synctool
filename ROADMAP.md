@@ -30,7 +30,7 @@ Remaining gap: no automated test of `install.sh` itself. Validate manually on a 
 
 ## v2 work in progress
 
-- Phase 2: Live file-level progress + ETA. Actively next.
+- Phase 2: Live byte-level progress + ETA — SHIPPED. `copy_source_to_staging` now emits `(src, dst, bytes_done, bytes_total)`. The offload tab cell shows `"45% (1.2 GB/2.6 GB ~3m)"` during the COPYING phase. Next: per-chunk progress for very large individual files (currently per-file granularity).
 - Phase 3: Conflict resolution UI for BOTH_CHANGED Merge rows. Planned.
 
 ## Testing roadmap
@@ -67,10 +67,8 @@ Parametrize over the key axes:
 
 Estimated effort: ~2-3 days.
 
-### Layer 3 — Property-based tests (hypothesis)
-For `three_way_diff` rename collapse logic: generate random manifest triples and assert invariants hold (every renamed file appears exactly once in output, no duplicate output paths). Catches whole classes of sort-order and edge-case bugs automatically.
-
-Estimated effort: ~half day for `three_way_diff`; more for `run_offload`.
+### Layer 3 — Property-based tests (hypothesis) — DONE
+8 structural invariant tests for `three_way_diff` rename collapse logic; hypothesis found and fixed a real chained-rename suppression bug in `comparison.py` in the process. `tests/test_three_way_diff_properties.py`.
 
 ---
 

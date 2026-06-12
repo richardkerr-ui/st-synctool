@@ -468,12 +468,19 @@ def copy_source_to_staging(
     status_cb(source.label, dest.label, CellState.COPYING)
 
     files = list(source_manifest.keys())
-    for i, rel in enumerate(files):
+    total_bytes = sum(
+        v["size"] for v in source_manifest.values() if isinstance(v, dict) and "size" in v
+    )
+    bytes_done = 0
+    for rel in files:
         src_file = source.path / rel
         dst_file = staging_dir / rel
         _copy_with_retries(src_file, dst_file, max_retries, log_cb)
+        info = source_manifest.get(rel)
+        if isinstance(info, dict):
+            bytes_done += info.get("size", 0)
         if progress_cb:
-            progress_cb(source.label, dest.label, i + 1, len(files))
+            progress_cb(source.label, dest.label, bytes_done, total_bytes)
 
     return staging_dir
 

@@ -170,6 +170,43 @@ class TestCopyToStaging:
         calls = [c.args for c in status_cb.call_args_list]
         assert any(state == CellState.COPYING for _, _, state in calls)
 
+    def test_progress_cb_emits_bytes_not_file_count(self, tmp_path, log_cb, status_cb):
+        """progress_cb should receive (src, dst, bytes_done, bytes_total) not file indices."""
+        source, _ = _make_source(tmp_path)
+        dest = OffloadDest(label="Primary", path=tmp_path / "dest2")
+        dest.path.mkdir()
+        manifest = prehash_source(source, log_cb)
+        total_bytes = sum(v["size"] for v in manifest.values() if isinstance(v, dict))
+        calls = []
+        copy_source_to_staging(
+            source, dest, "20260609T120000", manifest, 1, log_cb, status_cb,
+            progress_cb=lambda s, d, done, total: calls.append((s, d, done, total)),
+        )
+        assert calls, "progress_cb was not called"
+        # last call should report total_bytes for both done and total
+        last = calls[-1]
+        assert last[2] == total_bytes, f"bytes_done should equal total at end, got {last[2]} vs {total_bytes}"
+        assert last[3] == total_bytes
+        # bytes_done should be monotonically non-decreasing
+        for i in range(1, len(calls)):
+            assert calls[i][2] >= calls[i - 1][2], "bytes_done went backwards"
+
+    def test_progress_cb_total_equals_manifest_sum(self, tmp_path, log_cb, status_cb):
+        """bytes_total passed to progress_cb must equal sum of manifest sizes."""
+        source, _ = _make_source(tmp_path)
+        dest = OffloadDest(label="Primary", path=tmp_path / "dest3")
+        dest.path.mkdir()
+        manifest = prehash_source(source, log_cb)
+        expected_total = sum(v["size"] for v in manifest.values() if isinstance(v, dict))
+        totals = []
+        copy_source_to_staging(
+            source, dest, "20260609T120000", manifest, 1, log_cb, status_cb,
+            progress_cb=lambda s, d, done, total: totals.append(total),
+        )
+        assert all(t == expected_total for t in totals), (
+            f"bytes_total inconsistent across calls: {set(totals)}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # verify_staging
