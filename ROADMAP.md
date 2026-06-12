@@ -178,6 +178,26 @@ Ask questions like "when was this card offloaded and to where?" against `~/Docum
 
 ---
 
+## M9: Org-wide activity log (proposed 2026-06-12, design recommended below, Richard to confirm)
+
+Goal: a full view of all production activity (offloads, transfers, merges, verifies) across every Signal Theory user. Raised by Richard 2026-06-12: logs currently live only in each user's `~/Documents/STSyncTool/`.
+
+**Recommended design: ship logs to a shared Google Drive folder via the rclone remote every user already has.** Local stays the source of truth (custody logs must exist even offline); a background "log shipping" step uploads new files after each operation and on app launch. Layout: `ST_SyncTool_Activity/{workstation}/{user}/...` mirroring the local folders. Because every log and manifest filename is timestamped and unique (offload logs already carry a random suffix), shipping is append-only `rclone copy` with no conflicts and no reconciliation logic at all.
+
+Why Drive over Synology-direct: field DIT carts are not on the office network, but they already have Drive configured in this app; shipping works from anywhere with internet and queues quietly when offline. The Synology still gets its copy for free: point Synology **Cloud Sync** (built-in) at the same Drive folder and the NAS mirrors it with zero code in our app. Office tools read the NAS; remote tools read Drive; both see the same corpus.
+
+### M9.1 Log shipping (small, high value during beta)
+`core/log_sync.py`: enumerate new files under `~/Documents/STSyncTool/` (logs + manifest archive), `rclone copy` them to the shared folder, remember what shipped (small state file), never delete anything remotely. Runs after each operation and on launch; fully silent on failure (retry next time), opt-out toggle in settings.
+**Done when:** unit tests with mocked rclone cover new-file detection, state tracking, retry after offline and the never-delete invariant; one manual end-to-end against a junk Drive folder; README updated.
+
+### M9.2 Activity index (later)
+A small builder that walks the aggregated corpus into one SQLite file (operation, user, workstation, source, dests, file counts, bytes, verdict, timestamps) for dashboards and fast queries. Also becomes the retrieval layer for M8.3 log Q&A so answers can span the whole org, not just one machine.
+**Done when:** index builds idempotently from the corpus, query helpers tested, M8.3 reads from it when present.
+
+**Sequencing suggestion:** M9.1 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta; M9.2 alongside or after M8.
+
+---
+
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
 M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M7.3 → M7.4 → recruit beta testers.
