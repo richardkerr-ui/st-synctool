@@ -115,6 +115,11 @@ Verify multiple folder+manifest pairs in one run, fed by the projects registry (
 ### M5.3 Scheduled verification (larger, optional)
 launchd-based monthly verify of registered archive folders, writing reports to `~/Documents/STSyncTool/logs/` and surfacing failures in-app on next launch (banner: "2 archives failed verification on June 1"). No daemon, no background app, just a launchd plist the app installs on request.
 
+
+### M5.4 Persist format-verification results (approved 2026-06-12; numbering does not imply M5.3 is approved)
+Known gap: the Verify tab's format-aware media checks run but their results are never written anywhere, so the evidence is lost when the window closes. Persist per-file media-verify outcomes into the verify report and, where a manifest is present, into a `media_verify` block in the manifest entry. Pairs naturally with M5.0's extraction.
+**Done when:** results persist and reload, schema documented in SCHEMA_INTEROP_SPEC, round-trip tested.
+
 **Sequencing:** M5.0 first (it unblocks headless testing), then M5.1 and M5.2 in either order. M5.3 only if archives have actually bitten you before; not approved, do not start.
 
 ---
@@ -148,6 +153,11 @@ macOS runner executing the full pytest suite, including the pytest-qt GUI tests 
 ### M7.4 Quick start guide
 One page with screenshots covering the three core flows: offload a card, merge a project, verify an archive. Lives in the repo (`docs/QUICKSTART.md`) and ships with the DMG.
 **Done when:** a non-developer can complete each flow following only the guide.
+
+
+### M7.5 Update checker (approved 2026-06-12, required for beta)
+On launch, query the GitHub releases API for the latest version (5s timeout, silent on failure or offline). If newer than the running version, show a dismissible banner with a download link. No auto-update, no background daemon; just awareness. Version comparison logic in `core/` or `utils/`.
+**Done when:** version-compare and release-parse logic unit tested with mocked responses (newer, same, older, malformed, offline), banner renders or hides in a GUI smoke test, README updated.
 
 ---
 
@@ -203,10 +213,27 @@ A History view that renders the merged card index: rows like "Jun 12 · Cart 3 �
 
 **Sequencing (approved):** M9.1 + M9.2 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta (the summary line is written by the same shipping step, so they land together); M9.3 post-beta, before or alongside M8.3 which depends on the same index.
 
+
+---
+
+## M10: Field trust features (approved 2026-06-12)
+
+### M10.1 "Safe to format" clearance (small, high trust value)
+The scariest moment in a DIT's day is wiping a card. After an offload the app already holds per-file verification results for every destination. Show an explicit verdict per source: green "All N files verified on K destinations. Card X is safe to format" only when at least 2 destinations verified clean; otherwise an amber "Not cleared: ..." with the reason. Verdict computation in `core/offload.py` or a new `core/clearance.py`; recorded in the chain-of-custody log.
+**Done when:** verdict function unit tested (2+ clean dests, 1 dest only, any FAILED cell, partial verify), custody log carries the verdict, GUI smoke test on the Mac.
+
+### M10.2 Drive quota awareness (revised after Richard's 2026-06-12 question)
+We can never know the account's true 750 GB/day total because uploads outside the app (browser, Drive desktop) are invisible to us. Two honest layers instead of a false gauge: (a) a persisted daily tally of app uploads presented strictly as a floor ("at least 620 GB uploaded through ST SyncTool today"); (b) the real protection: classify rclone's Google quota/rate-limit error output (userRateLimitExceeded and friends) and surface a plain-language message ("Google's daily upload limit was hit for this account. It resets at midnight Pacific. Your files are safe; resume after reset.") instead of a cryptic failure. Layer (b) works regardless of outside-app uploads because Google itself is the source of truth.
+**Done when:** error classification unit tested against captured rclone stderr fixtures, daily tally persists and resets correctly across day boundaries (TZ-aware), transfer and offload Drive paths both surface the message, README "Known limitations" updated.
+
+### M10.3 ASC-MHL export (post-beta, interoperability)
+Export an ASC Media Hash List (.mhl) alongside `st_manifest.json` so post houses can verify Signal Theory deliveries with their own tools (Silverstack, YoYotta etc.) without trusting our app. All hash data already exists in the manifest; this is a format translation. Validate output against the published ASC MHL schema and at least one third-party tool.
+**Done when:** writer unit tested against the ASC MHL spec (hash formats, XML structure, sequence handling), round-trip check with one external validator documented, export toggle in offload and transfer flows.
+
 ---
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.3 → M7.4 → recruit beta testers (M9.3 post-beta, before M8.3).
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M10.1 → M5.0 → M5.1 → M5.2 → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M8 → M10.3.
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
