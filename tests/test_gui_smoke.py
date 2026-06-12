@@ -214,3 +214,30 @@ class TestMainWindowSmoke:
         assert isinstance(window._merge_tab, MergeTab)
         assert isinstance(window._offload_tab, OffloadTab)
         assert isinstance(window._verify_tab, VerifyTab)
+
+
+# ---------------------------------------------------------------------------
+# M4.1: resume prompt (OffloadTab)
+# ---------------------------------------------------------------------------
+
+class TestOffloadResumePrompt:
+    @pytest.fixture
+    def tab(self, qtbot, monkeypatch):
+        import gui.offload_tab as ot
+        import core.projects as proj
+
+        def _mock_watcher(self):
+            self._watcher = MagicMock()
+            self._watcher.available = False
+
+        monkeypatch.setattr(ot.OffloadTab, "_start_volume_watcher", _mock_watcher)
+        monkeypatch.setattr(proj, "list_dest_presets", lambda: [])
+        t = ot.OffloadTab()
+        qtbot.addWidget(t)
+        return t
+
+    def test_no_staging_returns_false_without_dialog(self, tab, tmp_path):
+        from core.offload import OffloadSource, OffloadDest
+        src = OffloadSource(label="A001", path=tmp_path / "card")
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        assert tab._ask_resume([src], [dst]) is False

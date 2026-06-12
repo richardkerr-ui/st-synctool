@@ -496,6 +496,12 @@ You probably paired the wrong manifest with the wrong Drive folder. Most common 
 
 ---
 
+## Resume after an interrupted offload
+
+If an offload is interrupted (power loss, crash, yanked drive), the partial copy stays in a hidden staging folder at the destination along with a small state file. The next time you start an offload of the same card to the same destination, the app offers **Resume**: files already copied are re-verified against the original source hashes and reused, so only missing or corrupted files are copied again. Choosing **Start Fresh** discards the partial copy instead. The chain-of-custody log records that the offload was resumed and lists every reused file. The source card is never written to in either case.
+
+---
+
 ## Known limitations
 
 - **Drive → Drive transfers run server-side.** Paste a Drive URL in both Source and Destination; rclone copies directly between the folders with no local disk used. Paranoid verify is unavailable for this direction (there are no local files to hash); verification relies on Drive checksums. The manifest is built from the destination's Drive metadata and saved to the central archive only. The 750 GB/day limit applies to server-side copies too and is enforced in pre-flight.

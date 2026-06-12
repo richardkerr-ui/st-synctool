@@ -954,6 +954,50 @@ class OffloadTab(QWidget):
         dests   = [d for d in dests   if d is not None]
         return sources, dests
 
+    def _ask_resume(self, active_src, active_dst):
+        """M4.1: if any source/dest pair has interrupted staging, offer Resume.
+
+        Returns True (resume), False (start fresh, stale staging discarded)
+        or None (user cancelled). Detection logic lives in core/offload.py.
+        """
+        from core.offload import find_resumable_staging, discard_stale_staging
+
+        found = []
+        for s in active_src:
+            for d in active_dst:
+                hit = find_resumable_staging(s, d)
+                if hit:
+                    found.append((s, d, hit[0], hit[1]))
+        if not found:
+            return False
+
+        detail = "\n".join(
+            f"  • {s.label} → {d.label}: {len(state.get('completed', []))} file(s) already staged"
+            for s, d, _, state in found
+        )
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Resume available")
+        box.setText(
+            "An earlier offload was interrupted. Files already copied can be "
+            "re-verified and reused instead of recopying the whole card:\n\n"
+            f"{detail}\n\n"
+            "Resume reuses only files that re-verify against the original "
+            "source hashes. Start Fresh discards the partial copy."
+        )
+        resume_btn = box.addButton("Resume", QMessageBox.ButtonRole.AcceptRole)
+        fresh_btn = box.addButton("Start Fresh", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is resume_btn:
+            return True
+        if clicked is fresh_btn:
+            for _, _, staging, _ in found:
+                discard_stale_staging(staging)
+            return False
+        return None
+
     def _start_offload(self):
         sources, dests = self._collect_inputs()
 
@@ -1004,12 +1048,18 @@ class OffloadTab(QWidget):
 
         normalize = self._check_normalisation(active_src)
 
+        # M4.1: never silently reuse an interrupted offload's staging — ask.
+        resume_staging = self._ask_resume(active_src, active_dst)
+        if resume_staging is None:
+            return  # user cancelled
+
         config = OffloadConfig(
             max_retries=self._retries_spin.value(),
             stop_on_first_failure=self._stop_on_fail.isChecked(),
             generate_thumbnails=self._thumb_check.isChecked() and self._thumb_check.isEnabled(),
             thumbnail_max_frames=self._max_frames_spin.value(),
             normalize_filenames=normalize,
+            resume_staging=resume_staging,
         )
 
         self._copy_start.clear()

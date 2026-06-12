@@ -12,6 +12,7 @@ Design principles (Phase 5, SYNCTOOL_CONTEXT.md):
 """
 
 import enum
+import json
 import re
 import shutil
 import time
@@ -136,6 +137,9 @@ class OffloadConfig:
     generate_thumbnails: bool = False
     thumbnail_max_frames: int = 4
     normalize_filenames: bool = False
+    # M4.1: reuse verified files from an interrupted offload's staging dir.
+    # Off by default — the UI must ask the user, never silently reuse.
+    resume_staging: bool = False
 
 
 @dataclass
@@ -149,6 +153,9 @@ class CellResult:
     staging_path: Optional[Path] = None
     final_path: Optional[Path] = None
     thumbnail_result: Optional[dict] = None   # set for primary dest when thumbnails enabled
+    # M4.1: resume bookkeeping for the chain-of-custody log
+    resumed: bool = False
+    reused_files: list = field(default_factory=list)
     # MANIFEST-FIX: per-file post-copy verification outcome from verify_staging().
     # verified is True only when every file's hash matched the source ground-truth.
     # per_file_verify maps relative path -> True (PASS) / False (FAIL) for the COC log.
@@ -447,6 +454,41 @@ def prehash_source(
     return manifest
 
 
+STATE_FILENAME = ".st_offload_state.json"
+
+
+def _write_staging_state(staging_dir: Path, state: dict) -> None:
+    """Atomic write (tmp + rename) so a kill mid-write never corrupts state."""
+    tmp = staging_dir / (STATE_FILENAME + ".tmp")
+    tmp.write_text(json.dumps(state))
+    tmp.replace(staging_dir / STATE_FILENAME)
+
+
+def find_resumable_staging(source: OffloadSource, dest: OffloadDest):
+    """Return (staging_dir, state) for an interrupted offload of this exact
+    source/destination pair, or None. Used by the UI to offer Resume."""
+    parent = dest.path / source.effective_subfolder()
+    if not parent.exists():
+        return None
+    for staging in sorted(parent.glob(".st_staging_*"), reverse=True):
+        state_path = staging / STATE_FILENAME
+        if not state_path.exists():
+            continue
+        try:
+            state = json.loads(state_path.read_text())
+        except Exception:
+            continue
+        if (state.get("source_path") == str(source.path)
+                and state.get("source_label") == source.label):
+            return staging, state
+    return None
+
+
+def discard_stale_staging(staging_dir: Path) -> None:
+    """Delete an abandoned staging directory (user chose Start Fresh)."""
+    shutil.rmtree(staging_dir, ignore_errors=True)
+
+
 def copy_source_to_staging(
     source: OffloadSource,
     dest: OffloadDest,
@@ -456,27 +498,75 @@ def copy_source_to_staging(
     log_cb: LogCallback,
     status_cb: StatusCallback,
     progress_cb: Optional[ProgressCallback] = None,
+    resume_from: Optional[Path] = None,
+    reused_out: Optional[list] = None,
 ) -> Path:
     """
     Copy all source files into a staging directory under the destination.
 
+    resume_from: an existing staging dir from an interrupted offload of the
+    same source/dest pair. Already staged files that hash-match the source
+    manifest are reused (appended to reused_out); others are (re)copied.
+
     Staging path: {dest.path}/{source.effective_subfolder()}/.st_staging_{ts}/
     Returns the staging directory Path.
     """
-    staging_dir = dest.path / source.effective_subfolder() / f".st_staging_{ts}"
-    log_cb(f"[Offload] Staging {source.label} → {dest.label}: {staging_dir}", "info")
+    if resume_from is not None:
+        staging_dir = resume_from
+        log_cb(f"[Offload] Resuming staging {source.label} → {dest.label}: {staging_dir}", "info")
+    else:
+        staging_dir = dest.path / source.effective_subfolder() / f".st_staging_{ts}"
+        log_cb(f"[Offload] Staging {source.label} → {dest.label}: {staging_dir}", "info")
     status_cb(source.label, dest.label, CellState.COPYING)
 
     files = list(source_manifest.keys())
     total_bytes = sum(
         v["size"] for v in source_manifest.values() if isinstance(v, dict) and "size" in v
     )
+
+    # M4.1 resume: remove staged junk not in the current manifest (e.g.
+    # leftovers from a run that died after filename normalization), so stale
+    # files can never be committed.
+    if resume_from is not None and staging_dir.exists():
+        wanted = set(files)
+        for f in staging_dir.rglob("*"):
+            if f.is_file() and f.name != STATE_FILENAME:
+                rel = str(f.relative_to(staging_dir))
+                if rel not in wanted:
+                    f.unlink()
+                    log_cb(f"[Offload]   discarded stale staged file: {rel}", "warning")
+
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    state = {
+        "source_label": source.label,
+        "source_path": str(source.path),
+        "ts": ts,
+        "manifest": source_manifest,
+        "completed": [],
+    }
     bytes_done = 0
     for rel in files:
         src_file = source.path / rel
         dst_file = staging_dir / rel
-        _copy_with_retries(src_file, dst_file, max_retries, log_cb)
         info = source_manifest.get(rel)
+
+        # M4.1 resume: re-verify an already staged file against the source
+        # pre-hash manifest; reuse on match, recopy on mismatch or absence.
+        reuse = False
+        if resume_from is not None and dst_file.exists() and isinstance(info, dict):
+            if (dst_file.stat().st_size == info.get("size")
+                    and _sha256(dst_file) == info.get("checksum")):
+                reuse = True
+            else:
+                log_cb(f"[Offload]   staged copy bad, recopying: {rel}", "warning")
+        if reuse:
+            if reused_out is not None:
+                reused_out.append(rel)
+        else:
+            _copy_with_retries(src_file, dst_file, max_retries, log_cb)
+
+        state["completed"].append(rel)
+        _write_staging_state(staging_dir, state)
         if isinstance(info, dict):
             bytes_done += info.get("size", 0)
         if progress_cb:
@@ -848,6 +938,13 @@ def write_chain_of_custody_log(
         # or audit tool can read PASS/FAIL per file rather than infer it.
         if r.verified is not None:
             lines.append(f"    Verified: {'PASS' if r.verified else 'FAIL'}")
+        if getattr(r, "resumed", False):
+            lines.append(
+                f"    Resumed: YES — {len(r.reused_files)} file(s) reused from "
+                "interrupted staging, re-verified against source pre-hash manifest"
+            )
+            for rel in sorted(r.reused_files):
+                lines.append(f"      REUSED: {rel}")
         if r.per_file_verify:
             lines.append("    Per-file verification:")
             for rel in sorted(r.per_file_verify):
@@ -979,11 +1076,31 @@ def run_offload(
 
             r = cell_results[(src.label, dst.label)]
             try:
+                resume_from = None
+                if config.resume_staging:
+                    found = find_resumable_staging(src, dst)
+                    if found:
+                        resume_from = found[0]
+                        log_cb(
+                            f"[Offload] Resume: found interrupted staging for "
+                            f"{src.label} → {dst.label}, reusing verified files",
+                            "info",
+                        )
+                reused: list = []
                 staging = copy_source_to_staging(
                     src, dst, ts, mfst, config.max_retries,
                     log_cb, status_cb, progress_cb,
+                    resume_from=resume_from, reused_out=reused,
                 )
                 r.staging_path = staging
+                if resume_from is not None:
+                    r.resumed = True
+                    r.reused_files = reused
+                    log_cb(
+                        f"[Offload] Resume: {len(reused)} file(s) reused, "
+                        f"{len(mfst) - len(reused)} copied fresh",
+                        "info",
+                    )
 
                 # Rename files in staging to normalised names (source never touched)
                 apply_normalization_in_staging(staging, norm_plan, log_cb)
@@ -1016,6 +1133,7 @@ def run_offload(
                         _mark_remaining(cell_results, src, active_dests, CellState.SKIPPED, status_cb, after=dst)
                         break
                 else:
+                    (staging / STATE_FILENAME).unlink(missing_ok=True)
                     final = commit_staging(staging, dst, src, log_cb, status_cb)
                     r.final_path   = final
                     r.files_copied = len(norm_mfst)

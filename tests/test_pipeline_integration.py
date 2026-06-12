@@ -364,3 +364,196 @@ class TestTransferConflictHandlers:
         manifest = load_manifest(actual / MANIFEST_FILENAME)
         statuses = _verify_against_manifest(manifest, actual)
         assert set(statuses.values()) == {"OK"}
+
+
+# ---------------------------------------------------------------------------
+# M4.1: resume interrupted offload
+# ---------------------------------------------------------------------------
+
+import core.offload as offload_mod
+from core.offload import (
+    STATE_FILENAME, discard_stale_staging, find_resumable_staging,
+    write_chain_of_custody_log,
+)
+
+
+def _interrupt_after(monkeypatch, n_files):
+    """Make _copy_with_retries die after n successful per-file copies."""
+    real = offload_mod._copy_with_retries
+    calls = {"n": 0}
+
+    def wrapper(src, dst, retries, log_cb):
+        if calls["n"] >= n_files:
+            raise OSError("simulated mid-copy interrupt")
+        calls["n"] += 1
+        return real(src, dst, retries, log_cb)
+
+    monkeypatch.setattr(offload_mod, "_copy_with_retries", wrapper)
+    return calls
+
+
+class TestResumeInterruptedOffload:
+    def _run(self, tmp_path, resume=False):
+        src = tmp_path / "CARD_A"
+        if not src.exists():
+            _populate(src)
+        dest = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dest.path.mkdir(exist_ok=True)
+        cfg = OffloadConfig(resume_staging=resume)
+        results, _, log_path = run_offload(
+            [OffloadSource(label="A001", path=src)], [dest],
+            cfg, MagicMock(), MagicMock(),
+        )
+        return src, dest, results[0], log_path
+
+    def test_interrupt_then_resume_copies_only_missing(self, tmp_path, monkeypatch):
+        calls = _interrupt_after(monkeypatch, 1)  # first file copies, second dies
+        src, dest, r1, _ = self._run(tmp_path)
+        assert r1.state == CellState.FAILED
+
+        # staging and its state file survive the failure
+        hit = find_resumable_staging(
+            OffloadSource(label="A001", path=src), dest)
+        assert hit is not None
+        staging, state = hit
+        assert len(state["completed"]) == 1
+
+        # resume: remaining files copy, staged one is reused
+        monkeypatch.setattr(offload_mod, "_copy_with_retries",
+                            offload_mod._copy_with_retries)  # restore via attr below
+        monkeypatch.undo()
+        calls2 = _count_copies(monkeypatch)
+        src, dest, r2, _ = self._run(tmp_path, resume=True)
+        assert r2.state == CellState.DONE
+        assert r2.resumed is True
+        assert len(r2.reused_files) == 1
+        assert calls2["n"] == len(FILES) - 1  # only the missing files copied
+
+        final = dest.path / "A001"
+        for rel, data in FILES.items():
+            assert (final / rel).read_bytes() == data
+        assert not (final / STATE_FILENAME).exists()
+
+    def test_corrupted_staged_file_recopied_on_resume(self, tmp_path, monkeypatch):
+        _interrupt_after(monkeypatch, 2)  # two files staged, third dies
+        src, dest, r1, _ = self._run(tmp_path)
+        assert r1.state == CellState.FAILED
+        staging, state = find_resumable_staging(
+            OffloadSource(label="A001", path=src), dest)
+        victim = state["completed"][0]
+        (staging / victim).write_bytes(b"bitrot in staging")
+
+        monkeypatch.undo()
+        calls2 = _count_copies(monkeypatch)
+        src, dest, r2, _ = self._run(tmp_path, resume=True)
+        assert r2.state == CellState.DONE
+        assert victim not in r2.reused_files          # corrupted -> recopied
+        assert calls2["n"] == len(FILES) - 1          # 1 clean reuse, rest copied
+        final = dest.path / "A001"
+        assert (final / victim).read_bytes() == FILES[victim]
+
+    def test_clean_noop_resume_reuses_everything(self, tmp_path, monkeypatch):
+        _interrupt_after(monkeypatch, len(FILES))  # all copied, dies after
+        # interrupt fires inside the next cell's first copy; with one dest and
+        # all files staged, the run actually completes copy. Force failure by
+        # corrupting verify instead: simpler — interrupt during commit is out
+        # of scope, so simulate by hand-building a complete staging run that
+        # failed before commit.
+        monkeypatch.undo()
+        src = _populate(tmp_path / "CARD_A")
+        dest = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dest.path.mkdir()
+        source = OffloadSource(label="A001", path=src)
+        from core.offload import prehash_source, copy_source_to_staging
+        mfst = prehash_source(source, MagicMock())
+        staging = copy_source_to_staging(
+            source, dest, "20260612_000000", mfst, 1, MagicMock(), MagicMock())
+        assert (staging / STATE_FILENAME).exists()
+
+        calls = _count_copies(monkeypatch)
+        _, dest, r, _ = self._run(tmp_path, resume=True)
+        assert r.state == CellState.DONE
+        assert r.resumed is True
+        assert calls["n"] == 0                        # nothing recopied
+        assert sorted(r.reused_files) == sorted(FILES)
+
+    def test_stale_staged_file_never_committed(self, tmp_path, monkeypatch):
+        _interrupt_after(monkeypatch, 1)
+        src, dest, r1, _ = self._run(tmp_path)
+        staging, _ = find_resumable_staging(
+            OffloadSource(label="A001", path=src), dest)
+        (staging / "junk_leftover.tmp").write_bytes(b"should not survive")
+
+        monkeypatch.undo()
+        src, dest, r2, _ = self._run(tmp_path, resume=True)
+        assert r2.state == CellState.DONE
+        assert not (dest.path / "A001" / "junk_leftover.tmp").exists()
+
+    def test_custody_log_records_resume_and_reused_files(self, tmp_path, monkeypatch):
+        _interrupt_after(monkeypatch, 1)
+        src, dest, r1, _ = self._run(tmp_path)
+        monkeypatch.undo()
+        src, dest, r2, log_path = self._run(tmp_path, resume=True)
+        text = Path(log_path).read_text()
+        assert "Resumed: YES" in text
+        assert "REUSED:" in text
+        for rel in r2.reused_files:
+            assert f"REUSED: {rel}" in text
+
+    def test_no_resume_when_config_off(self, tmp_path, monkeypatch):
+        _interrupt_after(monkeypatch, 1)
+        src, dest, r1, _ = self._run(tmp_path)
+        monkeypatch.undo()
+        src, dest, r2, _ = self._run(tmp_path, resume=False)
+        assert r2.state == CellState.DONE
+        assert r2.resumed is False and r2.reused_files == []
+
+    def test_source_remains_untouched_through_resume(self, tmp_path, monkeypatch):
+        _interrupt_after(monkeypatch, 1)
+        src, dest, _, _ = self._run(tmp_path)
+        monkeypatch.undo()
+        self._run(tmp_path, resume=True)
+        for rel, data in FILES.items():
+            assert (src / rel).read_bytes() == data
+
+
+def _count_copies(monkeypatch):
+    real = offload_mod._copy_with_retries
+    calls = {"n": 0}
+
+    def wrapper(src, dst, retries, log_cb):
+        calls["n"] += 1
+        return real(src, dst, retries, log_cb)
+
+    monkeypatch.setattr(offload_mod, "_copy_with_retries", wrapper)
+    return calls
+
+
+class TestFindResumableStaging:
+    def test_none_when_no_staging(self, tmp_path):
+        s = OffloadSource(label="A001", path=tmp_path / "card")
+        d = OffloadDest(label="NAS", path=tmp_path / "nas")
+        assert find_resumable_staging(s, d) is None
+
+    def test_none_for_different_source(self, tmp_path, monkeypatch):
+        _interrupt_after(monkeypatch, 1)
+        src = _populate(tmp_path / "CARD_A")
+        dest = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dest.path.mkdir()
+        run_offload([OffloadSource(label="A001", path=src)], [dest],
+                    OffloadConfig(), MagicMock(), MagicMock())
+        other = OffloadSource(label="A001", path=tmp_path / "OTHER_CARD")
+        assert find_resumable_staging(other, dest) is None
+
+    def test_discard_stale_staging_removes_dir(self, tmp_path, monkeypatch):
+        _interrupt_after(monkeypatch, 1)
+        src = _populate(tmp_path / "CARD_A")
+        dest = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dest.path.mkdir()
+        run_offload([OffloadSource(label="A001", path=src)], [dest],
+                    OffloadConfig(), MagicMock(), MagicMock())
+        source = OffloadSource(label="A001", path=src)
+        staging, _ = find_resumable_staging(source, dest)
+        discard_stale_staging(staging)
+        assert not staging.exists()
+        assert find_resumable_staging(source, dest) is None

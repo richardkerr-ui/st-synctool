@@ -80,7 +80,7 @@ Real ask: move a project between ST Drive folders without burning local disk spa
 
 ## M4: Offload improvements
 
-### M4.1 Resume interrupted offload
+### M4.1 Resume interrupted offload ✅ DONE 2026-06-12 (GUI resume prompt needs one manual Mac run)
 Today a failed offload leaves `.st_staging_{ts}/` plus a failure report and a restart recopies the whole card. Add resume: on start, detect existing staging for the same source/destination pair, re-verify already staged files against the source pre-hash manifest, copy only what is missing or mismatched, then commit normally.
 
 - Logic in `core/offload.py`. Staging folder gains a small state file (source manifest reference + completed-file list) written atomically as files verify.
@@ -88,6 +88,7 @@ Today a failed offload leaves `.st_staging_{ts}/` plus a failure report and a re
 - Source remains strictly read-only throughout.
 
 **Done when:** integration tests cover interrupt-then-resume (mid-copy kill simulated), corrupted-staged-file re-copy and a clean no-op resume. UI shows "Resume available" rather than silently reusing.
+**Findings:** `copy_source_to_staging` now writes `.st_offload_state.json` atomically (tmp + rename) after every file; `find_resumable_staging()` matches staging dirs to the exact source path + label pair; resume re-hashes every staged file against the source pre-hash manifest, reusing matches and recopying mismatches; staged files not in the manifest are deleted before commit so stale leftovers (e.g. from a post-normalization crash) can never land in the final folder; the state file is removed pre-commit. `OffloadConfig.resume_staging` defaults to False — the GUI asks via a Resume / Start Fresh / Cancel dialog (`_ask_resume`), with Start Fresh discarding the stale staging. Custody log records "Resumed: YES" plus each REUSED file. 11 integration tests cover interrupt-then-resume (simulated mid-copy kill), corrupted-staged-file recopy, clean no-op resume (zero copies), stale-file cleanup, custody entries, config-off behavior and source immutability. Suite 1199 → 1209, coverage 87%.
 
 ### M4.2 BRAW contact sheet thumbnails (time-boxed spike first)
 Blackmagic offers no lightweight official CLI. Spike (max 1 day): evaluate (a) ffmpeg builds with BRAW decode patches, (b) Blackmagic RAW SDK sample binaries (`braw` extract tools ship with the free SDK) and (c) shelling to DaVinci Resolve if installed, mirroring the REDline pattern (optional tool, graceful metadata-only fallback).
@@ -235,6 +236,6 @@ Export an ASC Media Hash List (.mhl) alongside `st_manifest.json` so post houses
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M10.1 → M5.0 → M5.1 → M5.2 → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M8 → M10.3.
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 (manual e2e pending) → M4.1 ✅ → M4.2 spike → M10.1 → M5.0 → M5.1 → M5.2 → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M8 → M10.3.
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
