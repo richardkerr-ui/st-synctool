@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/utils/volume_watcher.py
-# hypothesis_version: 6.141.1
-
-[1024, '%m%d', '-plist', '.rdc', '.rdm', '/Volumes', 'AUDIO', 'B', 'CLIP', 'Card_', 'DCIM', 'EOS_DIGITAL', 'Ejectable', 'FilesystemType', 'GB', 'KB', 'MB', 'MEDIA', 'NO NAME', 'NSDevicePath', 'PRIVATE', 'Removable', 'RemovableMedia', 'SOUND', 'TB', 'TotalSize', 'UNTITLED', 'UNTITLED 1', 'UNTITLED 2', 'UNTITLED SD', 'VolumeName', '_', 'diskutil', 'ejectable', 'filesystem', 'info', 'label', 'marker', 'mount_path', 'removable', 'total_size', 'total_size_str', 'unknown', 'volumeDidMount:', 'volumeDidUnmount:', 'volume_name']

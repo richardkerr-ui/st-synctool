@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/oauth_config.py
-# hypothesis_version: 6.141.1
-
-[200, 384, '.config', ':', '=', 'Authorization', 'access_token', 'active_remote', 'client_id', 'client_secret', 'config', 'config.json', 'email', 'gdrive', 'listremotes', 'oauth.json', 'rclone', 'show', 'st_synctool', 'token', 'type = drive']

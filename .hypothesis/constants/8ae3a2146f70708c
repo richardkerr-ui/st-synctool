@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/preflight.py
-# hypothesis_version: 6.141.1
-
-['client_id', 'client_secret', 'config', 'create', 'drive', 'gdrive', 'listremotes', 'rclone', 'scope', 'version']

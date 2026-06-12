@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/media_verify.py
-# hypothesis_version: 6.141.1
-
-[120, '(\\d+)$', '*.R3D', '*.r3d', '--decode', '--noOutput', '--useMeta', '-count_packets', '-of', '-select_streams', '-show_entries', '-v', '.ari', '.dpx', '.exr', '.mov', '.mp4', '.mxf', '.r3d', '.rdc', 'REDline', 'arri-art', 'csv=p=0', 'error', 'ffprobe', 'replace', 'v:0']

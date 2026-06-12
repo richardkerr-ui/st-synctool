@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/comparison.py
-# hypothesis_version: 6.141.1
-
-['#569cd6', '#6a9955', '#808080', '#9cdcfe', '#c586c0', '#ce9178', '#d16969', '#dcdcaa', '#f44747', '.DS_Store', '.st_failure_', '.st_offload_', '.st_staging_', '/', 'BOTH_CHANGED', 'Conflict', 'Deleted Both', 'Deleted Locally', 'Deleted Server', 'DiffResult', 'Local Changed', 'Local Only', 'Renamed', 'Server Changed', 'Server Only', 'Thumbs.db', 'Unchanged', '\\', '_contact_sheet_', '_thumbnails', 'checksums', 'desktop.ini', 'files', 'from', 'md5', 'modtime', 'renames', 'sha256', 'st_manifest.json', 'to', 'xxhash3_64']

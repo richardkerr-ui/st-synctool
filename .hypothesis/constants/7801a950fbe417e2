@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/checksum.py
-# hypothesis_version: 6.141.1
-
-[100, 1024, 'md5', 'rb', 'sha256', 'xxhash3_64']

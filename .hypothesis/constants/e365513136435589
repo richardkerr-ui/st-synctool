@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/setup_checks.py
-# hypothesis_version: 6.141.1
-
-[300, '--max-depth', '--version', '-m', '-r', '.', '1', ':', 'Create remote', 'Homebrew', 'PyQt6', 'Python packages', 'brew', 'config', 'config_is_local=true', 'create', 'drive', 'error', 'humanize', 'install', 'listremotes', 'lsd', 'missing', 'ok', 'pip', 'pyperclip', 'rclone', 'requests', 'requirements.txt', 'scope=drive', 'unknown', 'upgrade', 'v(\\d+)\\.(\\d+)\\.(\\d+)', 'version', 'warning', 'xxhash']

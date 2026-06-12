@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/core/manifest.py
-# hypothesis_version: 6.141.1
-
-[100, '%Y%m%d_%H%M%S', '*', '.bak', '.json', '.json.bak', '1.0', '1.2', 'Documents', 'STSyncTool', '_', 'algorithm', 'applied', 'checksum_context', 'checksums', 'counterpart_path', 'created_at', 'destination', 'dry_run', 'errors', 'file', 'file_count', 'files', 'gdrive_mode', 'gdrive_url', 'hash_algorithm', 'label', 'manifests', 'md5', 'migrated', 'modtime', 'operation', 'project_id', 'rehashed', 'renames', 'reused_from_base', 'root', 'scan_stats', 'scanned', 'schema_version', 'server_path', 'sha256', 'size', 'skipped', 'source', 'st_manifest', 'st_manifest*.json', 'st_manifest.json', 'total_size_bytes', 'type', 'user', 'workstation', 'xxhash3_64']

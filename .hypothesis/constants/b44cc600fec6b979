@@ -1,4 +1,0 @@
-# file: /Users/richard.kerr/Claude/Projects/ST SyncTool/gui/theme.py
-# hypothesis_version: 6.141.1
-
-['#046A38', '#25282A', '#2F3336', '#3A3E42', '#3F4347', '#555555', '#888B8E', '#8BA6C1', '#EE5340', '#F6BE00', '#FAF7F0', '#c586c0', 'BOTH_CHANGED', 'DELETED_BOTH', 'DELETED_LOCAL', 'DELETED_SERVER', 'LOCAL_CHANGED', 'LOCAL_ONLY', 'RENAMED', 'SERVER_CHANGED', 'SERVER_ONLY', 'UNCHANGED']
