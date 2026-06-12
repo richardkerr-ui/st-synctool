@@ -178,7 +178,7 @@ Ask questions like "when was this card offloaded and to where?" against `~/Docum
 
 ---
 
-## M9: Org-wide activity log (proposed 2026-06-12, design recommended below, Richard to confirm)
+## M9: Org-wide activity log (APPROVED by Richard 2026-06-12)
 
 Goal: a full view of all production activity (offloads, transfers, merges, verifies) across every Signal Theory user. Raised by Richard 2026-06-12: logs currently live only in each user's `~/Documents/STSyncTool/`.
 
@@ -197,12 +197,12 @@ Why Drive over Synology-direct: field DIT carts are not on the office network, b
 A small builder that walks the aggregated corpus into one SQLite file (operation, user, workstation, source, dests, file counts, bytes, verdict, timestamps) for dashboards and fast queries. Includes per-workstation staleness flags (last-reported date) to catch machines whose logs stopped flowing, which is the org-side answer to M9.1's never-reopened-app gap. Also becomes the retrieval layer for M8.3 log Q&A so answers can span the whole org, not just one machine.
 **Done when:** index builds idempotently from the corpus, query helpers tested, staleness flags computed, M8.3 reads from it when present.
 
-**Sequencing suggestion:** M9.1 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta; M9.2 alongside or after M8.
+**Sequencing (approved):** M9.1 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta; M9.2 alongside or after M8.
 
 ---
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M7.3 → M7.4 → recruit beta testers.
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 → M4.1 → M4.2 spike → M5.0 → M5.1 → M5.2 → M7.1 → M7.2 → M9.1 → M7.3 → M7.4 → recruit beta testers (M9.2 post-beta, alongside or after M8).
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
