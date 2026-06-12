@@ -231,3 +231,133 @@ class TestProgressInfoBuilding:
         assert info is not None
         assert info["files_done"] == 0      # falsy but not None
         assert info["files_total"] == 20
+
+
+# ---------------------------------------------------------------------------
+# _run — subprocess orchestration (Popen fully mocked, no rclone needed)
+# ---------------------------------------------------------------------------
+
+import io
+import subprocess
+from unittest.mock import patch
+
+import core.rclone_bridge as rb
+from core.rclone_bridge import _run
+
+
+class FakeProc:
+    """Scripted stand-in for subprocess.Popen running rclone.
+
+    stdout/stderr are StringIO streams so _run's reader threads consume
+    them exactly as they would real pipes.
+    """
+
+    def __init__(self, stdout="", stderr="", returncode=0, hang=False):
+        self.stdout = io.StringIO(stdout)
+        self.stderr = io.StringIO(stderr)
+        self.returncode = returncode
+        self._hang = hang
+        self.killed = False
+
+    def wait(self, timeout=None):
+        if self._hang and not self.killed:
+            raise subprocess.TimeoutExpired(cmd="rclone", timeout=timeout)
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+        self._hang = False
+        self.returncode = -9
+
+    def poll(self):
+        return self.returncode
+
+
+class TestRunSubprocess:
+    """_run must collect output, surface progress and always clear _current_proc."""
+
+    def _patch(self, fake):
+        return patch("core.rclone_bridge.subprocess.Popen", return_value=fake)
+
+    def test_returns_returncode_stdout_stderr(self):
+        fake = FakeProc(stdout="line1\nline2\n", stderr="err1\n", returncode=0)
+        with self._patch(fake):
+            r = _run(["lsjson", "remote:"])
+        assert r.returncode == 0
+        assert r.stdout == "line1\nline2\n"
+        assert r.stderr == "err1\n"
+
+    def test_nonzero_returncode_propagated(self):
+        fake = FakeProc(returncode=3)
+        with self._patch(fake):
+            r = _run(["size", "remote:"])
+        assert r.returncode == 3
+
+    def test_command_echoed_to_log_cb(self):
+        fake = FakeProc()
+        logged = []
+        with self._patch(fake):
+            _run(["copy", "a", "b"], log_cb=lambda m, l: logged.append((m, l)))
+        assert logged[0] == ("  rclone copy a b", "info")
+
+    def test_progress_cb_receives_pct_and_info(self):
+        stats = "NOTICE: 45.2 MiB / 500 MiB, 9%, 12.3 MB/s, ETA 1m2s (xfr#5/47)\n"
+        fake = FakeProc(stderr=stats)
+        seen = []
+        with self._patch(fake):
+            _run(["copy", "a", "b"], progress_cb=lambda pct, info: seen.append((pct, info)))
+        assert len(seen) == 1
+        pct, info = seen[0]
+        assert pct == 9
+        assert info["speed"] == "12.3 MB/s"
+        assert info["eta"] == "1m2s"
+        assert info["files_done"] == 5
+        assert info["files_total"] == 47
+
+    def test_current_file_attached_to_progress_info(self):
+        stderr = (
+            "INFO  : A001_C002.mov: Copying\n"
+            "NOTICE: 19.996 MiB / 2.421 GiB, 1%, 0 B/s, ETA - (xfr#0/20)\n"
+        )
+        fake = FakeProc(stderr=stderr)
+        seen = []
+        with self._patch(fake):
+            _run(["copy", "a", "b"], progress_cb=lambda pct, info: seen.append(info))
+        assert seen[0]["current_file"] == "A001_C002.mov"
+
+    def test_progress_cb_exception_swallowed(self):
+        stats = "NOTICE: 45.2 MiB / 500 MiB, 9%, 12.3 MB/s, ETA 1m2s (xfr#5/47)\n"
+        fake = FakeProc(stderr=stats)
+
+        def boom(pct, info):
+            raise RuntimeError("ui died")
+
+        with self._patch(fake):
+            r = _run(["copy", "a", "b"], progress_cb=boom)
+        assert r.returncode == 0
+
+    def test_non_stats_stderr_forwarded_to_log_cb(self):
+        fake = FakeProc(stderr="ERROR : something broke\n")
+        logged = []
+        with self._patch(fake):
+            _run(["copy", "a", "b"], log_cb=lambda m, l: logged.append(m))
+        assert "ERROR : something broke" in logged
+
+    def test_timeout_kills_process(self):
+        fake = FakeProc(hang=True)
+        with self._patch(fake):
+            r = _run(["copy", "a", "b"], timeout=1)
+        assert fake.killed is True
+        assert r.returncode == -9
+
+    def test_current_proc_cleared_after_run(self):
+        fake = FakeProc()
+        with self._patch(fake):
+            _run(["copy", "a", "b"])
+        assert rb._current_proc is None
+
+    def test_current_proc_cleared_even_after_timeout(self):
+        fake = FakeProc(hang=True)
+        with self._patch(fake):
+            _run(["copy", "a", "b"], timeout=1)
+        assert rb._current_proc is None

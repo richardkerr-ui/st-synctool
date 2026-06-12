@@ -779,3 +779,27 @@ class TestRouteTransfer:
         monkeypatch.setattr("core.transfer.transfer_folder", fake_transfer_folder)
         route_transfer(tmp_path / "src", tmp_path / "dst", conflict_handler="rename")
         assert received["conflict_handler"] == "rename"
+
+
+# ---------------------------------------------------------------------------
+# TransferError — exception contract (7 callers raise/catch it)
+# ---------------------------------------------------------------------------
+
+class TestTransferError:
+    def test_is_exception_subclass(self):
+        assert issubclass(TransferError, Exception)
+
+    def test_message_preserved(self):
+        err = TransferError("Source does not exist: /tmp/x")
+        assert str(err) == "Source does not exist: /tmp/x"
+
+    def test_raise_and_catch(self):
+        with pytest.raises(TransferError, match="boom"):
+            raise TransferError("boom")
+
+    def test_catchable_as_generic_exception(self):
+        # GUI workers catch bare Exception; TransferError must not escape that net
+        try:
+            raise TransferError("x")
+        except Exception as e:
+            assert isinstance(e, TransferError)

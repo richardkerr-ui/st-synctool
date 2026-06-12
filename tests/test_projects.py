@@ -9,6 +9,7 @@ import pytest
 from pathlib import Path
 
 import core.projects as proj
+from core.projects import _load, _save
 
 
 @pytest.fixture(autouse=True)
@@ -23,54 +24,54 @@ def isolated_registry(tmp_path, monkeypatch):
 
 class TestLoad:
     def test_returns_empty_dict_when_file_missing(self):
-        result = proj._load()
+        result = _load()
         assert result == {}
 
     def test_returns_parsed_dict_when_file_exists(self, isolated_registry):
         isolated_registry.parent.mkdir(parents=True, exist_ok=True)
         isolated_registry.write_text(json.dumps({"key": "value"}))
-        assert proj._load() == {"key": "value"}
+        assert _load() == {"key": "value"}
 
     def test_returns_empty_dict_on_corrupt_json(self, isolated_registry):
         isolated_registry.parent.mkdir(parents=True, exist_ok=True)
         isolated_registry.write_text("not valid json {{{{")
-        assert proj._load() == {}
+        assert _load() == {}
 
     def test_preserves_nested_structure(self, isolated_registry):
         data = {"p1": {"project_id": "p1", "history": [{"merged_at": "2026-01-01"}]}}
         isolated_registry.parent.mkdir(parents=True, exist_ok=True)
         isolated_registry.write_text(json.dumps(data))
-        assert proj._load()["p1"]["history"][0]["merged_at"] == "2026-01-01"
+        assert _load()["p1"]["history"][0]["merged_at"] == "2026-01-01"
 
 
 # ── _save ─────────────────────────────────────────────────────────────────────
 
 class TestSave:
     def test_creates_file_if_missing(self, isolated_registry):
-        proj._save({"x": 1})
+        _save({"x": 1})
         assert isolated_registry.exists()
 
     def test_creates_parent_directories(self, tmp_path, monkeypatch):
         deep = tmp_path / "a" / "b" / "c" / "projects.json"
         monkeypatch.setattr(proj, "PROJECTS_REGISTRY", deep)
-        proj._save({"y": 2})
+        _save({"y": 2})
         assert deep.exists()
 
     def test_roundtrip_preserves_data(self, isolated_registry):
         data = {"abc": {"name": "test"}}
-        proj._save(data)
+        _save(data)
         assert json.loads(isolated_registry.read_text()) == data
 
     def test_overwrites_existing_file(self, isolated_registry):
         isolated_registry.parent.mkdir(parents=True, exist_ok=True)
         isolated_registry.write_text(json.dumps({"old": True}))
-        proj._save({"new": True})
+        _save({"new": True})
         assert json.loads(isolated_registry.read_text()) == {"new": True}
 
     def test_output_is_valid_json(self):
-        proj._save({"nested": {"list": [1, 2, 3]}})
+        _save({"nested": {"list": [1, 2, 3]}})
         # If _load doesn't raise, the JSON written is valid
-        assert proj._load() == {"nested": {"list": [1, 2, 3]}}
+        assert _load() == {"nested": {"list": [1, 2, 3]}}
 
 
 # ── Public API (exercises _load/_save integration) ───────────────────────────

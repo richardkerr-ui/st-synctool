@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import core.oauth_config as oc
+from core.oauth_config import get_oauth_credentials, get_active_remote, save_oauth_credentials
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +25,7 @@ class TestGetOauthCredentials:
         monkeypatch.delenv("ST_SYNC_GDRIVE_CLIENT_ID", raising=False)
         monkeypatch.delenv("ST_SYNC_GDRIVE_CLIENT_SECRET", raising=False)
         monkeypatch.setattr(oc, "_CONFIG_PATH", tmp_path / "oauth.json")
-        cid, csec = oc.get_oauth_credentials()
+        cid, csec = get_oauth_credentials()
         assert cid == oc._DEFAULT_CLIENT_ID
         assert csec == oc._DEFAULT_CLIENT_SECRET
 
@@ -35,7 +36,7 @@ class TestGetOauthCredentials:
         cfg = tmp_path / "oauth.json"
         cfg.write_text(json.dumps({"client_id": "file-id", "client_secret": "file-secret"}))
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
-        cid, csec = oc.get_oauth_credentials()
+        cid, csec = get_oauth_credentials()
         assert cid == "env-id"
         assert csec == "env-secret"
 
@@ -45,7 +46,7 @@ class TestGetOauthCredentials:
         cfg = tmp_path / "oauth.json"
         cfg.write_text(json.dumps({"client_id": "custom-id", "client_secret": "custom-secret"}))
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
-        cid, csec = oc.get_oauth_credentials()
+        cid, csec = get_oauth_credentials()
         assert cid == "custom-id"
         assert csec == "custom-secret"
 
@@ -55,7 +56,7 @@ class TestGetOauthCredentials:
         cfg = tmp_path / "oauth.json"
         cfg.write_text("not valid json {{{")
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
-        cid, csec = oc.get_oauth_credentials()
+        cid, csec = get_oauth_credentials()
         assert cid == oc._DEFAULT_CLIENT_ID
         assert csec == oc._DEFAULT_CLIENT_SECRET
 
@@ -65,7 +66,7 @@ class TestGetOauthCredentials:
         cfg = tmp_path / "oauth.json"
         cfg.write_text(json.dumps({"client_id": "", "client_secret": ""}))
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
-        cid, csec = oc.get_oauth_credentials()
+        cid, csec = get_oauth_credentials()
         assert cid == oc._DEFAULT_CLIENT_ID
         assert csec == oc._DEFAULT_CLIENT_SECRET
 
@@ -74,7 +75,7 @@ class TestGetOauthCredentials:
         monkeypatch.setenv("ST_SYNC_GDRIVE_CLIENT_ID", "partial-id")
         monkeypatch.delenv("ST_SYNC_GDRIVE_CLIENT_SECRET", raising=False)
         monkeypatch.setattr(oc, "_CONFIG_PATH", tmp_path / "oauth.json")
-        cid, csec = oc.get_oauth_credentials()
+        cid, csec = get_oauth_credentials()
         assert cid == oc._DEFAULT_CLIENT_ID
 
 
@@ -86,38 +87,38 @@ class TestGetActiveRemote:
     def test_env_var_takes_priority(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ST_SYNC_RCLONE_REMOTE", "myremote")
         monkeypatch.setattr(oc, "_APP_CONFIG_PATH", tmp_path / "config.json")
-        assert oc.get_active_remote() == "myremote"
+        assert get_active_remote() == "myremote"
 
     def test_env_var_strips_trailing_colon(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ST_SYNC_RCLONE_REMOTE", "myremote:")
         monkeypatch.setattr(oc, "_APP_CONFIG_PATH", tmp_path / "config.json")
-        assert oc.get_active_remote() == "myremote"
+        assert get_active_remote() == "myremote"
 
     def test_config_file_used_when_no_env(self, monkeypatch, tmp_path):
         monkeypatch.delenv("ST_SYNC_RCLONE_REMOTE", raising=False)
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({"active_remote": "work-remote"}))
         monkeypatch.setattr(oc, "_APP_CONFIG_PATH", cfg)
-        assert oc.get_active_remote() == "work-remote"
+        assert get_active_remote() == "work-remote"
 
     def test_falls_back_to_gdrive_when_no_env_and_no_file(self, monkeypatch, tmp_path):
         monkeypatch.delenv("ST_SYNC_RCLONE_REMOTE", raising=False)
         monkeypatch.setattr(oc, "_APP_CONFIG_PATH", tmp_path / "config.json")
-        assert oc.get_active_remote() == "gdrive"
+        assert get_active_remote() == "gdrive"
 
     def test_falls_back_to_gdrive_on_corrupt_config(self, monkeypatch, tmp_path):
         monkeypatch.delenv("ST_SYNC_RCLONE_REMOTE", raising=False)
         cfg = tmp_path / "config.json"
         cfg.write_text("{{bad json")
         monkeypatch.setattr(oc, "_APP_CONFIG_PATH", cfg)
-        assert oc.get_active_remote() == "gdrive"
+        assert get_active_remote() == "gdrive"
 
     def test_falls_back_to_gdrive_when_active_remote_empty_in_file(self, monkeypatch, tmp_path):
         monkeypatch.delenv("ST_SYNC_RCLONE_REMOTE", raising=False)
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({"active_remote": ""}))
         monkeypatch.setattr(oc, "_APP_CONFIG_PATH", cfg)
-        assert oc.get_active_remote() == "gdrive"
+        assert get_active_remote() == "gdrive"
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +129,7 @@ class TestSaveOauthCredentials:
     def test_writes_json_file(self, monkeypatch, tmp_path):
         cfg = tmp_path / "oauth.json"
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
-        oc.save_oauth_credentials("my-id", "my-secret")
+        save_oauth_credentials("my-id", "my-secret")
         assert cfg.exists()
         data = json.loads(cfg.read_text())
         assert data["client_id"] == "my-id"
@@ -137,14 +138,14 @@ class TestSaveOauthCredentials:
     def test_creates_parent_directory(self, monkeypatch, tmp_path):
         cfg = tmp_path / "deep" / "nested" / "oauth.json"
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
-        oc.save_oauth_credentials("id", "secret")
+        save_oauth_credentials("id", "secret")
         assert cfg.exists()
 
     def test_file_permissions_are_600(self, monkeypatch, tmp_path):
         import stat
         cfg = tmp_path / "oauth.json"
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
-        oc.save_oauth_credentials("id", "secret")
+        save_oauth_credentials("id", "secret")
         mode = oct(stat.S_IMODE(cfg.stat().st_mode))
         assert mode == "0o600"
 
@@ -152,7 +153,7 @@ class TestSaveOauthCredentials:
         cfg = tmp_path / "oauth.json"
         cfg.write_text(json.dumps({"client_id": "old", "client_secret": "old"}))
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
-        oc.save_oauth_credentials("new-id", "new-secret")
+        save_oauth_credentials("new-id", "new-secret")
         data = json.loads(cfg.read_text())
         assert data["client_id"] == "new-id"
 
@@ -161,7 +162,7 @@ class TestSaveOauthCredentials:
         monkeypatch.setattr(oc, "_CONFIG_PATH", cfg)
         monkeypatch.delenv("ST_SYNC_GDRIVE_CLIENT_ID", raising=False)
         monkeypatch.delenv("ST_SYNC_GDRIVE_CLIENT_SECRET", raising=False)
-        oc.save_oauth_credentials("rt-id", "rt-secret")
-        cid, csec = oc.get_oauth_credentials()
+        save_oauth_credentials("rt-id", "rt-secret")
+        cid, csec = get_oauth_credentials()
         assert cid == "rt-id"
         assert csec == "rt-secret"

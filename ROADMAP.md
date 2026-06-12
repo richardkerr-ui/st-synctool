@@ -25,9 +25,13 @@ Structured for execution via `/loop`. Milestones are ordered by dependency: hard
 **Findings:** Not dead code — actively imported by `gui/merge_tab.py`. Contains `build_server_manifest`, which routes server-side manifest generation to either `rclone_bridge.lsjson_to_manifest` (GDrive) or `generate_manifest_fast` (local). Added `tests/test_merge_logic.py` (9 tests). Coverage: 0% → 100%.
 **Done when:** module is either deleted (with grep proof of zero imports) or documented and covered to 90%+.
 
-### M1.2 Cover high-risk untested functions
+### M1.2 Cover high-risk untested functions ✅ DONE 2026-06-12
 Targets from the risk index above, in risk order. Mock subprocess, osascript and filesystem per the `/cover-risk` conventions.
 **Done when:** every production function with `caller_count > 5` shows `tested` in a fresh code-review-graph build, or has a written justification.
+**Findings:** Most targets already had real tests but the graph could not see them: code-review-graph only emits TESTED_BY edges when a test imports the function directly (`from x import f`), not via module alias (`import x as m; m.f()`). Fixed by adding direct imports and converting call sites in `test_amphetamine.py`, `test_gdrive_utils.py`, `test_projects.py` and `test_oauth_config.py`. Added new tests for the two genuine gaps: `rclone_bridge._run` (10 tests, scripted FakeProc, covers progress parsing, current-file tracking, timeout kill and `_current_proc` cleanup — head start on M1.3) and `TransferError` (4 tests). A fresh build now shows `tested` for all core/utils functions with caller_count > 5.
+**Justified exceptions (cannot show `tested` in the graph):**
+- `core/transfer.py::log` (23 callers) — nested closure redefined inside each transfer function; not importable, so no TESTED_BY edge is possible. Exercised indirectly by every `test_transfer_folder`/`test_transfer_rclone` test that passes a `log_cb`; `transfer.py` is at 92% line coverage.
+- `gui/offload_tab.py::SourceRowWidget.__init__`/`._build_ui`, `gui/path_input_widget.py::PathInputWidget`, `gui/setup_wizard.py::CheckWorker.__init__`, `main.py::_qcolor` — PyQt6 GUI code; pytest-qt tests exist but only run on macOS, not in the Linux sandbox where the graph is built. Per project policy GUI layers stay thin and logic lives in core/ or utils/.
 
 ### M1.3 rclone_bridge coverage (11% to 70%+)
 The entire Drive layer rests on this module and it is nearly untested. Test `_run`, progress regex parsing of `--stats-one-line` output, cancel/`_current_proc` locking, error classification. Mock the rclone binary with scripted stdout/stderr fixtures.
