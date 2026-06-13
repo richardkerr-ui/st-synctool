@@ -61,7 +61,8 @@ def _find_redline() -> Optional[Path]:
 
 def _find_ffprobe() -> Optional[str]:
     """Return the ffprobe executable name/path, or None if not installed."""
-    return shutil.which("ffprobe")
+    from utils.resources import find_binary
+    return find_binary("ffprobe")
 
 
 def _find_art() -> Optional[str]:

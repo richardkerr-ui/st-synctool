@@ -21,6 +21,11 @@ def _run_scheduled_verify_headless():
 
 
 def main():
+    # M7.1: when frozen into a .app, make the bundled rclone (and any bundled
+    # ffmpeg) the first thing on PATH so every subprocess call finds it.
+    from utils.resources import prepend_bundle_to_path
+    prepend_bundle_to_path()
+
     # M5.3: the monthly launchd agent relaunches us with this flag; run the
     # verify headlessly and quit without ever constructing the GUI.
     if "--scheduled-verify" in sys.argv:

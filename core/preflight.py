@@ -10,13 +10,20 @@ import re
 import subprocess
 import sys
 
+from utils.resources import find_binary
+
 MIN_RCLONE = (1, 60, 0)
+
+
+def _rclone() -> str:
+    """Resolve rclone: the copy bundled in the frozen .app, else PATH."""
+    return find_binary("rclone") or "rclone"
 
 
 def check_rclone() -> None:
     try:
         out = subprocess.run(
-            ["rclone", "version"],
+            [_rclone(), "version"],
             capture_output=True, text=True, timeout=5,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
@@ -33,14 +40,14 @@ def ensure_remote(remote: str = "gdrive") -> None:
     from core.oauth_config import get_oauth_credentials
 
     existing = subprocess.run(
-        ["rclone", "listremotes"], capture_output=True, text=True,
+        [_rclone(), "listremotes"], capture_output=True, text=True,
     ).stdout
     if f"{remote}:" in existing:
         return
     cid, csec = get_oauth_credentials()
     subprocess.run(
         [
-            "rclone", "config", "create", remote, "drive",
+            _rclone(), "config", "create", remote, "drive",
             "client_id", cid,
             "client_secret", csec,
             "scope", "drive",

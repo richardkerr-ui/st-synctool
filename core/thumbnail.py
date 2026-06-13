@@ -29,10 +29,12 @@ _REDLINE_BUNDLE_PATH = Path("/Applications/REDCINE-X PRO.app/Contents/MacOS/REDl
 # ---------------------------------------------------------------------------
 
 def check_ffmpeg() -> bool:
-    return shutil.which("ffmpeg") is not None
+    from utils.resources import find_binary
+    return find_binary("ffmpeg") is not None
 
 def check_ffprobe() -> bool:
-    return shutil.which("ffprobe") is not None
+    from utils.resources import find_binary
+    return find_binary("ffprobe") is not None
 
 def ffmpeg_available() -> bool:
     return check_ffmpeg() and check_ffprobe()

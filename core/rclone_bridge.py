@@ -1,8 +1,14 @@
 import json, re, subprocess, socket, getpass, shutil, threading
 from datetime import datetime, timezone
 from core.manifest import SCHEMA_VERSION
+from utils.resources import find_binary
 
 RCLONE_BIN = "rclone"
+
+
+def _rclone() -> str:
+    """Resolve the rclone executable: bundled copy when frozen, else PATH."""
+    return find_binary(RCLONE_BIN) or RCLONE_BIN
 
 _current_proc = None
 _current_proc_lock = threading.Lock()
@@ -29,7 +35,7 @@ _CURRENT_FILE_RE = re.compile(
 
 
 def is_rclone_installed() -> bool:
-    return shutil.which(RCLONE_BIN) is not None
+    return find_binary(RCLONE_BIN) is not None
 
 
 def _run(args, timeout=300, log_cb=None, progress_cb=None):
@@ -50,7 +56,7 @@ def _run(args, timeout=300, log_cb=None, progress_cb=None):
         log_cb(f"  rclone {' '.join(args)}", "info")
 
     proc = subprocess.Popen(
-        [RCLONE_BIN] + args,
+        [_rclone()] + args,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, bufsize=1,
     )
@@ -165,7 +171,7 @@ def cat_sha256(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
     args.append(remote_path)
 
     proc = subprocess.Popen(
-        [RCLONE_BIN] + args,
+        [_rclone()] + args,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     with _current_proc_lock:
