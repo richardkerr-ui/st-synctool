@@ -550,7 +550,7 @@ Alongside the raw files, each completed job appends one compact summary line to 
 
 ### History
 
-The History view renders the merged index as readable rows ("Jun 12 · Cart 3 · Offload · A001 → NAS, Shuttle · 312 files · 1.2 GiB · VERIFIED") with dropdown filters for operation, workstation, user and project plus a date range. Your own machine's history loads instantly from local files and works offline; refreshing org activity downloads only the other machines' summary shards, never the raw logs. The query and row-formatting logic lives in `core/history.py` (headless and unit tested); the GUI renders rows and dropdowns only. The History tab and the org refresh land with the shared-remote Settings work.
+The **History** tab renders the merged index as readable rows ("Jun 12 · Cart 3 · Offload · A001 → NAS, Shuttle · 312 files · 1.2 GiB · VERIFIED") with dropdown filters for operation, workstation, user and project. Your own machine's history loads instantly from local files and works offline; **Refresh org activity** downloads only the other machines' summary shards (kilobytes), never the raw logs. Set the shared Drive folder under the **Settings** button first. The query and row-formatting logic lives in `core/history.py` (headless and unit tested); the GUI renders rows and dropdowns only.
 
 ---
 

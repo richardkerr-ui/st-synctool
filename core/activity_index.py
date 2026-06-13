@@ -203,6 +203,59 @@ def find_shards(activity_dir=ACTIVITY_DIR) -> list:
     return sorted(d.glob("activity_*.jsonl"))
 
 
+# Local cache of other machines' shards downloaded from the org remote.
+ORG_CACHE_DIR = STSYNC_DIR / "activity_cache"
+
+
+def fetch_remote_shards(remote_base, cache_dir=ORG_CACHE_DIR, *, list_fn=None,
+                        copy_fn=None, log_cb=None) -> list:
+    """M9.3: download other machines' ``activity_*.jsonl`` shards from the org
+    remote into ``cache_dir`` (kilobytes — never the raw logs). Returns the list
+    of local filenames fetched. Never raises; a per-file failure is logged and
+    skipped. ``list_fn(remote_base) -> [remote_path, ...]`` and
+    ``copy_fn(remote_path, local_path)`` are injected (default to rclone)."""
+    log = log_cb or (lambda m, l="info": None)
+    if not remote_base:
+        return []
+    if list_fn is None or copy_fn is None:
+        from core import rclone_bridge
+        if list_fn is None:
+            list_fn = lambda base: rclone_bridge.find_activity_shards(base)
+        if copy_fn is None:
+            copy_fn = lambda src, dst: rclone_bridge.copyto(src, dst)
+    cache = Path(cache_dir)
+    cache.mkdir(parents=True, exist_ok=True)
+    fetched = []
+    try:
+        remote_paths = list_fn(remote_base) or []
+    except Exception as e:
+        log(f"  Could not list org activity shards: {e}", "warning")
+        return []
+    for rp in remote_paths:
+        name = Path(rp).name
+        if not name.startswith("activity_") or not name.endswith(".jsonl"):
+            continue
+        try:
+            copy_fn(rp, str(cache / name))
+            fetched.append(name)
+        except Exception as e:
+            log(f"  Skipped org shard {name}: {e}", "warning")
+    return fetched
+
+
+def load_org_records(*, local_dir=ACTIVITY_DIR, cache_dir=ORG_CACHE_DIR,
+                     log_cb=None) -> list:
+    """Merge this machine's shards with the cached org shards into one
+    timestamp-sorted record list. When a shard filename appears in both, the
+    local copy wins (our own data is authoritative and freshest)."""
+    by_name: dict = {}
+    for p in find_shards(cache_dir):
+        by_name[p.name] = p
+    for p in find_shards(local_dir):  # local overrides cache for same filename
+        by_name[p.name] = p
+    return merge_shards(list(by_name.values()), log_cb=log_cb)
+
+
 # --------------------------------------------------------------------------- #
 # query + staleness
 # --------------------------------------------------------------------------- #

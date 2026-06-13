@@ -211,6 +211,27 @@ def lsjson(remote_path, extra_flags=None, with_checksum=True):
     return json.loads(r.stdout)
 
 
+def find_activity_shards(remote_base, extra_flags=None):
+    """M9.3: list the full remote paths of every ``activity_*.jsonl`` shard under
+    the org activity base (recursive). Used to pull other machines' summaries
+    (kilobytes) without ever listing the raw logs."""
+    args = ["lsjson", "--recursive", "--files-only"]
+    if extra_flags:
+        args.extend(extra_flags)
+    args.append(remote_base)
+    r = _run(args, timeout=120)
+    if r.returncode != 0:
+        raise RuntimeError(f"rclone lsjson failed: {r.stderr}")
+    base = remote_base.rstrip("/")
+    out = []
+    for entry in json.loads(r.stdout):
+        rel = entry.get("Path", "")
+        name = rel.rsplit("/", 1)[-1]
+        if name.startswith("activity_") and name.endswith(".jsonl"):
+            out.append(f"{base}/{rel}")
+    return out
+
+
 def remote_size(remote_path, extra_flags=None, timeout=120):
     args = ["size", "--json"]
     if extra_flags:

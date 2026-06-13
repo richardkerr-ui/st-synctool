@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -204,3 +205,73 @@ def test_transfer_folder_appends_activity(tmp_path, monkeypatch):
     assert shards, "transfer should write an activity shard"
     recs = ai.merge_shards(shards)
     assert any(r["operation"] == "transfer" for r in recs)
+
+
+# --------------------------------------------------------------------------- #
+# M9.3 org shards: fetch_remote_shards + load_org_records
+# --------------------------------------------------------------------------- #
+
+def test_fetch_remote_shards_copies_only_shards(tmp_path):
+    cache = tmp_path / "cache"
+    remote = [
+        "gdrive:Acts/Cart1/dit/activity/activity_Cart1.jsonl",
+        "gdrive:Acts/Cart2/dit/activity/activity_Cart2.jsonl",
+        "gdrive:Acts/Cart1/dit/logs/custody_x.txt",  # not a shard, ignored
+    ]
+    copied = {}
+    def copy_fn(src, dst):
+        copied[src] = dst
+        Path(dst).write_text('{"operation":"offload","timestamp":"2026-06-12T10:00:00","workstation":"Cart1","user":"dit"}\n')
+    fetched = ai.fetch_remote_shards("gdrive:Acts", cache, list_fn=lambda b: remote,
+                                     copy_fn=copy_fn)
+    assert set(fetched) == {"activity_Cart1.jsonl", "activity_Cart2.jsonl"}
+    assert len(copied) == 2
+
+
+def test_fetch_remote_shards_empty_base_noop(tmp_path):
+    assert ai.fetch_remote_shards("", tmp_path / "c", list_fn=lambda b: [],
+                                  copy_fn=lambda s, d: None) == []
+
+
+def test_fetch_remote_shards_skips_failed_copy(tmp_path):
+    def copy_fn(src, dst):
+        if "Cart2" in src:
+            raise RuntimeError("network")
+        Path(dst).write_text("{}\n")
+    fetched = ai.fetch_remote_shards(
+        "gdrive:Acts", tmp_path / "c",
+        list_fn=lambda b: ["x/activity_Cart1.jsonl", "x/activity_Cart2.jsonl"],
+        copy_fn=copy_fn)
+    assert fetched == ["activity_Cart1.jsonl"]
+
+
+def test_fetch_remote_shards_list_failure_returns_empty(tmp_path):
+    def boom(b):
+        raise RuntimeError("offline")
+    assert ai.fetch_remote_shards("gdrive:Acts", tmp_path / "c", list_fn=boom,
+                                  copy_fn=lambda s, d: None) == []
+
+
+def test_load_org_records_merges_local_and_cache(tmp_path):
+    local = tmp_path / "local"; local.mkdir()
+    cache = tmp_path / "cache"; cache.mkdir()
+    (local / "activity_Cart1.jsonl").write_text(
+        '{"operation":"offload","timestamp":"2026-06-12T10:00:00","workstation":"Cart1","user":"a"}\n')
+    (cache / "activity_Cart2.jsonl").write_text(
+        '{"operation":"merge","timestamp":"2026-06-11T10:00:00","workstation":"Cart2","user":"b"}\n')
+    recs = ai.load_org_records(local_dir=local, cache_dir=cache)
+    assert [r["workstation"] for r in recs] == ["Cart2", "Cart1"]  # timestamp-sorted
+
+
+def test_load_org_records_local_overrides_cache_same_filename(tmp_path):
+    local = tmp_path / "local"; local.mkdir()
+    cache = tmp_path / "cache"; cache.mkdir()
+    # Stale cached copy of our own shard vs the fresh local one.
+    (cache / "activity_Cart1.jsonl").write_text(
+        '{"operation":"offload","timestamp":"2026-06-01T10:00:00","workstation":"Cart1","user":"a"}\n')
+    (local / "activity_Cart1.jsonl").write_text(
+        '{"operation":"offload","timestamp":"2026-06-12T10:00:00","workstation":"Cart1","user":"a"}\n'
+        '{"operation":"verify","timestamp":"2026-06-13T10:00:00","workstation":"Cart1","user":"a"}\n')
+    recs = ai.load_org_records(local_dir=local, cache_dir=cache)
+    assert len(recs) == 2  # local shard used, not the 1-line stale cache
+    assert recs[-1]["operation"] == "verify"

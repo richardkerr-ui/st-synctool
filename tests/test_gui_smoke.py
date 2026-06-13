@@ -201,12 +201,12 @@ class TestMainWindowSmoke:
     def test_instantiates(self, window):
         window.show()
 
-    def test_has_four_tabs(self, window):
-        assert window.tabs.count() == 4
+    def test_has_five_tabs(self, window):
+        assert window.tabs.count() == 5
 
     def test_tab_titles(self, window):
-        titles = [window.tabs.tabText(i) for i in range(4)]
-        assert titles == ["Transfer", "Merge", "Offload", "Verify"]
+        titles = [window.tabs.tabText(i) for i in range(5)]
+        assert titles == ["Transfer", "Merge", "Offload", "Verify", "History"]
 
     def test_status_bar_ready(self, window):
         assert "Ready" in window.statusBar().currentMessage()
@@ -219,10 +219,12 @@ class TestMainWindowSmoke:
         from gui.merge_tab import MergeTab
         from gui.offload_tab import OffloadTab
         from gui.verify_tab import VerifyTab
+        from gui.history_tab import HistoryTab
         assert isinstance(window._transfer_tab, TransferTab)
         assert isinstance(window._merge_tab, MergeTab)
         assert isinstance(window._offload_tab, OffloadTab)
         assert isinstance(window._verify_tab, VerifyTab)
+        assert isinstance(window._history_tab, HistoryTab)
 
     # M7.5: update-available banner
     def test_update_banner_hidden_at_startup(self, window):
@@ -294,6 +296,51 @@ class TestMainWindowSmoke:
         dlg._save()
         assert app_settings.activity_remote_base(path=cfg) == "gdrive:Acts"
         assert app_settings.log_shipping_enabled(path=cfg) is False
+
+
+# ---------------------------------------------------------------------------
+# M9.3: History tab
+# ---------------------------------------------------------------------------
+
+class TestHistoryTabSmoke:
+    @pytest.fixture
+    def tab(self, qtbot, monkeypatch):
+        import gui.history_tab as ht
+        records = [
+            {"operation": "offload", "timestamp": "2026-06-12T10:00:00",
+             "workstation": "Cart 1", "user": "dit", "project": "ProjX",
+             "source": "A001", "dests": ["NAS"], "file_count": 10, "bytes": 1024,
+             "verdict": "VERIFIED", "log_filename": "c.txt"},
+            {"operation": "verify", "timestamp": "2026-06-11T09:00:00",
+             "workstation": "Cart 2", "user": "ed", "project": "ProjY",
+             "verdict": "FAIL"},
+        ]
+        monkeypatch.setattr(ht.activity_index, "load_org_records",
+                            lambda **k: list(records))
+        t = ht.HistoryTab()
+        qtbot.addWidget(t)
+        return t
+
+    def test_instantiates_and_renders_rows(self, tab):
+        tab.show()
+        assert tab.table.rowCount() == 2
+
+    def test_filter_options_populated(self, tab):
+        ops = [tab._filter_combos["operation"].itemText(i)
+               for i in range(tab._filter_combos["operation"].count())]
+        assert "offload" in ops and "verify" in ops
+
+    def test_filter_narrows_rows(self, tab):
+        combo = tab._filter_combos["operation"]
+        combo.setCurrentText("verify")
+        assert tab.table.rowCount() == 1
+        assert tab.table.item(0, 1).text() == "Cart 2"
+
+    def test_refresh_without_remote_base_is_safe(self, tab, monkeypatch):
+        import gui.history_tab as ht
+        monkeypatch.setattr(ht.app_settings, "activity_remote_base", lambda **k: "")
+        tab._refresh_org()  # must not raise or start a thread
+        assert tab.refresh_btn.isEnabled()
 
 
 # ---------------------------------------------------------------------------

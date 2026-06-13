@@ -11,6 +11,7 @@ from gui.transfer_tab     import TransferTab
 from gui.merge_tab        import MergeTab
 from gui.verify_tab       import VerifyTab
 from gui.offload_tab      import OffloadTab
+from gui.history_tab       import HistoryTab
 from gui.setup_wizard     import SetupWizard, should_show_wizard
 from gui.tutorial_overlay import TutorialOverlay, tutorial_already_seen, reset_tutorial
 from core.demo import (
@@ -244,11 +245,13 @@ class MainWindow(QMainWindow):
         self._merge_tab    = MergeTab(self)
         self._offload_tab  = OffloadTab(self)
         self._verify_tab   = VerifyTab(self)
+        self._history_tab  = HistoryTab(self)
 
         self.tabs.addTab(self._transfer_tab, "Transfer")
         self.tabs.addTab(self._merge_tab,    "Merge")
         self.tabs.addTab(self._offload_tab,  "Offload")
         self.tabs.addTab(self._verify_tab,   "Verify")
+        self.tabs.addTab(self._history_tab,  "History")
         root.addWidget(self.tabs)
 
         # Status bar

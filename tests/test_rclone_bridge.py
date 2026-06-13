@@ -803,3 +803,32 @@ class TestSync:
     def test_checksum_always_present(self):
         ok, m = self._call()
         assert "--checksum" in m.call_args[0][0]
+
+
+class TestFindActivityShards:
+    """M9.3: find_activity_shards lists only activity_*.jsonl under the base."""
+
+    def _result(self, stdout, returncode=0):
+        from types import SimpleNamespace
+        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
+
+    def test_returns_only_shard_paths(self):
+        import json as _json
+        from core import rclone_bridge
+        entries = [
+            {"Path": "Cart1/dit/activity/activity_Cart1.jsonl"},
+            {"Path": "Cart2/dit/activity/activity_Cart2.jsonl"},
+            {"Path": "Cart1/dit/logs/custody_x.txt"},
+        ]
+        with patch("core.rclone_bridge._run", return_value=self._result(_json.dumps(entries))):
+            out = rclone_bridge.find_activity_shards("gdrive:Acts/")
+        assert out == [
+            "gdrive:Acts/Cart1/dit/activity/activity_Cart1.jsonl",
+            "gdrive:Acts/Cart2/dit/activity/activity_Cart2.jsonl",
+        ]
+
+    def test_raises_on_nonzero(self):
+        from core import rclone_bridge
+        with patch("core.rclone_bridge._run", return_value=self._result("", returncode=1)):
+            with pytest.raises(RuntimeError):
+                rclone_bridge.find_activity_shards("gdrive:Acts")
