@@ -243,6 +243,27 @@ def fetch_remote_shards(remote_base, cache_dir=ORG_CACHE_DIR, *, list_fn=None,
     return fetched
 
 
+def find_local_log(filename: str, base_dir=STSYNC_DIR) -> Optional[Path]:
+    """M9.3: locate a custody/verify log by filename under the local STSyncTool
+    dirs (logs/, offload_logs/). Returns the path or None. Used by the History
+    tab's "open custody log" action for jobs run on this machine."""
+    if not filename:
+        return None
+    base = Path(base_dir)
+    for sub in ("logs", "offload_logs"):
+        cand = base / sub / filename
+        if cand.is_file():
+            return cand
+    # Fall back to a recursive search in case of nested layouts.
+    for sub in ("logs", "offload_logs"):
+        d = base / sub
+        if d.is_dir():
+            for hit in d.rglob(filename):
+                if hit.is_file():
+                    return hit
+    return None
+
+
 def load_org_records(*, local_dir=ACTIVITY_DIR, cache_dir=ORG_CACHE_DIR,
                      log_cb=None) -> list:
     """Merge this machine's shards with the cached org shards into one

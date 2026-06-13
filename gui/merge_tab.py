@@ -338,6 +338,18 @@ class ApplyWorker(QObject):
                     log(f"  Could not update project registry: {e}", "warning")
 
             results["renames"] = renames
+
+            # M9.2: record the merge in the local activity index (never raises).
+            try:
+                from core.activity_index import record_from_manifest, safe_append_activity
+                verdict = "COMPLETE" if not results["failed"] else "PARTIAL"
+                safe_append_activity(record_from_manifest(
+                    new_manifest, operation="merge",
+                    source=self.local_path.name, dests=[str(self.server_path)],
+                    verdict=verdict))
+            except Exception:
+                pass
+
             self.progress.emit(100, "Done")
             self.finished.emit(results)
         except Exception as e:

@@ -42,6 +42,7 @@ class HistoryTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._records = []          # merged raw records
+        self._rows = []             # currently displayed HistoryRows
         self._build_ui()
         self.reload()
 
@@ -76,7 +77,12 @@ class HistoryTab(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setSectionResizeMode(
             3, QHeaderView.ResizeMode.Stretch)
+        self.table.cellDoubleClicked.connect(self._open_row_log)
         root.addWidget(self.table)
+
+        hint = QLabel("Double-click a row to open its custody log (jobs run on this machine).")
+        hint.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:11px;")
+        root.addWidget(hint)
 
     # ── data ──────────────────────────────────────────────────────────────────
     def reload(self):
@@ -107,6 +113,7 @@ class HistoryTab(QWidget):
 
     def _apply_filters(self):
         rows = history.rows_for(self._records, **self._active_filters())
+        self._rows = rows
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
             details = row.to_text()
@@ -119,6 +126,22 @@ class HistoryTab(QWidget):
             f"{len(rows)} of {n} job(s)" if n else
             "No activity recorded yet (configure the remote base in Settings to "
             "see other machines).")
+
+    # ── per-row actions ───────────────────────────────────────────────────────
+    def _open_row_log(self, row: int, _col: int):
+        """M9.3: open the selected job's custody log if it exists locally."""
+        from PyQt6.QtGui import QDesktopServices
+        from PyQt6.QtCore import QUrl
+        if row < 0 or row >= len(self._rows):
+            return
+        name = self._rows[row].log_filename
+        path = activity_index.find_local_log(name) if name else None
+        if path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        else:
+            self.status_label.setText(
+                "Custody log not available locally for this job"
+                + (f" ({name})" if name else "") + ".")
 
     # ── refresh ─────────────────────────────────────────────────────────────
     def _refresh_org(self):

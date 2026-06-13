@@ -199,6 +199,11 @@ class MainWindow(QMainWindow):
         root.addWidget(self._sched_banner)
         self._refresh_scheduled_verify_banner()
 
+        # M9.1: activity-log pending banner (hidden unless logs are waiting to ship)
+        self._pending_banner = self._build_pending_activity_banner()
+        root.addWidget(self._pending_banner)
+        self._refresh_pending_activity_banner()
+
         # M7.5: update-available banner (hidden until a newer release is found).
         # Defer the check onto the event loop so it only runs in the live app,
         # never during bare construction in tests (avoids a QThread outliving
@@ -252,6 +257,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._offload_tab,  "Offload")
         self.tabs.addTab(self._verify_tab,   "Verify")
         self.tabs.addTab(self._history_tab,  "History")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self.tabs)
 
         # Status bar
@@ -309,6 +315,41 @@ class MainWindow(QMainWindow):
         scheduled_verify.acknowledge_failures()
         self._sched_banner.setVisible(False)
 
+    def _build_pending_activity_banner(self) -> QWidget:
+        """M9.1: passive status line for activity logs waiting to ship, escalating
+        to a stronger banner once something has been pending 7+ days."""
+        banner = QWidget()
+        banner.setObjectName("pendingBanner")
+        layout = QHBoxLayout(banner)
+        layout.setContentsMargins(12, 6, 12, 6)
+        self._pending_label = QLabel()
+        self._pending_label.setWordWrap(True)
+        layout.addWidget(self._pending_label, stretch=1)
+        banner.setVisible(False)
+        return banner
+
+    def _refresh_pending_activity_banner(self):
+        from core import log_sync
+        try:
+            status = log_sync.pending_status()
+        except Exception:
+            self._pending_banner.setVisible(False)
+            return
+        text = status.banner() if status.escalate else status.status_line()
+        if not text:
+            self._pending_banner.setVisible(False)
+            return
+        border = theme.ACCENT_CORAL if status.escalate else theme.CHARCOAL_LIGHT
+        self._pending_banner.setStyleSheet(f"""
+            QWidget#pendingBanner {{
+                background-color: {theme.CHARCOAL_LIGHT};
+                border-bottom: 2px solid {border};
+            }}
+            QWidget#pendingBanner QLabel {{ color: {theme.CREAM}; background: transparent; }}
+        """)
+        self._pending_label.setText(text)
+        self._pending_banner.setVisible(True)
+
     def _build_update_banner(self) -> QWidget:
         banner = QWidget()
         banner.setObjectName("updateBanner")
@@ -351,13 +392,31 @@ class MainWindow(QMainWindow):
 
     def _start_log_shipping(self):
         # Best-effort, off the main thread; silent no-op unless org activity is
-        # configured in Settings.
+        # configured in Settings. Guarded so overlapping triggers (launch +
+        # tab navigation) never spawn a second concurrent ship.
+        existing = getattr(self, "_ship_thread", None)
+        if existing is not None and existing.isRunning():
+            return
         self._ship_thread = QThread()
         self._ship_worker = _LogShipWorker()
         self._ship_worker.moveToThread(self._ship_thread)
         self._ship_thread.started.connect(self._ship_worker.run)
         self._ship_worker.finished.connect(self._ship_thread.quit)
+        self._ship_worker.finished.connect(self._on_ship_done)
         self._ship_thread.start()
+
+    def _on_ship_done(self, _result):
+        # Refresh the pending-activity banner once a ship pass completes.
+        self._refresh_pending_activity_banner()
+
+    def _on_tab_changed(self, _index):
+        # M9.1: after the user finishes an op and navigates, drain pending logs
+        # and refresh the banner (no background polling — fires only on nav).
+        self._start_log_shipping()
+        self._refresh_pending_activity_banner()
+        widget = self.tabs.currentWidget()
+        if widget is self._history_tab:
+            self._history_tab.reload()
 
     def _on_update_check_done(self, info):
         if info is None:

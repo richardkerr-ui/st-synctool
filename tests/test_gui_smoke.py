@@ -279,6 +279,31 @@ class TestMainWindowSmoke:
                             staticmethod(lambda *a, **k: ("", "")))
         window._report_problem()  # must not raise
 
+    # M9.1: pending-activity banner
+    def test_pending_banner_hidden_when_nothing_pending(self, window, monkeypatch):
+        import gui.main_window as mw
+        fake = type("S", (), {"escalate": False, "status_line": lambda self: None,
+                              "banner": lambda self: None})()
+        monkeypatch.setattr(mw, "_LogShipWorker", mw._LogShipWorker)
+        monkeypatch.setattr("core.log_sync.pending_status", lambda *a, **k: fake)
+        window._refresh_pending_activity_banner()
+        assert not window._pending_banner.isVisible()
+
+    def test_pending_banner_shows_when_pending(self, window, monkeypatch):
+        fake = type("S", (), {"escalate": False,
+                              "status_line": lambda self: "Activity log: 2 reports waiting to upload",
+                              "banner": lambda self: None})()
+        monkeypatch.setattr("core.log_sync.pending_status", lambda *a, **k: fake)
+        window.show()
+        window._refresh_pending_activity_banner()
+        assert window._pending_banner.isVisible()
+        assert "2 reports" in window._pending_label.text()
+
+    def test_tab_change_is_safe(self, window):
+        # Switching tabs triggers shipping + banner refresh + History reload.
+        for i in range(window.tabs.count()):
+            window.tabs.setCurrentIndex(i)  # must not raise
+
     # M11.2: Settings
     def test_settings_button_present(self, window):
         assert hasattr(window, "_settings_btn")
@@ -341,6 +366,23 @@ class TestHistoryTabSmoke:
         monkeypatch.setattr(ht.app_settings, "activity_remote_base", lambda **k: "")
         tab._refresh_org()  # must not raise or start a thread
         assert tab.refresh_btn.isEnabled()
+
+    def test_double_click_opens_local_log(self, tab, monkeypatch, tmp_path):
+        import gui.history_tab as ht
+        from PyQt6.QtGui import QDesktopServices
+        log = tmp_path / "custody.txt"; log.write_text("x")
+        monkeypatch.setattr(ht.activity_index, "find_local_log", lambda n: log)
+        opened = []
+        monkeypatch.setattr(QDesktopServices, "openUrl",
+                            staticmethod(lambda url: opened.append(url) or True))
+        tab._open_row_log(0, 0)  # first row has log_filename "c.txt"
+        assert opened, "should open the custody log"
+
+    def test_double_click_missing_log_sets_status(self, tab, monkeypatch):
+        import gui.history_tab as ht
+        monkeypatch.setattr(ht.activity_index, "find_local_log", lambda n: None)
+        tab._open_row_log(0, 0)
+        assert "not available" in tab.status_label.text()
 
 
 # ---------------------------------------------------------------------------

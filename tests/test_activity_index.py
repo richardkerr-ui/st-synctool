@@ -275,3 +275,26 @@ def test_load_org_records_local_overrides_cache_same_filename(tmp_path):
     recs = ai.load_org_records(local_dir=local, cache_dir=cache)
     assert len(recs) == 2  # local shard used, not the 1-line stale cache
     assert recs[-1]["operation"] == "verify"
+
+
+# --------------------------------------------------------------------------- #
+# M9.3: find_local_log (open custody log)
+# --------------------------------------------------------------------------- #
+
+def test_find_local_log_in_logs_dir(tmp_path):
+    (tmp_path / "logs").mkdir()
+    f = tmp_path / "logs" / "custody_a001.txt"
+    f.write_text("x")
+    assert ai.find_local_log("custody_a001.txt", base_dir=tmp_path) == f
+
+
+def test_find_local_log_in_offload_logs(tmp_path):
+    (tmp_path / "offload_logs").mkdir()
+    f = tmp_path / "offload_logs" / "offload_x.txt"
+    f.write_text("x")
+    assert ai.find_local_log("offload_x.txt", base_dir=tmp_path) == f
+
+
+def test_find_local_log_missing_or_empty(tmp_path):
+    assert ai.find_local_log("nope.txt", base_dir=tmp_path) is None
+    assert ai.find_local_log("", base_dir=tmp_path) is None
