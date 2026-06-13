@@ -188,3 +188,51 @@ def test_corrupt_ledger_recovered(base, ledger_path):
     res = log_sync.ship_logs("r:", base_dir=base, ledger_path=ledger_path,
                              copy_fn=copy, workstation="c", user="u")
     assert res.shipped == 3
+
+
+# --------------------------------------------------------------------------- #
+# M9.1 trigger: ship_if_configured (settings-aware)
+# --------------------------------------------------------------------------- #
+
+def test_ship_if_configured_noop_when_not_configured(tmp_path):
+    calls = []
+    out = log_sync.ship_if_configured(base_dir=tmp_path, ledger_path=tmp_path / "l.json",
+                                copy_fn=lambda a, b: calls.append((a, b)),
+                                configured=False)
+    assert out is None
+    assert calls == []
+
+
+def test_ship_if_configured_noop_when_base_empty(tmp_path):
+    calls = []
+    out = log_sync.ship_if_configured(base_dir=tmp_path, ledger_path=tmp_path / "l.json",
+                                copy_fn=lambda a, b: calls.append((a, b)),
+                                configured=True, remote_base="")
+    assert out is None
+    assert calls == []
+
+
+def test_ship_if_configured_ships_when_configured(tmp_path):
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "custody.txt").write_text("x")
+    calls = []
+    out = log_sync.ship_if_configured(base_dir=tmp_path, ledger_path=tmp_path / "l.json",
+                                copy_fn=lambda a, b: calls.append((a, b)),
+                                configured=True, remote_base="gdrive:Acts")
+    assert out is not None and out.shipped == 1
+    assert len(calls) == 1
+    assert calls[0][1].startswith("gdrive:Acts/")
+
+
+def test_ship_if_configured_reads_settings(tmp_path, monkeypatch):
+    from core import settings
+    cfg = tmp_path / "config.json"
+    monkeypatch.setattr(settings, "SETTINGS_PATH", cfg)
+    settings.set_activity_remote_base("gdrive:FromSettings", path=cfg)
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "c.txt").write_text("x")
+    calls = []
+    out = log_sync.ship_if_configured(base_dir=tmp_path, ledger_path=tmp_path / "l.json",
+                                copy_fn=lambda a, b: calls.append((a, b)))
+    assert out is not None and out.shipped == 1
+    assert calls[0][1].startswith("gdrive:FromSettings/")

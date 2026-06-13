@@ -35,6 +35,18 @@ class _UpdateCheckWorker(QThread):
         self.finished.emit(update_check.check_for_update())
 
 
+class _LogShipWorker(QThread):
+    """M9.1: ships the activity log to the shared Drive folder off the main thread.
+
+    Thin adapter — all logic is in core.log_sync.ship_if_configured, which is a
+    no-op unless a remote base is set in Settings and never raises."""
+    finished = pyqtSignal(object)  # ShipResult | None
+
+    def run(self):
+        from core.log_sync import ship_if_configured
+        self.finished.emit(ship_if_configured())
+
+
 class _ReconnectWorker(QThread):
     finished = pyqtSignal(object)  # CheckResult
 
@@ -193,6 +205,8 @@ class MainWindow(QMainWindow):
         self._update_banner = self._build_update_banner()
         root.addWidget(self._update_banner)
         QTimer.singleShot(0, self._start_update_check)
+        # M9.1: ship any pending activity logs on launch (no-op unless configured).
+        QTimer.singleShot(0, self._start_log_shipping)
 
         # Tutorial overlay (parented to central widget so it covers the tabs)
         # Created here so tab references are valid; started later.
@@ -331,6 +345,16 @@ class MainWindow(QMainWindow):
         self._update_worker.finished.connect(self._on_update_check_done)
         self._update_worker.finished.connect(self._update_thread.quit)
         self._update_thread.start()
+
+    def _start_log_shipping(self):
+        # Best-effort, off the main thread; silent no-op unless org activity is
+        # configured in Settings.
+        self._ship_thread = QThread()
+        self._ship_worker = _LogShipWorker()
+        self._ship_worker.moveToThread(self._ship_thread)
+        self._ship_thread.started.connect(self._ship_worker.run)
+        self._ship_worker.finished.connect(self._ship_thread.quit)
+        self._ship_thread.start()
 
     def _on_update_check_done(self, info):
         if info is None:

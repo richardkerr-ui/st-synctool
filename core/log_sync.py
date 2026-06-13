@@ -195,6 +195,40 @@ def ship_logs(
     return ShipResult(shipped=n_shipped, failed=n_failed, pending=n_failed)
 
 
+def ship_if_configured(
+    *,
+    base_dir=STSYNC_DIR,
+    ledger_path=LEDGER_PATH,
+    copy_fn: Optional[Callable] = None,
+    now: Optional[datetime] = None,
+    log_cb: Optional[Callable] = None,
+    remote_base: Optional[str] = None,
+    configured: Optional[bool] = None,
+) -> Optional[ShipResult]:
+    """M9.1 trigger: ship logs only when the org activity log is configured.
+
+    Reads ``core.settings`` (a remote base is set and shipping is not opted out)
+    unless ``configured``/``remote_base`` are passed directly (for tests). Returns
+    the :class:`ShipResult`, or None when shipping is not configured (a no-op).
+    Never raises — safe to fire on launch and after every operation.
+    """
+    from core import settings
+    if configured is None:
+        configured = settings.activity_log_configured()
+    if not configured:
+        return None
+    base = remote_base if remote_base is not None else settings.activity_remote_base()
+    if not base:
+        return None
+    try:
+        return ship_logs(base, base_dir=base_dir, ledger_path=ledger_path,
+                         copy_fn=copy_fn, now=now, log_cb=log_cb)
+    except Exception as e:  # pragma: no cover - ship_logs is already silent-safe
+        if log_cb:
+            log_cb(f"  Log shipping skipped: {e}", "warning")
+        return None
+
+
 def _default_copy(local_abs: str, remote_dst: str) -> None:
     ok = rclone_bridge.copyto(local_abs, remote_dst)
     if not ok:

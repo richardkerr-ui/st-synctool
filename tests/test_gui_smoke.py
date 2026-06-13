@@ -192,6 +192,7 @@ class TestMainWindowSmoke:
         monkeypatch.setattr(mw._StartupCheckWorker, "start", lambda self: None)
         monkeypatch.setattr(mw.MainWindow, "_start_update_check", lambda self: None)
         monkeypatch.setattr(mw.update_check, "check_for_update", lambda *a, **k: None)
+        monkeypatch.setattr(mw.MainWindow, "_start_log_shipping", lambda self: None)
 
         w = mw.MainWindow()
         qtbot.addWidget(w)
