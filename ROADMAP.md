@@ -177,9 +177,10 @@ One page with screenshots covering the three core flows: offload a card, merge a
 **Done when:** a non-developer can complete each flow following only the guide.
 
 
-### M7.5 Update checker (approved 2026-06-12, required for beta)
+### M7.5 Update checker ✅ DONE 2026-06-13 (approved 2026-06-12, required for beta)
 On launch, query the GitHub releases API for the latest version (5s timeout, silent on failure or offline). If newer than the running version, show a dismissible banner with a download link. No auto-update, no background daemon; just awareness. Version comparison logic in `core/` or `utils/`.
 **Done when:** version-compare and release-parse logic unit tested with mocked responses (newer, same, older, malformed, offline), banner renders or hides in a GUI smoke test, README updated.
+**Findings:** New `core/version.py` (`__version__ = "1.0.0"`) is now the single source of truth — the GUI header label reads it (was a hardcoded "v1.0.0"). New headless `core/update_check.py`: `parse_version` (semver triple, rejects malformed), `is_newer` (never nags on an unparseable version), `parse_release` (GitHub JSON → `UpdateInfo(version, url)`, None on any malformed shape), `check_for_update(current=APP_VERSION, fetch_fn=…)` queries `releases/latest` with a 5s timeout and is **silent on every failure** (network error, timeout, non-200, malformed JSON, unparseable version → None) so startup is never disrupted; `fetch_fn` injected for tests (default uses `requests`). `update_banner_text` renders the line. GUI: a dismissible gold update banner + a thin `_UpdateCheckWorker` QThread that runs the check off the main thread on launch and shows the banner only when a newer release is found; Download opens the release URL via QDesktopServices. 21 unit tests in `test_update_check.py` (parse newer/same/older/malformed/offline, timeout passthrough, default-current-is-app-version, banner text) + 4 GUI smoke tests in `test_gui_smoke.py` (banner hidden at startup, hidden when no update, shows on newer release, version label uses APP_VERSION). Suite 1333 → **1365 passed** (non-GUI), coverage 89% → **90%**, `update_check.py` 92%, `version.py` 100%. GUI smoke tests run automatically in M7.2 CI under offscreen. README "Update notifications" section added.
 
 ---
 
@@ -264,7 +265,7 @@ Export an ASC Media Hash List (.mhl) alongside `st_manifest.json` so post houses
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 ✅ → M10.2 ✅ → M7.2 ✅ → M9.1+M9.2 (core ✅, integration+settings remote pending) → M7.5 → M7.3 → M7.4 → M9.3 → M10.3 → M7.1 → recruit beta testers. (M8 AI assist on hold — not scheduled.)
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 ✅ → M10.2 ✅ → M7.2 ✅ → M9.1+M9.2 (core ✅, integration+settings remote pending) → M7.5 ✅ → M7.3 → M7.4 → M9.3 → M10.3 → M7.1 → recruit beta testers. (M8 AI assist on hold — not scheduled.)
 
 **Reorder note (2026-06-12):** M7.1 (signed DMG) moved to the end of the list because it is blocked on an Apple Developer account ($99/yr, Richard to set up) and was stalling the autonomous loop. Everything ahead of it is workable without signing. Dependency caveat: **beta-tester recruitment still cannot happen until M7.1 lands** (testers need the signed DMG), so M7.1 sits immediately before "recruit beta testers" despite being last in work order. M7.2 CI is now the next item — it retroactively validates every "needs a manual Mac run" GUI item via a macOS runner.
 

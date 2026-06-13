@@ -20,6 +20,19 @@ from core.demo import (
 from gui                  import theme
 from core.setup_checks    import check_rclone_auth, CheckStatus, create_gdrive_remote, run_all_checks
 from core.oauth_config    import get_active_remote, get_remote_account_email
+from core.version         import __version__ as APP_VERSION
+from core import update_check
+
+
+class _UpdateCheckWorker(QThread):
+    """M7.5: queries GitHub for a newer release off the main thread.
+
+    Thin adapter — all logic is in core.update_check. Emits UpdateInfo or None;
+    never raises (the core check is silent on every failure)."""
+    finished = pyqtSignal(object)  # UpdateInfo | None
+
+    def run(self):
+        self.finished.emit(update_check.check_for_update())
 
 
 class _ReconnectWorker(QThread):
@@ -102,7 +115,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("color:#ffffff;letter-spacing:1px;")
         subtitle = QLabel("Signal Theory Productions")
         subtitle.setStyleSheet("color:#555;font-size:12px;margin-left:10px;")
-        version = QLabel("v1.0.0")
+        version = QLabel(f"v{APP_VERSION}")
         version.setStyleSheet("color:#444;font-size:11px;")
         self._account_label = QLabel()
         self._account_label.setStyleSheet(
@@ -142,6 +155,11 @@ class MainWindow(QMainWindow):
         self._sched_banner = self._build_scheduled_verify_banner()
         root.addWidget(self._sched_banner)
         self._refresh_scheduled_verify_banner()
+
+        # M7.5: update-available banner (hidden until a newer release is found).
+        self._update_banner = self._build_update_banner()
+        root.addWidget(self._update_banner)
+        self._start_update_check()
 
         # Tutorial overlay (parented to central widget so it covers the tabs)
         # Created here so tab references are valid; started later.
@@ -240,6 +258,59 @@ class MainWindow(QMainWindow):
         from core import scheduled_verify
         scheduled_verify.acknowledge_failures()
         self._sched_banner.setVisible(False)
+
+    def _build_update_banner(self) -> QWidget:
+        banner = QWidget()
+        banner.setObjectName("updateBanner")
+        banner.setStyleSheet(f"""
+            QWidget#updateBanner {{
+                background-color: {theme.CHARCOAL_LIGHT};
+                border-bottom: 2px solid {theme.GOLD};
+            }}
+            QWidget#updateBanner QLabel {{
+                color: {theme.CREAM};
+                background: transparent;
+            }}
+        """)
+        layout = QHBoxLayout(banner)
+        layout.setContentsMargins(12, 8, 12, 8)
+        self._update_banner_label = QLabel()
+        self._update_banner_label.setWordWrap(True)
+        layout.addWidget(self._update_banner_label, stretch=1)
+        download_btn = QPushButton("Download")
+        download_btn.setStyleSheet(theme.primary_button_style())
+        download_btn.clicked.connect(self._open_update_url)
+        layout.addWidget(download_btn)
+        dismiss_btn = QPushButton("Dismiss")
+        dismiss_btn.setStyleSheet(theme.primary_button_style())
+        dismiss_btn.clicked.connect(lambda: self._update_banner.setVisible(False))
+        layout.addWidget(dismiss_btn)
+        banner.setVisible(False)
+        self._update_url = ""
+        return banner
+
+    def _start_update_check(self):
+        # Best-effort, off the main thread; silent on any failure or offline.
+        self._update_thread = QThread()
+        self._update_worker = _UpdateCheckWorker()
+        self._update_worker.moveToThread(self._update_thread)
+        self._update_thread.started.connect(self._update_worker.run)
+        self._update_worker.finished.connect(self._on_update_check_done)
+        self._update_worker.finished.connect(self._update_thread.quit)
+        self._update_thread.start()
+
+    def _on_update_check_done(self, info):
+        if info is None:
+            return
+        self._update_url = info.url
+        self._update_banner_label.setText(update_check.update_banner_text(info))
+        self._update_banner.setVisible(True)
+
+    def _open_update_url(self):
+        if self._update_url:
+            from PyQt6.QtGui import QDesktopServices
+            from PyQt6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(self._update_url))
 
     def _build_auth_banner(self) -> QWidget:
         banner = QWidget()

@@ -522,6 +522,12 @@ If an offload is interrupted (power loss, crash, yanked drive), the partial copy
 
 ---
 
+## Update notifications
+
+On launch the app quietly asks GitHub for the latest published release (5-second timeout, completely silent if offline or the request fails). If a newer version exists, a dismissible banner appears with a Download button linking to the release page. There is no auto-update and no background daemon — just awareness. The running version is shown in the window header.
+
+---
+
 ## Org-wide activity log
 
 Every offload, transfer, merge and verify writes its custody log and manifest locally first — the local copy is the source of truth and never depends on the network. The app then ships those files (append-only, never deleting anything remotely) to a shared Google Drive folder via the rclone remote every user already has, so the org gets a single view of all production activity. The remote layout mirrors the local folders, namespaced per machine and user: `ST_SyncTool_Activity/{workstation}/{user}/...`.

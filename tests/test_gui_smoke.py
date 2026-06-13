@@ -184,6 +184,8 @@ class TestMainWindowSmoke:
         monkeypatch.setattr(ot.OffloadTab, "_start_volume_watcher", lambda self: None)
         monkeypatch.setattr(mt.project_registry, "list_projects", lambda: [])
         monkeypatch.setattr(proj, "list_dest_presets", lambda: [])
+        # M7.5: keep the launch update-check off the network in tests.
+        monkeypatch.setattr(mw.update_check, "check_for_update", lambda *a, **k: None)
 
         w = mw.MainWindow()
         qtbot.addWidget(w)
@@ -214,6 +216,28 @@ class TestMainWindowSmoke:
         assert isinstance(window._merge_tab, MergeTab)
         assert isinstance(window._offload_tab, OffloadTab)
         assert isinstance(window._verify_tab, VerifyTab)
+
+    # M7.5: update-available banner
+    def test_update_banner_hidden_at_startup(self, window):
+        assert not window._update_banner.isVisible()
+
+    def test_update_banner_hidden_when_no_update(self, window):
+        window._on_update_check_done(None)
+        assert not window._update_banner.isVisible()
+
+    def test_update_banner_shows_on_newer_release(self, window):
+        from core.update_check import UpdateInfo
+        window.show()
+        window._on_update_check_done(UpdateInfo(version="v9.9.9",
+                                                url="https://example/release"))
+        assert window._update_banner.isVisible()
+        assert "v9.9.9" in window._update_banner_label.text()
+        assert window._update_url == "https://example/release"
+
+    def test_version_label_uses_app_version(self, window):
+        from core.version import __version__ as APP_VERSION
+        labels = window.findChildren(type(window._update_banner_label))
+        assert any(lbl.text() == f"v{APP_VERSION}" for lbl in labels)
 
 
 # ---------------------------------------------------------------------------
