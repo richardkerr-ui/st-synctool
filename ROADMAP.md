@@ -12,6 +12,11 @@ Structured for execution via `/loop`. Milestones are ordered by dependency: hard
 
 ### Loop session notes
 
+- **Next item: M7.3 (Feedback and crash loop).** Order: M7.3 → M7.4 → M9 integration → M7.1 (last, blocked on Apple Dev account). Skip M7.1 — do not work it until Richard has the Apple Developer account.
+- **Baseline 2026-06-13 (latest):** non-GUI suite **1365 passed**, core+utils coverage **90%**. Full suite on CI (macOS, incl. GUI) **1551 passed, 91%**. Last commit `39a52dc`, all pushed to `origin/main`, CI green.
+- **CI now runs the full pytest-qt GUI suite** on every push (macOS runner, `QT_QPA_PLATFORM=offscreen`). When adding GUI code that starts a worker/modal in `MainWindow.__init__`, defer it via `QTimer` AND suppress it in the `test_gui_smoke.py` MainWindow fixture (monkeypatch the worker's `start`), or CI aborts with exit 134 (pytest-qt pumps events at setup). After a GUI-touching change, push and watch the run: `gh run list --workflow=ci.yml --limit 1` then `gh run watch <id> --exit-status`.
+- **M9.1+M9.2 are core-complete** (`core/log_sync.py`, `core/activity_index.py`) but the integration (fire `ship_logs` after each op + on launch, a Settings field for the shared Drive remote base + opt-out toggle, GUI status line/banner, `append_activity` call sites, manual e2e) is **blocked on a Settings remote that does not exist yet** — do not attempt until a Settings remote-config story exists; it rides with M9.3.
+- **Pushing:** commit locally by default. Pushing to `main` requires explicit user OK in interactive sessions (the auto-approver blocks unprompted pushes); in an autonomous 3 AM run, commit locally and report — do not assume push permission.
 - Rebuild the graph each session: `code-review-graph build --repo . --data-dir /tmp/crg_<uid>`. Stale `/tmp/crg_data` dirs from prior sessions may be owned by another uid and unwritable, so use a fresh uniquely named dir and query `graph.db` read-only.
 - Run `/cover-risk` at the start of any milestone touching `core/` to re-rank targets.
 - Any GUI changes get logic extracted into `core/` so it is testable headlessly, with a thin Qt layer on top.
