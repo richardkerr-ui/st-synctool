@@ -259,6 +259,8 @@ Export an ASC Media Hash List (.mhl) alongside `st_manifest.json` so post houses
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 ✅ → M10.2 ✅ → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M10.3. (M8 AI assist on hold — not scheduled.)
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 ✅ → M10.2 ✅ → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → M9.3 → M10.3 → M7.1 → recruit beta testers. (M8 AI assist on hold — not scheduled.)
+
+**Reorder note (2026-06-12):** M7.1 (signed DMG) moved to the end of the list because it is blocked on an Apple Developer account ($99/yr, Richard to set up) and was stalling the autonomous loop. Everything ahead of it is workable without signing. Dependency caveat: **beta-tester recruitment still cannot happen until M7.1 lands** (testers need the signed DMG), so M7.1 sits immediately before "recruit beta testers" despite being last in work order. M7.2 CI is now the next item — it retroactively validates every "needs a manual Mac run" GUI item via a macOS runner.
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is ON HOLD as of 2026-06-12 — Richard does not want AI features built at this time; do not start it. M5 fully signed off and complete (M5.0–M5.4 done 2026-06-12). M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
