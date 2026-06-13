@@ -273,6 +273,37 @@ class FakeProc:
         return self.returncode
 
 
+class TestQuotaClassificationSurfacing:
+    """M10.2: sync/copyto must surface a plain-language quota message on failure."""
+
+    def _patch(self, fake):
+        return patch("core.rclone_bridge.subprocess.Popen", return_value=fake)
+
+    def test_sync_surfaces_rate_limit_message(self):
+        fake = FakeProc(stderr="ERROR : googleapi: Error 403: userRateLimitExceeded\n",
+                        returncode=1)
+        logged = []
+        with self._patch(fake):
+            ok = rb.sync("a", "b", log_cb=lambda m, l: logged.append((m, l)))
+        assert ok is False
+        assert any("daily upload limit" in m and l == "error" for m, l in logged)
+
+    def test_copyto_surfaces_storage_full_message(self):
+        fake = FakeProc(stderr="ERROR : storageQuotaExceeded\n", returncode=1)
+        logged = []
+        with self._patch(fake):
+            ok = rb.copyto("a", "b", log_cb=lambda m, l: logged.append((m, l)))
+        assert ok is False
+        assert any("out of storage space" in m for m, l in logged)
+
+    def test_sync_no_quota_message_on_unrelated_failure(self):
+        fake = FakeProc(stderr="ERROR : connection refused\n", returncode=1)
+        logged = []
+        with self._patch(fake):
+            rb.sync("a", "b", log_cb=lambda m, l: logged.append((m, l)))
+        assert not any("daily upload limit" in m or "storage space" in m for m, l in logged)
+
+
 class TestRunSubprocess:
     """_run must collect output, surface progress and always clear _current_proc."""
 

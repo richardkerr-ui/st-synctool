@@ -320,6 +320,7 @@ def sync(src, dst, mode="copy", conflict="overwrite",
 
     if r.returncode != 0 and log_cb:
         log_cb(f"rclone {cmd} exited with code {r.returncode}", "error")
+        _log_quota_classification(r.stderr, log_cb)
 
     return r.returncode == 0
 
@@ -331,7 +332,17 @@ def copyto(src, dst, src_flags=None, dst_flags=None, log_cb=None):
         if f:
             args.extend(f)
     r = _run(args, timeout=24 * 3600, log_cb=log_cb)
+    if r.returncode != 0 and log_cb:
+        _log_quota_classification(r.stderr, log_cb)
     return r.returncode == 0
+
+
+def _log_quota_classification(stderr, log_cb):
+    """Surface a plain-language Google quota / rate-limit message (M10.2)."""
+    from core import quota
+    cls = quota.classify_rclone_error(stderr)
+    if cls and log_cb:
+        log_cb(cls.message, "error")
 
 
 def deletefile(path, extra_flags=None, log_cb=None):

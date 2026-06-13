@@ -6,7 +6,7 @@ from core.checksum import compute_all
 from core.manifest import generate_manifest, save_manifest, SCHEMA_VERSION
 from utils.file_utils import folder_size, free_space, format_bytes
 from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone, gdrive_url_to_connstr
-from core import rclone_bridge
+from core import rclone_bridge, quota
 
 GDRIVE_DAILY_LIMIT_BYTES = 750 * 1024 ** 3
 
@@ -458,6 +458,20 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
         f"{status_counts['updated']} updated, "
         f"{status_counts['unchanged']} unchanged, "
         f"{len(deleted)} deleted")
+
+    # M10.2: record an upload floor for the daily tally. Only counts bytes this
+    # app actually pushed to Drive (uploaded/updated files to a Drive dest),
+    # presented strictly as a floor since outside-app uploads are invisible.
+    if dst_is_url:
+        uploaded_bytes = sum(
+            f.get("size", 0) for f in normalized.values()
+            if f.get("status") in ("uploaded", "updated")
+        )
+        if uploaded_bytes > 0:
+            quota.record_upload(uploaded_bytes)
+            floor = quota.tally_floor_text()
+            if floor:
+                log(f"  {floor}")
 
     # Save manifest JSON next to local side (and central log dir)
     saved_paths = []
