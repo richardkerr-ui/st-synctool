@@ -21,13 +21,12 @@ from typing import Any, Optional
 
 SETTINGS_PATH = Path.home() / ".config" / "st_synctool" / "config.json"
 
-# Shipped default for the org activity log. SET THIS ONCE the shared Google Drive
-# folder exists (e.g. "ST_SyncTool_Activity" — a folder in a Shared Drive every
-# user's rclone remote can reach). When non-empty, every install auto-derives its
-# activity remote base from its active remote (e.g. "gdrive:ST_SyncTool_Activity")
-# with zero per-user setup; a value typed in Settings still overrides it. Leave
-# empty to keep org shipping off until the folder is provisioned.
-DEFAULT_ACTIVITY_FOLDER = ""
+# Shipped default for the org activity log: the shared Google Drive folder every
+# install ships activity to with zero per-user setup. Accepts a Drive folder URL
+# (resolved to an rclone connection string via the folder id), a full rclone base
+# ("gdrive:Folder"), or a bare folder name (derived as "<active_remote>:<name>").
+# A value typed in Settings overrides it; empty turns org shipping off.
+DEFAULT_ACTIVITY_BASE = "https://drive.google.com/drive/folders/1bRGj7XQdAKBhjUG8gHqnmbmwvkE6--Ls"
 
 # Known setting keys and their defaults. Unknown keys are preserved on write but
 # are not part of the typed surface.
@@ -99,24 +98,38 @@ def set_setting(key: str, value: Any, *, path=None) -> dict:
 # Typed convenience accessors for the activity-log cluster
 # --------------------------------------------------------------------------- #
 
-def default_activity_remote_base(*, path=None) -> str:
-    """The shipped default base, derived from the active remote + DEFAULT_ACTIVITY_FOLDER.
+def _resolve_base(value: str, *, path=None) -> str:
+    """Turn a configured activity base into a usable rclone destination.
 
-    Returns '' until DEFAULT_ACTIVITY_FOLDER is set; then e.g. the active remote
-    'gdrive' + folder 'ST_SyncTool_Activity' -> 'gdrive:ST_SyncTool_Activity'.
+    Accepts a Drive folder URL (-> "gdrive,root_folder_id=<id>:" connection
+    string), a full rclone base containing ':' (used verbatim), or a bare folder
+    name (-> "<active_remote>:<name>"). Empty/garbage -> ''.
     """
-    folder = DEFAULT_ACTIVITY_FOLDER.strip()
-    if not folder:
+    value = (value or "").strip()
+    if not value:
         return ""
+    from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_connstr
+    if is_gdrive_url(value):
+        try:
+            return gdrive_url_to_connstr(value)
+        except ValueError:
+            return ""
+    if ":" in value:                       # already an rclone base
+        return value
     remote = (get_setting("active_remote", "gdrive", path=path) or "gdrive").rstrip(":")
-    return f"{remote}:{folder}"
+    return f"{remote}:{value}"
+
+
+def default_activity_remote_base(*, path=None) -> str:
+    """The shipped default base (DEFAULT_ACTIVITY_BASE), resolved to an rclone path."""
+    return _resolve_base(DEFAULT_ACTIVITY_BASE, path=path)
 
 
 def activity_remote_base(*, path=None) -> str:
     """The effective shared Drive remote base: an explicit Settings value (or the
     env override) if set, otherwise the shipped default. '' when neither applies."""
     explicit = (get_setting("activity_remote_base", "", path=path) or "").strip()
-    return explicit or default_activity_remote_base(path=path)
+    return _resolve_base(explicit, path=path) or default_activity_remote_base(path=path)
 
 
 def set_activity_remote_base(value: str, *, path=None) -> dict:
