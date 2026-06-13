@@ -140,6 +140,8 @@ class OffloadConfig:
     # M4.1: reuse verified files from an interrupted offload's staging dir.
     # Off by default — the UI must ask the user, never silently reuse.
     resume_staging: bool = False
+    # M10.3: also write an ASC MHL v2.0 .mhl sidecar next to each manifest.
+    export_mhl: bool = False
 
 
 @dataclass
@@ -808,6 +810,7 @@ def save_offload_manifest(
     committed_results: list,
     norm_block: Optional[dict] = None,
     renames_full: Optional[list] = None,
+    export_mhl: bool = False,
 ) -> list:
     """Build and persist an offload manifest to all committed destinations + archive.
 
@@ -861,6 +864,16 @@ def save_offload_manifest(
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(_json.dumps(manifest, indent=2))
         saved.append(dest)
+
+    # M10.3: optional ASC MHL v2.0 sidecar next to each saved manifest. Never
+    # let an export failure affect the offload — it is purely additive.
+    if export_mhl:
+        from core.asc_mhl import write_mhl, default_mhl_path
+        for p in saved:
+            try:
+                write_mhl(manifest, default_mhl_path(manifest, p.parent))
+            except Exception:
+                pass
 
     return saved
 
@@ -1253,6 +1266,7 @@ def run_offload(
                 src_results,
                 norm_block if norm_plan else None,
                 renames_full or None,
+                export_mhl=config.export_mhl,
             )
         except Exception as exc:
             log_cb(

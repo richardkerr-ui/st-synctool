@@ -733,6 +733,13 @@ class OffloadTab(QWidget):
         self._stop_on_fail = QCheckBox("Stop on first destination failure")
         layout.addWidget(self._stop_on_fail)
 
+        # M10.3: optional ASC MHL v2.0 sidecar for post-house interoperability.
+        self._export_mhl_chk = QCheckBox("Export ASC MHL (.mhl)")
+        self._export_mhl_chk.setToolTip(
+            "Write an ASC Media Hash List sidecar next to each manifest, "
+            "for verification in Silverstack, YoYotta and similar tools")
+        layout.addWidget(self._export_mhl_chk)
+
         # Divider
         div2 = QFrame()
         div2.setFrameShape(QFrame.Shape.VLine)
@@ -1071,6 +1078,7 @@ class OffloadTab(QWidget):
             thumbnail_max_frames=self._max_frames_spin.value(),
             normalize_filenames=normalize,
             resume_staging=resume_staging,
+            export_mhl=self._export_mhl_chk.isChecked(),
         )
 
         self._copy_start.clear()

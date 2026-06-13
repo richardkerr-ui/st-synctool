@@ -31,7 +31,8 @@ class TransferWorker(QObject):
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
-    def __init__(self, src, dst, gdrive_mode, mirror_mode, paranoid_mode, conflict_handler, extract_zips):
+    def __init__(self, src, dst, gdrive_mode, mirror_mode, paranoid_mode, conflict_handler,
+                 extract_zips, export_mhl=False):
         super().__init__()
         self.src              = src
         self.dst              = dst
@@ -40,6 +41,7 @@ class TransferWorker(QObject):
         self.paranoid_mode    = paranoid_mode
         self.conflict_handler = conflict_handler
         self.extract_zips     = extract_zips
+        self.export_mhl       = export_mhl
 
     def run(self):
         try:
@@ -51,6 +53,7 @@ class TransferWorker(QObject):
                 log_cb=lambda m, l: self.log.emit(m, l),
                 progress_cb=lambda p, f: self.progress.emit(p, f),
                 conflict_handler=self.conflict_handler,
+                export_mhl=self.export_mhl,
             )
             if self.extract_zips and not is_gdrive_url(str(self.dst)):
                 extract_multipart_zip(
@@ -172,6 +175,14 @@ class TransferTab(QWidget):
         self.paranoid_chk = QCheckBox("Paranoid verification")
         self.paranoid_chk.setStyleSheet(f"color:{theme.TEXT_MUTED};")
         opts_row1.addWidget(self.paranoid_chk)
+
+        # M10.3: optional ASC MHL v2.0 sidecar for post-house interoperability.
+        self.export_mhl_chk = QCheckBox("Export ASC MHL (.mhl)")
+        self.export_mhl_chk.setStyleSheet(f"color:{theme.TEXT_MUTED};")
+        self.export_mhl_chk.setToolTip(
+            "Write an ASC Media Hash List sidecar next to the manifest, for "
+            "verification in Silverstack, YoYotta and similar tools")
+        opts_row1.addWidget(self.export_mhl_chk)
         opts_row1.addStretch()
         opts_layout.addLayout(opts_row1)
 
@@ -429,6 +440,7 @@ class TransferTab(QWidget):
             paranoid_mode=self.paranoid_chk.isChecked(),
             conflict_handler=self._conflict_handler_str(),
             extract_zips=self.extract_zip_chk.isChecked(),
+            export_mhl=self.export_mhl_chk.isChecked(),
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)

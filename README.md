@@ -528,6 +528,12 @@ On launch the app quietly asks GitHub for the latest published release (5-second
 
 ---
 
+## ASC MHL export
+
+Tick **Export ASC MHL (.mhl)** in the Transfer or Offload tab to write an ASC Media Hash List sidecar (ASC MHL v2.0) next to the manifest. Post houses can then verify Signal Theory deliveries with their own tools (Silverstack, YoYotta and similar) without trusting our app. It is a translation of the hash data already in the manifest, so nothing is rehashed. Note that ASC MHL has no sha256 element, so the export uses the manifest's xxh3 hash for local files and md5 for Drive files; the sha256 stays in `st_manifest.json`.
+
+---
+
 ## Report a problem
 
 A **Report a Problem** button in the window header bundles recent logs into a single zip a tester can email. It collects the last 14 days of files from `~/Documents/STSyncTool/logs/` and `~/Documents/STSyncTool/offload_logs/`, plus a `system_info.txt` carrying the app version, macOS version and Python version. You pick where to save the zip; the app then reveals it in Finder so you can attach it to an email describing the problem. Nothing is uploaded — the bundle never leaves your machine until you send it.

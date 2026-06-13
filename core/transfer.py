@@ -149,7 +149,22 @@ def resolve_folder_conflict(src: Path, dst: Path):
     return (dst if same else dst / src.name), same
 
 
-def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None, conflict_handler="skip"):
+def _maybe_export_mhl(manifest, saved_paths, export_mhl, log):
+    """M10.3: write an ASC MHL v2.0 .mhl next to each saved manifest, additively.
+
+    A failure here is logged and swallowed so it can never fail the transfer."""
+    if not export_mhl:
+        return
+    from core.asc_mhl import write_mhl, default_mhl_path
+    for p in saved_paths:
+        try:
+            write_mhl(manifest, default_mhl_path(manifest, Path(p).parent))
+        except Exception as exc:
+            log(f"  MHL export skipped for {Path(p).parent}: {exc}", "warning")
+
+
+def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None,
+                    conflict_handler="skip", export_mhl=False):
     """Local-to-local transfer with per-file verification + manifest."""
     def log(m, l="info"):
         if log_cb: log_cb(m, l)
@@ -219,6 +234,7 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None, 
     }
     saved = save_manifest(manifest, source_dir=src, dest_dir=actual_dest, name_hint=src.name)
     log(f"  Manifest saved to {len(saved)} locations")
+    _maybe_export_mhl(manifest, saved, export_mhl, log)
     return {
         "manifest": manifest, "saved_manifest_paths": [str(p) for p in saved],
         "errors": errors, "actual_dest": str(actual_dest), "same_name": same_name,
@@ -226,7 +242,8 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None, 
 
 
 def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwrite",
-                           paranoid_verify=False, log_cb=None, progress_cb=None):
+                           paranoid_verify=False, log_cb=None, progress_cb=None,
+                           export_mhl=False):
     """Routes a transfer through rclone when either side is a Google Drive URL."""
     def log(m, l="info"):
         if log_cb: log_cb(m, l)
@@ -496,6 +513,8 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     except Exception as e:
         log(f"  Could not save JSON manifest: {e}", "warning")
 
+    _maybe_export_mhl(manifest, saved_paths, export_mhl, log)
+
     if progress_cb: progress_cb(100, "Done")
     return {
         "manifest": manifest, "saved_manifest_paths": [str(p) for p in saved_paths],
@@ -506,7 +525,8 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
 
 def route_transfer(src, dst, gdrive_mode=False, mirror_mode=False,
                    paranoid_verify=False,
-                   log_cb=None, progress_cb=None, conflict_handler="skip"):
+                   log_cb=None, progress_cb=None, conflict_handler="skip",
+                   export_mhl=False):
     """Top-level dispatcher: picks rclone vs. local based on URL detection."""
     if is_gdrive_url(str(src)) or is_gdrive_url(str(dst)):
         return transfer_folder_rclone(
@@ -515,11 +535,13 @@ def route_transfer(src, dst, gdrive_mode=False, mirror_mode=False,
             conflict_handler=conflict_handler,
             paranoid_verify=paranoid_verify,
             log_cb=log_cb, progress_cb=progress_cb,
+            export_mhl=export_mhl,
         )
     return transfer_folder(
         src, dst, gdrive_mode=gdrive_mode,
         log_cb=log_cb, progress_cb=progress_cb,
         conflict_handler=conflict_handler,
+        export_mhl=export_mhl,
     )
 
 

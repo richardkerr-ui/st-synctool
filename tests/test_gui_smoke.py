@@ -28,7 +28,7 @@ class TestTransferTabSmoke:
 
     def test_key_widgets_present(self, tab):
         for attr in ("src_input", "dst_input", "start_btn", "conflict_combo",
-                     "cancel_btn", "manifest_btn", "log"):
+                     "cancel_btn", "manifest_btn", "log", "export_mhl_chk"):
             assert hasattr(tab, attr), f"TransferTab missing: {attr}"
 
     def test_start_btn_label(self, tab):
@@ -130,7 +130,8 @@ class TestOffloadTabSmoke:
         tab.show()
 
     def test_key_widgets_present(self, tab):
-        for attr in ("_preset_combo", "_start_btn", "_cancel_btn", "_log"):
+        for attr in ("_preset_combo", "_start_btn", "_cancel_btn", "_log",
+                     "_export_mhl_chk"):
             assert hasattr(tab, attr), f"OffloadTab missing: {attr}"
 
     def test_one_source_row_created_at_init(self, tab):

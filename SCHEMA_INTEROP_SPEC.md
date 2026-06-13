@@ -240,6 +240,15 @@ a `media_verify` block onto each file entry that actually ran a format check:
 
 ---
 
+## Part 4 — ASC MHL v2.0 export (M10.3)
+
+ST SyncTool can export an ASC Media Hash List sidecar (`.mhl`) next to `st_manifest.json` so post houses verify deliveries with their own tools (Silverstack, YoYotta and similar) without trusting our app. It is a translation of existing manifest hash data, no rehashing. Code: `core/asc_mhl.py`.
+
+- **Format:** ASC MHL v2.0, namespace `urn:ASC:MHL:v2.0`, single `<hashlist version="2.0">` with required `<creatorinfo>` (creationdate, hostname, tool[@version]), `<processinfo>` (`<process>transfer</process>`) and a `<hashes>` block of `<hash>` entries. Validated against the published schema `xsd/ASCMHL.xsd` (github.com/ascmitc/mhl), bundled at `tests/fixtures/ASCMHL.xsd`.
+- **Per file:** `<path size=".." lastmodificationdate="..">rel/posix/path</path>` plus hash elements in schema order (c4, md5, sha1, xxh128, xxh3, xxh64), each carrying `action="original"` and `hashdate`.
+- **Hash mapping:** manifest `md5` to `<md5>`, manifest `xxhash3_64` to `<xxh3>`. **sha256 is intentionally not exported** because the ASC MHL v2.0 schema defines no sha256 element. Every manifest we write also carries an MHL-compatible hash (xxhash3_64 for local, md5 for Drive), so each file still gets a verifiable hash; a file that somehow has only sha256 is written with its path but no hash element and reported in `MhlExportResult.unhashed`.
+- **Trigger:** off by default. An "Export ASC MHL (.mhl)" checkbox in the Transfer and Offload tabs sets `export_mhl`, threaded through `route_transfer`/`transfer_folder`/`transfer_folder_rclone` and `OffloadConfig`/`save_offload_manifest`. A `.mhl` (named from the manifest label) is written next to each saved manifest; an export failure is logged and swallowed so it never affects the copy.
+
 ## Out of scope for this change, tracked separately
 
 - `.DS_Store` ingest asymmetry: offload copies it, merge filters it via `comparison._is_ignored`. Unify the ignore list across both subsystems in a follow-up.
