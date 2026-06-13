@@ -304,6 +304,10 @@ A live grid shows each source/destination pair as: pending / copying / verifying
 
 For each offload, a chain-of-custody log is saved to `~/Documents/STSyncTool/offload_logs/`. It records source manifests, per-destination verification results, any filename renames, and contact sheet artifacts.
 
+### Safe to format
+
+For every source the log carries an explicit `CLEARANCE:` verdict. A card is marked **SAFE TO FORMAT** only when at least two destinations verified clean, so a single drive failure can never cost the only copy. Otherwise it is **NOT CLEARED** with the reason (a verification failure, an unverified destination, or only one clean copy). The verdict is computed in `core/clearance.py` and recorded in the chain-of-custody log; never format a card until its source reads SAFE TO FORMAT.
+
 ---
 
 ## Contact sheets

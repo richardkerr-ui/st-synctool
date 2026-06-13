@@ -922,6 +922,13 @@ def write_chain_of_custody_log(
         ]
         for rel, info in sorted(file_entries.items()):
             lines.append(f"    {info.get('checksum', '')[:16]}  {rel}")
+        # M10.1: explicit safe-to-format clearance verdict for this source.
+        from core.clearance import compute_clearance
+        verdict = compute_clearance(src.label, results)
+        lines.append(
+            f"  CLEARANCE: {'SAFE TO FORMAT' if verdict.cleared else 'NOT CLEARED'} "
+            f"— {verdict.to_text()}"
+        )
         lines.append("")
 
     lines += ["RESULTS:", ""]

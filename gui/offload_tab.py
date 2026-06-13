@@ -352,6 +352,17 @@ class SummaryDialog(QDialog):
             eject_lbl.setStyleSheet(f"color:{color};font-weight:bold;font-size:13px;")
             layout.addWidget(eject_lbl)
 
+            # M10.1: safe-to-format clearance (verification-based, stricter than
+            # eject). Logic lives in core.clearance; this only renders it.
+            from core.clearance import compute_clearance
+            verdict = compute_clearance(src_label, results)
+            clr_color = theme.ACCENT_GREEN if verdict.cleared else theme.ACCENT_CORAL
+            clr_icon  = "✓" if verdict.cleared else "⚠"
+            clr_lbl = QLabel(f"{clr_icon} {verdict.to_text()}")
+            clr_lbl.setWordWrap(True)
+            clr_lbl.setStyleSheet(f"color:{clr_color};font-size:12px;margin-left:14px;")
+            layout.addWidget(clr_lbl)
+
         layout.addSpacing(8)
 
         # Result table
