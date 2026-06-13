@@ -544,7 +544,8 @@ class TransferTab(QWidget):
     def _write_txt_log(self, result):
         import getpass, socket
         from datetime import datetime
-        log_dir = Path.home() / "Documents" / "STSyncTool" / "logs"
+        from core import paths as _paths
+        log_dir = _paths.transfer_reports_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = log_dir / f"transfer_{ts}.txt"

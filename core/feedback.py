@@ -20,12 +20,13 @@ from typing import Callable, Optional
 
 from core.version import __version__ as APP_VERSION
 
-STSYNC_DIR = Path.home() / "Documents" / "STSyncTool"
+from core import paths as _paths
+STSYNC_DIR = _paths.base_dir()
 
 # Only the human-readable evidence trails go in a feedback bundle. Manifests and
 # the activity index can be large and are not needed to diagnose a tester report,
 # so they are deliberately excluded to keep the zip emailable.
-FEEDBACK_SUBDIRS = ("logs", "offload_logs")
+FEEDBACK_SUBDIRS = _paths.FEEDBACK_SUBDIRS
 
 # Logs older than this are unlikely to relate to the problem being reported and
 # only bloat the bundle.
@@ -135,4 +136,4 @@ def default_bundle_path(now: Optional[datetime] = None, base_dir: Path = STSYNC_
     """Default location/name for a feedback bundle: timestamped, in the logs dir."""
     when = now or datetime.now()
     stamp = when.strftime("%Y%m%d_%H%M%S")
-    return Path(base_dir) / "logs" / f"st_synctool_feedback_{stamp}.zip"
+    return Path(base_dir) / f"st_synctool_feedback_{stamp}.zip"

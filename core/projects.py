@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-PROJECTS_REGISTRY = Path.home() / "Documents" / "STSyncTool" / "projects.json"
+from core import paths as _paths
+PROJECTS_REGISTRY = _paths.projects_registry()
 
 
 def _load() -> dict:

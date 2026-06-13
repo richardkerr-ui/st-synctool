@@ -857,7 +857,8 @@ class MergeTab(QWidget):
     def _open_logs_folder(self):
         from PyQt6.QtGui import QDesktopServices
         from PyQt6.QtCore import QUrl
-        log_dir = Path.home() / "Documents" / "STSyncTool" / "logs"
+        from core import paths as _paths
+        log_dir = _paths.base_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir)))
 

@@ -30,7 +30,8 @@ from core.thumbnail import (
 )
 import core.media_verify as _media_verify
 
-OFFLOAD_LOGS_DIR = Path.home() / "Documents" / "STSyncTool" / "offload_logs"
+from core import paths as _paths
+OFFLOAD_LOGS_DIR = _paths.offload_reports_dir()
 MAX_RETRIES_DEFAULT = 3
 
 # MANIFEST-FIX: OS-generated junk files that must never enter the offload
@@ -887,15 +888,25 @@ def write_chain_of_custody_log(
 ) -> Path:
     """
     Write a human-readable chain-of-custody log for the entire offload run.
-    Saved to ~/Documents/STSyncTool/offload_logs/offload_{ts}.txt.
+    Saved to ~/Documents/STSyncTool/Offload Reports/<date>/<label> <time> <id>.txt.
     """
-    OFFLOAD_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    # MANIFEST-FIX: append a 4-char random hex suffix so two offloads that start
-    # in the same second do not collide on the log filename and silently
-    # overwrite each other's chain-of-custody record.
+    # Human-readable, date-grouped layout: "Offload Reports/2026-06-13/A001 20.10.56 4fd2.txt".
+    # A 4-char random suffix keeps two offloads that start in the same second
+    # from colliding and silently overwriting each other's custody record.
     import secrets as _secrets
-    suffix = _secrets.token_hex(2)  # 4 hex chars
-    log_path = OFFLOAD_LOGS_DIR / f"offload_{ts}_{suffix}.txt"
+    from datetime import datetime as _dt
+    suffix = _secrets.token_hex(2)
+    try:
+        parsed = _dt.strptime(ts, "%Y%m%d_%H%M%S")
+        date_folder = parsed.strftime("%Y-%m-%d")
+        time_str = parsed.strftime("%H.%M.%S")
+    except ValueError:
+        date_folder, time_str = "undated", ts
+    label = sources[0].label if sources else "offload"
+    safe_label = "".join(c if (c.isalnum() or c in " -_") else "_" for c in label).strip() or "offload"
+    out_dir = _paths.offload_reports_dir() / date_folder
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = out_dir / f"{safe_label} {time_str} {suffix}.txt"
 
     # MANIFEST-FIX: explicit overall verdict near the top. PARTIAL_FAILURE if any
     # result cell is not DONE (failed, skipped or otherwise incomplete).

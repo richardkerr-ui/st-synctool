@@ -776,13 +776,16 @@ class TestChainOfCustodyLog:
 
         assert "VERIFY: FAIL  clip.mov" in log_path.read_text()
 
-    def test_log_filename_has_4char_hex_suffix(self, tmp_path):
+    def test_log_filename_is_human_readable_and_date_grouped(self, tmp_path):
         src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
         dst = OffloadDest(label="NAS", path=tmp_path / "nas"); dst.path.mkdir()
 
         _, _, log_path = self._run([src], [dst])
-        # offload_<YYYYmmdd>_<HHMMSS>_<4 hex>.txt
-        assert _re.fullmatch(r"offload_\d{8}_\d{6}_[0-9a-f]{4}\.txt", log_path.name), log_path.name
+        # "Offload Reports/<YYYY-MM-DD>/<label> <HH.MM.SS> <4 hex>.txt"
+        assert _re.fullmatch(r"A001 \d{2}\.\d{2}\.\d{2} [0-9a-f]{4}\.txt",
+                             log_path.name), log_path.name
+        assert _re.fullmatch(r"\d{4}-\d{2}-\d{2}", log_path.parent.name), log_path.parent.name
+        assert log_path.parent.parent.name == "Offload Reports"
 
     def test_ds_store_never_appears_in_log(self, tmp_path):
         src_dir = tmp_path / "A001"

@@ -28,7 +28,8 @@ import humanize
 GOOGLE_DAILY_LIMIT_BYTES = 750 * 1024 ** 3
 
 # Where the daily upload tally is persisted.
-TALLY_PATH = Path.home() / "Documents" / "STSyncTool" / "upload_tally.json"
+from core import paths as _paths
+TALLY_PATH = _paths.upload_tally_path()
 
 
 # --------------------------------------------------------------------------- #

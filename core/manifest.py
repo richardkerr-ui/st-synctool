@@ -5,8 +5,9 @@ from typing import Optional, Callable
 from core.checksum import compute_all
 from core.comparison import is_ignored_path
 
+from core import paths as _paths
 MANIFEST_FILENAME = "st_manifest.json"
-LOCAL_MANIFEST_DIR = Path.home() / "Documents" / "STSyncTool" / "manifests"
+LOCAL_MANIFEST_DIR = _paths.manifests_dir()
 SCHEMA_VERSION = "1.2"
 
 # Fields backfilled when loading a manifest older than SCHEMA_VERSION.

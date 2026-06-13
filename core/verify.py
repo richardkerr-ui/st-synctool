@@ -39,7 +39,8 @@ ProgressCallback = Callable[[int, str], None]
 LogCallback = Callable[[str, str], None]
 
 # M5.4 — where persisted verify reports land.
-VERIFY_LOGS_DIR = Path.home() / "Documents" / "STSyncTool" / "logs"
+from core import paths as _paths
+VERIFY_LOGS_DIR = _paths.verify_reports_dir()
 
 # Files that legitimately live in a Drive folder without being in the manifest.
 _IGNORED_EXTRAS = frozenset(

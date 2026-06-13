@@ -23,8 +23,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-STSYNC_DIR = Path.home() / "Documents" / "STSyncTool"
-ACTIVITY_DIR = STSYNC_DIR / "activity"
+from core import paths as _paths
+STSYNC_DIR = _paths.base_dir()
+ACTIVITY_DIR = _paths.activity_dir()
 
 # How many days without a new summary line marks a workstation as stale.
 STALE_AFTER_DAYS = 7
@@ -204,7 +205,7 @@ def find_shards(activity_dir=ACTIVITY_DIR) -> list:
 
 
 # Local cache of other machines' shards downloaded from the org remote.
-ORG_CACHE_DIR = STSYNC_DIR / "activity_cache"
+ORG_CACHE_DIR = _paths.activity_cache_dir()
 
 
 def fetch_remote_shards(remote_base, cache_dir=ORG_CACHE_DIR, *, list_fn=None,
@@ -250,12 +251,12 @@ def find_local_log(filename: str, base_dir=STSYNC_DIR) -> Optional[Path]:
     if not filename:
         return None
     base = Path(base_dir)
-    for sub in ("logs", "offload_logs"):
+    for sub in _paths.FEEDBACK_SUBDIRS:
         cand = base / sub / filename
         if cand.is_file():
             return cand
     # Fall back to a recursive search in case of nested layouts.
-    for sub in ("logs", "offload_logs"):
+    for sub in _paths.FEEDBACK_SUBDIRS:
         d = base / sub
         if d.is_dir():
             for hit in d.rglob(filename):

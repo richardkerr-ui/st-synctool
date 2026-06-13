@@ -28,12 +28,13 @@ from typing import Callable, Optional
 
 from core import rclone_bridge
 
-STSYNC_DIR = Path.home() / "Documents" / "STSyncTool"
-LEDGER_PATH = STSYNC_DIR / "log_sync_ledger.json"
+from core import paths as _paths
+STSYNC_DIR = _paths.base_dir()
+LEDGER_PATH = _paths.log_sync_ledger_path()
 
 # Local subdirectories whose files are shipped (logs + manifest archive +
 # the per-machine activity shard written by core/activity_index.py).
-SHIP_SUBDIRS = ("offload_logs", "logs", "manifests", "activity")
+SHIP_SUBDIRS = _paths.SHIP_SUBDIRS
 
 # A file pending this many days escalates from the passive status line to a
 # gentle banner (still never a popup).

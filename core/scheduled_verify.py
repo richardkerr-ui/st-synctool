@@ -22,10 +22,11 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from core import verify as _verify
+from core import paths as _paths
 
 LAUNCH_AGENT_LABEL = "com.signaltheory.stsynctool.scheduledverify"
 LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
-STATE_PATH = _verify.VERIFY_LOGS_DIR / "scheduled_verify_state.json"
+STATE_PATH = _paths.scheduled_verify_state_path()
 
 # CLI flag the agent passes so the relaunched app knows to run a verify and quit.
 SCHEDULED_VERIFY_FLAG = "--scheduled-verify"

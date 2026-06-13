@@ -19,7 +19,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable, Optional
 
-CONTACT_SHEETS_DIR = Path.home() / "Documents" / "STSyncTool" / "contact_sheets"
+from core import paths as _paths
+CONTACT_SHEETS_DIR = _paths.contact_sheets_dir()
 
 # REDline ships inside REDCINE-X PRO (free download from red.com)
 _REDLINE_BUNDLE_PATH = Path("/Applications/REDCINE-X PRO.app/Contents/MacOS/REDline")

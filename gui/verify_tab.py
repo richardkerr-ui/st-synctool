@@ -330,7 +330,8 @@ class VerifyTab(QWidget):
         # Persist the consolidated report.
         import getpass, socket
         from datetime import datetime
-        log_dir = Path.home() / "Documents" / "STSyncTool" / "logs"
+        from core import paths as _paths
+        log_dir = _paths.verify_reports_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         report_path = log_dir / f"batch_verify_{ts}.txt"
@@ -399,7 +400,8 @@ class VerifyTab(QWidget):
     def _write_verify_report(self, results):
         import getpass, socket
         from datetime import datetime
-        log_dir = Path.home() / "Documents" / "STSyncTool" / "logs"
+        from core import paths as _paths
+        log_dir = _paths.verify_reports_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = log_dir / f"verify_{ts}.txt"

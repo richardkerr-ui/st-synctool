@@ -556,6 +556,22 @@ The **History** tab renders the merged index as readable rows ("Jun 12 · Cart 3
 
 ---
 
+## Where your files go
+
+Everything lives under `~/Documents/STSyncTool/`, organised for humans:
+
+| Folder | Contents |
+|--------|----------|
+| `Offload Reports/` | Chain-of-custody logs, grouped by date (`2026-06-13/A001 20.10.56 ….txt`) |
+| `Verify Reports/` | Verify, batch-verify and scheduled-verify reports |
+| `Transfer Reports/` | Transfer logs |
+| `Contact Sheets/` | Thumbnail contact-sheet PDFs |
+| `Manifests/` | Per-project `st_manifest.json` archives |
+| `projects.json` | The project registry |
+| `.app-state/` | Hidden machine state (shipping ledger, upload tally, scheduled-verify state, activity shards) — not meant to be opened |
+
+Paths are defined in one place (`core/paths.py`) and can be redirected with the `ST_SYNC_HOME` environment variable (the test suite uses this so it never writes into your real Documents).
+
 ## Known limitations
 
 - **Drive → Drive transfers run server-side.** Paste a Drive URL in both Source and Destination; rclone copies directly between the folders with no local disk used. Paranoid verify is unavailable for this direction (there are no local files to hash); verification relies on Drive checksums. The manifest is built from the destination's Drive metadata and saved to the central archive only. The 750 GB/day limit applies to server-side copies too and is enforced in pre-flight.

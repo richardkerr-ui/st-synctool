@@ -27,7 +27,8 @@ def fake_remote():
 
 
 def _write_shard(base_dir, ws, lines):
-    d = base_dir / "activity"
+    from core import paths as _paths
+    d = base_dir / _paths.ACTIVITY  # ".app-state/activity"
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"activity_{ws}.jsonl"
     p.write_text("".join(json.dumps(r) + "\n" for r in lines))
@@ -63,7 +64,8 @@ def test_ship_then_fetch_then_render_round_trip(fake_remote, tmp_path):
     fetched = activity_index.fetch_remote_shards(remote_base, cache)
     assert "activity_CartA.jsonl" in fetched
 
-    merged = activity_index.load_org_records(local_dir=machine_b / "activity",
+    from core import paths as _paths
+    merged = activity_index.load_org_records(local_dir=machine_b / _paths.ACTIVITY,
                                              cache_dir=cache)
     workstations = {r["workstation"] for r in merged}
     assert workstations == {"CartA", "CartB"}  # own + pulled

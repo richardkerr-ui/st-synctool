@@ -11,12 +11,12 @@ from core import log_sync
 @pytest.fixture
 def base(tmp_path):
     """A fake ~/Documents/STSyncTool with a couple of log files."""
-    (tmp_path / "offload_logs").mkdir()
-    (tmp_path / "offload_logs" / "offload_20260612_ab12.txt").write_text("log a")
-    (tmp_path / "logs").mkdir()
-    (tmp_path / "logs" / "verify_20260612.txt").write_text("verify log")
-    (tmp_path / "manifests" / "ProjX").mkdir(parents=True)
-    (tmp_path / "manifests" / "ProjX" / "st_manifest_20260612.json").write_text("{}")
+    (tmp_path / "Offload Reports").mkdir()
+    (tmp_path / "Offload Reports" / "offload_20260612_ab12.txt").write_text("log a")
+    (tmp_path / "Verify Reports").mkdir()
+    (tmp_path / "Verify Reports" / "verify_20260612.txt").write_text("verify log")
+    (tmp_path / "Manifests" / "ProjX").mkdir(parents=True)
+    (tmp_path / "Manifests" / "ProjX" / "st_manifest_20260612.json").write_text("{}")
     return tmp_path
 
 
@@ -37,9 +37,9 @@ def _collecting_copy():
 def test_enumerate_finds_all_files(base):
     found = {rel for rel, _abs, _size in log_sync.enumerate_shippable(base)}
     assert found == {
-        "offload_logs/offload_20260612_ab12.txt",
-        "logs/verify_20260612.txt",
-        "manifests/ProjX/st_manifest_20260612.json",
+        "Offload Reports/offload_20260612_ab12.txt",
+        "Verify Reports/verify_20260612.txt",
+        "Manifests/ProjX/st_manifest_20260612.json",
     }
 
 
@@ -55,9 +55,9 @@ def test_new_file_after_ship_is_detected(base, ledger_path):
     copy, calls = _collecting_copy()
     log_sync.ship_logs("gdrive:Activity", base_dir=base, ledger_path=ledger_path,
                        copy_fn=copy, workstation="cart3", user="rk")
-    (base / "logs" / "verify_20260613.txt").write_text("new")
+    (base / "Verify Reports" / "verify_20260613.txt").write_text("new")
     pend = log_sync.pending_files(base, log_sync._read_ledger(ledger_path))
-    assert [r for r, _a, _s in pend] == ["logs/verify_20260613.txt"]
+    assert [r for r, _a, _s in pend] == ["Verify Reports/verify_20260613.txt"]
 
 
 # ── shipping + ledger ────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ def test_ship_copies_to_namespaced_remote(base, ledger_path):
                              copy_fn=copy, workstation="cart3", user="rk")
     assert res.shipped == 3 and res.failed == 0 and res.all_clear
     remotes = {r for _l, r in calls}
-    assert "gdrive:Activity/cart3/rk/logs/verify_20260612.txt" in remotes
+    assert "gdrive:Activity/cart3/rk/Verify Reports/verify_20260612.txt" in remotes
     # ledger persisted
     led = json.loads(ledger_path.read_text())
     assert len(led["shipped"]) == 3
@@ -213,8 +213,8 @@ def test_ship_if_configured_noop_when_base_empty(tmp_path):
 
 
 def test_ship_if_configured_ships_when_configured(tmp_path):
-    (tmp_path / "logs").mkdir()
-    (tmp_path / "logs" / "custody.txt").write_text("x")
+    (tmp_path / "Verify Reports").mkdir()
+    (tmp_path / "Verify Reports" / "custody.txt").write_text("x")
     calls = []
     out = log_sync.ship_if_configured(base_dir=tmp_path, ledger_path=tmp_path / "l.json",
                                 copy_fn=lambda a, b: calls.append((a, b)),
@@ -229,8 +229,8 @@ def test_ship_if_configured_reads_settings(tmp_path, monkeypatch):
     cfg = tmp_path / "config.json"
     monkeypatch.setattr(settings, "SETTINGS_PATH", cfg)
     settings.set_activity_remote_base("gdrive:FromSettings", path=cfg)
-    (tmp_path / "logs").mkdir()
-    (tmp_path / "logs" / "c.txt").write_text("x")
+    (tmp_path / "Verify Reports").mkdir()
+    (tmp_path / "Verify Reports" / "c.txt").write_text("x")
     calls = []
     out = log_sync.ship_if_configured(base_dir=tmp_path, ledger_path=tmp_path / "l.json",
                                 copy_fn=lambda a, b: calls.append((a, b)))

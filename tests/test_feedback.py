@@ -41,27 +41,27 @@ def test_system_info_text_renders_labels():
 
 def test_gather_recent_logs_includes_subdirs(tmp_path):
     now = datetime(2026, 6, 13)
-    _write(tmp_path / "logs" / "verify_1.txt")
-    _write(tmp_path / "offload_logs" / "custody_1.txt")
+    _write(tmp_path / "Verify Reports" / "verify_1.txt")
+    _write(tmp_path / "Offload Reports" / "custody_1.txt")
     _write(tmp_path / "manifests" / "m.json")  # not a feedback subdir
     logs = feedback.gather_recent_logs(tmp_path, now=now)
     rels = {r for r, _ in logs}
-    assert rels == {"logs/verify_1.txt", "offload_logs/custody_1.txt"}
+    assert rels == {"Verify Reports/verify_1.txt", "Offload Reports/custody_1.txt"}
 
 
 def test_gather_recent_logs_skips_old(tmp_path):
     now = datetime(2026, 6, 13)
-    _write(tmp_path / "logs" / "fresh.txt", age_days=1, now=now)
-    _write(tmp_path / "logs" / "stale.txt", age_days=60, now=now)
+    _write(tmp_path / "Verify Reports" / "fresh.txt", age_days=1, now=now)
+    _write(tmp_path / "Verify Reports" / "stale.txt", age_days=60, now=now)
     rels = {r for r, _ in feedback.gather_recent_logs(tmp_path, now=now, max_age_days=14)}
-    assert rels == {"logs/fresh.txt"}
+    assert rels == {"Verify Reports/fresh.txt"}
 
 
 def test_gather_recent_logs_none_age_keeps_all(tmp_path):
     now = datetime(2026, 6, 13)
-    _write(tmp_path / "logs" / "stale.txt", age_days=400, now=now)
+    _write(tmp_path / "Verify Reports" / "stale.txt", age_days=400, now=now)
     rels = {r for r, _ in feedback.gather_recent_logs(tmp_path, now=now, max_age_days=None)}
-    assert rels == {"logs/stale.txt"}
+    assert rels == {"Verify Reports/stale.txt"}
 
 
 def test_gather_recent_logs_missing_base_is_empty(tmp_path):
@@ -70,8 +70,8 @@ def test_gather_recent_logs_missing_base_is_empty(tmp_path):
 
 def test_build_feedback_zip_contains_info_and_logs(tmp_path):
     now = datetime(2026, 6, 13, 9, 30, 0)
-    _write(tmp_path / "logs" / "verify_1.txt", text="hello")
-    _write(tmp_path / "offload_logs" / "custody_1.txt", text="world")
+    _write(tmp_path / "Verify Reports" / "verify_1.txt", text="hello")
+    _write(tmp_path / "Offload Reports" / "custody_1.txt", text="world")
     dest = tmp_path / "out" / "bundle.zip"
 
     bundle = feedback.build_feedback_zip(dest, base_dir=tmp_path, now=now)
@@ -85,9 +85,9 @@ def test_build_feedback_zip_contains_info_and_logs(tmp_path):
         names = set(zf.namelist())
         assert "system_info.txt" in names
         assert "system_info.json" in names
-        assert "logs/verify_1.txt" in names
-        assert "offload_logs/custody_1.txt" in names
-        assert zf.read("logs/verify_1.txt") == b"hello"
+        assert "Verify Reports/verify_1.txt" in names
+        assert "Offload Reports/custody_1.txt" in names
+        assert zf.read("Verify Reports/verify_1.txt") == b"hello"
         si = json.loads(zf.read("system_info.json"))
         assert si["app_version"] == APP_VERSION
         assert "os" in si
@@ -104,7 +104,7 @@ def test_build_feedback_zip_no_logs_still_has_info(tmp_path):
 
 def test_build_feedback_zip_atomic_no_tmp_left(tmp_path):
     now = datetime(2026, 6, 13)
-    _write(tmp_path / "logs" / "a.txt")
+    _write(tmp_path / "Verify Reports" / "a.txt")
     dest = tmp_path / "bundle.zip"
     feedback.build_feedback_zip(dest, base_dir=tmp_path, now=now)
     assert not (tmp_path / "bundle.zip.tmp").exists()
@@ -113,4 +113,4 @@ def test_build_feedback_zip_atomic_no_tmp_left(tmp_path):
 def test_default_bundle_path_timestamped(tmp_path):
     now = datetime(2026, 6, 13, 14, 5, 6)
     p = feedback.default_bundle_path(now=now, base_dir=tmp_path)
-    assert p == tmp_path / "logs" / "st_synctool_feedback_20260613_140506.zip"
+    assert p == tmp_path / "st_synctool_feedback_20260613_140506.zip"
