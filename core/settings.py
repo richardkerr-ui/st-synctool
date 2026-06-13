@@ -21,6 +21,14 @@ from typing import Any, Optional
 
 SETTINGS_PATH = Path.home() / ".config" / "st_synctool" / "config.json"
 
+# Shipped default for the org activity log. SET THIS ONCE the shared Google Drive
+# folder exists (e.g. "ST_SyncTool_Activity" — a folder in a Shared Drive every
+# user's rclone remote can reach). When non-empty, every install auto-derives its
+# activity remote base from its active remote (e.g. "gdrive:ST_SyncTool_Activity")
+# with zero per-user setup; a value typed in Settings still overrides it. Leave
+# empty to keep org shipping off until the folder is provisioned.
+DEFAULT_ACTIVITY_FOLDER = ""
+
 # Known setting keys and their defaults. Unknown keys are preserved on write but
 # are not part of the typed surface.
 DEFAULTS: dict = {
@@ -91,9 +99,24 @@ def set_setting(key: str, value: Any, *, path=None) -> dict:
 # Typed convenience accessors for the activity-log cluster
 # --------------------------------------------------------------------------- #
 
+def default_activity_remote_base(*, path=None) -> str:
+    """The shipped default base, derived from the active remote + DEFAULT_ACTIVITY_FOLDER.
+
+    Returns '' until DEFAULT_ACTIVITY_FOLDER is set; then e.g. the active remote
+    'gdrive' + folder 'ST_SyncTool_Activity' -> 'gdrive:ST_SyncTool_Activity'.
+    """
+    folder = DEFAULT_ACTIVITY_FOLDER.strip()
+    if not folder:
+        return ""
+    remote = (get_setting("active_remote", "gdrive", path=path) or "gdrive").rstrip(":")
+    return f"{remote}:{folder}"
+
+
 def activity_remote_base(*, path=None) -> str:
-    """The configured shared Drive remote base, or '' if unset. Trailing ':' kept."""
-    return (get_setting("activity_remote_base", "", path=path) or "").strip()
+    """The effective shared Drive remote base: an explicit Settings value (or the
+    env override) if set, otherwise the shipped default. '' when neither applies."""
+    explicit = (get_setting("activity_remote_base", "", path=path) or "").strip()
+    return explicit or default_activity_remote_base(path=path)
 
 
 def set_activity_remote_base(value: str, *, path=None) -> dict:

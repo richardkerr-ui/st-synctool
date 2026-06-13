@@ -28,6 +28,9 @@ Structured for execution via `/loop`. Milestones are ordered by dependency: hard
 
 The only checks still needing Richard. The GUI smoke/worker tests that older findings tag "needs one manual Mac run" are **no longer manual** — M7.2 CI runs the full pytest-qt suite on every push, so those are retired; do not re-run them by hand. What remains genuinely needs real rclone against real Drive, real hardware, or an account that CI cannot provide.
 
+**Before beta (provisioning, Richard):**
+- [ ] **Create the shared Drive folder + flip on org activity.** Make a folder in a Signal Theory **Shared Drive** (e.g. `ST_SyncTool_Activity`) every user's rclone remote can reach, then set `core/settings.DEFAULT_ACTIVITY_FOLDER = "ST_SyncTool_Activity"` (one constant) and rebuild. Every install then auto-derives its base (`{active_remote}:ST_SyncTool_Activity`) and ships with zero per-tester setup; the Settings field still overrides. Optionally point Synology Cloud Sync at the same folder so the NAS mirrors it. Until the constant is set, shipping stays a safe no-op.
+
 **Actionable now (nothing blocking it):**
 - [ ] **M5.1 deep-verify e2e** — tick "Deep verify (downloads files)" against a junk Drive folder, confirm files stream-download, hash and report.
 - [ ] **M10.3 ASC MHL external-tool round-trip** — generate a `.mhl` (tick "Export ASC MHL" on a transfer/offload), import it into Silverstack or YoYotta and confirm it verifies the files. Schema validation against the published XSD is already automated; this is the third-party-tool confirmation.

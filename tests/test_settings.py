@@ -98,3 +98,41 @@ def test_activity_log_configured_requires_base_and_toggle(cfg):
     assert settings.activity_log_configured(path=cfg) is True
     settings.set_log_shipping_enabled(False, path=cfg)
     assert settings.activity_log_configured(path=cfg) is False  # opted out
+
+
+# --------------------------------------------------------------------------- #
+# Shipped default activity remote base (derived from active remote + folder)
+# --------------------------------------------------------------------------- #
+
+def test_default_base_empty_when_folder_unset(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "DEFAULT_ACTIVITY_FOLDER", "")
+    assert settings.default_activity_remote_base(path=tmp_path / "c.json") == ""
+
+
+def test_default_base_derives_from_active_remote(tmp_path, monkeypatch):
+    cfg = tmp_path / "c.json"
+    monkeypatch.setattr(settings, "DEFAULT_ACTIVITY_FOLDER", "ST_SyncTool_Activity")
+    settings.set_setting("active_remote", "gdrive", path=cfg)
+    assert settings.default_activity_remote_base(path=cfg) == "gdrive:ST_SyncTool_Activity"
+
+
+def test_activity_remote_base_falls_back_to_default(tmp_path, monkeypatch):
+    cfg = tmp_path / "c.json"
+    monkeypatch.setattr(settings, "DEFAULT_ACTIVITY_FOLDER", "ST_SyncTool_Activity")
+    # No explicit base set -> derives the shipped default.
+    assert settings.activity_remote_base(path=cfg) == "gdrive:ST_SyncTool_Activity"
+    assert settings.activity_log_configured(path=cfg) is True
+
+
+def test_explicit_base_overrides_default(tmp_path, monkeypatch):
+    cfg = tmp_path / "c.json"
+    monkeypatch.setattr(settings, "DEFAULT_ACTIVITY_FOLDER", "ST_SyncTool_Activity")
+    settings.set_activity_remote_base("gdrive:Custom", path=cfg)
+    assert settings.activity_remote_base(path=cfg) == "gdrive:Custom"
+
+
+def test_no_default_keeps_shipping_off(tmp_path, monkeypatch):
+    cfg = tmp_path / "c.json"
+    monkeypatch.setattr(settings, "DEFAULT_ACTIVITY_FOLDER", "")
+    assert settings.activity_remote_base(path=cfg) == ""
+    assert settings.activity_log_configured(path=cfg) is False

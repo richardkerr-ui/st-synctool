@@ -53,7 +53,14 @@ class SettingsDialog(QDialog):
         root.addWidget(buttons)
 
     def _load(self):
-        self.remote_base_input.setText(app_settings.activity_remote_base())
+        # Show only an explicitly-set value; leave the field empty when relying on
+        # the shipped default, and surface that default as placeholder text so the
+        # user sees what shipping will use if they leave it blank.
+        explicit = app_settings.get_setting("activity_remote_base", "") or ""
+        self.remote_base_input.setText(explicit)
+        default = app_settings.default_activity_remote_base()
+        if default:
+            self.remote_base_input.setPlaceholderText(f"{default}  (shipped default)")
         self.shipping_chk.setChecked(app_settings.log_shipping_enabled())
 
     def _save(self):
