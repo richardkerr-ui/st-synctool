@@ -49,15 +49,16 @@ class ActivityRecord:
         return json.dumps(asdict(self), sort_keys=True)
 
 
-def shard_path(workstation: Optional[str] = None, *, activity_dir=ACTIVITY_DIR) -> Path:
+def shard_path(workstation: Optional[str] = None, *, activity_dir=None) -> Path:
     ws = workstation or socket.gethostname()
-    return Path(activity_dir) / f"activity_{ws}.jsonl"
+    base = Path(activity_dir) if activity_dir is not None else ACTIVITY_DIR
+    return base / f"activity_{ws}.jsonl"
 
 
 def append_activity(
     record: ActivityRecord,
     *,
-    activity_dir=ACTIVITY_DIR,
+    activity_dir=None,
 ) -> Path:
     """Append one summary line to this machine's shard, atomically.
 
@@ -70,6 +71,54 @@ def append_activity(
     with path.open("a", encoding="utf-8") as fh:
         fh.write(record.to_json() + "\n")
     return path
+
+
+def record_from_manifest(
+    manifest: dict,
+    *,
+    operation: str,
+    source: str = "",
+    dests: Optional[list] = None,
+    verdict: str = "",
+    log_filename: str = "",
+    now: Optional[datetime] = None,
+) -> ActivityRecord:
+    """Build an ActivityRecord from a manifest dict, deriving project/counts/bytes.
+
+    `file_count` and `bytes` fall back to summing the manifest's files when the
+    top-level totals are absent, so it works for any manifest shape.
+    """
+    files = manifest.get("files", {}) or {}
+    file_count = manifest.get("file_count")
+    if file_count is None:
+        file_count = len(files)
+    total_bytes = manifest.get("total_size_bytes")
+    if total_bytes is None:
+        total_bytes = sum(int((f or {}).get("size") or 0) for f in files.values())
+    return record_for(
+        operation,
+        project=manifest.get("project_id") or manifest.get("label") or "",
+        source=source,
+        dests=dests or [],
+        file_count=int(file_count or 0),
+        bytes=int(total_bytes or 0),
+        verdict=verdict,
+        log_filename=log_filename,
+        now=now,
+        workstation=manifest.get("workstation") or None,
+        user=manifest.get("user") or None,
+    )
+
+
+def safe_append_activity(record: ActivityRecord, *, activity_dir=None, log_cb=None):
+    """Append an activity record, never raising — a logging failure must not
+    affect the operation that produced it. Returns the shard path or None."""
+    try:
+        return append_activity(record, activity_dir=activity_dir)
+    except Exception as exc:  # pragma: no cover - defensive
+        if log_cb:
+            log_cb(f"Activity not recorded: {exc}", "warning")
+        return None
 
 
 def record_for(

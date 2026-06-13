@@ -1278,6 +1278,23 @@ def run_offload(
     log_path = write_chain_of_custody_log(
         active_sources, active_dests, flat, source_manifests, ts
     )
+
+    # M9.2: record one activity-index line per source (local-only, never raises).
+    from core.activity_index import record_from_manifest, safe_append_activity
+    from core.clearance import compute_clearance
+    dest_labels = [d.label for d in active_dests]
+    log_name = Path(log_path).name if log_path else ""
+    for src in active_sources:
+        smfst = source_manifests.get(src.label)
+        if not smfst:
+            continue
+        cleared = compute_clearance(src.label, flat).cleared
+        safe_append_activity(
+            record_from_manifest(
+                smfst, operation="offload", source=src.label, dests=dest_labels,
+                verdict="VERIFIED" if cleared else "NOT_CLEARED", log_filename=log_name,
+            ), log_cb=log_cb)
+
     return flat, source_manifests, log_path
 
 

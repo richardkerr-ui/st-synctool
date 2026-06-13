@@ -134,3 +134,73 @@ def test_staleness_ignores_bad_rows():
     ]
     result = ai.staleness(recs, now=now)
     assert [s.workstation for s in result] == ["z"]
+
+
+# --------------------------------------------------------------------------- #
+# M9.2 wiring helpers: record_from_manifest + safe_append_activity
+# --------------------------------------------------------------------------- #
+
+def _manifest(**over):
+    m = {
+        "label": "ProjectX", "project_id": "projx", "workstation": "Cart 9",
+        "user": "dit", "file_count": 3, "total_size_bytes": 9000,
+        "files": {"a": {"size": 1000}, "b": {"size": 3000}, "c": {"size": 5000}},
+    }
+    m.update(over)
+    return m
+
+
+def test_record_from_manifest_derives_fields():
+    r = ai.record_from_manifest(_manifest(), operation="offload", source="A001",
+                                dests=["NAS", "Shuttle"], verdict="VERIFIED",
+                                log_filename="cust.txt",
+                                now=datetime(2026, 6, 13, 9, 0, 0))
+    assert r.operation == "offload"
+    assert r.project == "projx"
+    assert r.workstation == "Cart 9"
+    assert r.user == "dit"
+    assert r.file_count == 3
+    assert r.bytes == 9000
+    assert r.dests == ["NAS", "Shuttle"]
+    assert r.verdict == "VERIFIED"
+    assert r.log_filename == "cust.txt"
+    assert r.timestamp == "2026-06-13T09:00:00"
+
+
+def test_record_from_manifest_falls_back_to_file_sums():
+    m = _manifest()
+    del m["file_count"]; del m["total_size_bytes"]
+    r = ai.record_from_manifest(m, operation="transfer")
+    assert r.file_count == 3
+    assert r.bytes == 9000  # summed from files
+
+
+def test_safe_append_activity_writes(activity_dir):
+    r = ai.record_from_manifest(_manifest(), operation="offload")
+    path = ai.safe_append_activity(r, activity_dir=activity_dir)
+    assert path.exists()
+    recs = ai.load_shard(path)
+    assert recs[0]["operation"] == "offload"
+
+
+def test_safe_append_activity_swallows_errors(monkeypatch):
+    msgs = []
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(ai, "append_activity", boom)
+    out = ai.safe_append_activity(_rec(), log_cb=lambda m, l: msgs.append(m))
+    assert out is None
+    assert msgs and "not recorded" in msgs[0]
+
+
+def test_transfer_folder_appends_activity(tmp_path, monkeypatch):
+    from core import transfer
+    monkeypatch.setattr(ai, "ACTIVITY_DIR", tmp_path / "activity")
+    src = tmp_path / "src"; src.mkdir()
+    (src / "clip.txt").write_text("data")
+    dst = tmp_path / "dst"
+    transfer.transfer_folder(src, dst)
+    shards = ai.find_shards(tmp_path / "activity")
+    assert shards, "transfer should write an activity shard"
+    recs = ai.merge_shards(shards)
+    assert any(r["operation"] == "transfer" for r in recs)

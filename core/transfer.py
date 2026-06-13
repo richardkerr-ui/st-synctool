@@ -235,6 +235,16 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None,
     saved = save_manifest(manifest, source_dir=src, dest_dir=actual_dest, name_hint=src.name)
     log(f"  Manifest saved to {len(saved)} locations")
     _maybe_export_mhl(manifest, saved, export_mhl, log)
+
+    # M9.2: record this job in the local per-machine activity index (local-only,
+    # never raises). Shipping to the org folder is a separate step (M9.1).
+    from core.activity_index import record_from_manifest, safe_append_activity
+    safe_append_activity(
+        record_from_manifest(
+            manifest, operation="transfer", source=src.name,
+            dests=[actual_dest.name], verdict="COMPLETE" if not errors else "PARTIAL",
+        ), log_cb=log_cb)
+
     return {
         "manifest": manifest, "saved_manifest_paths": [str(p) for p in saved],
         "errors": errors, "actual_dest": str(actual_dest), "same_name": same_name,
