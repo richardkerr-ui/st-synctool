@@ -1,12 +1,12 @@
 # ST SyncTool Quick Start
 
-A one-page guide to the three core flows: offload a card, merge a project and verify an archive. No terminal or developer knowledge needed.
+A one-page guide to the everyday flows: transfer files, offload a card, merge a project, verify an archive and review activity. No terminal or developer knowledge needed.
 
-When you launch the app you see four tabs across the top: **Transfer**, **Merge**, **Offload** and **Verify**. The running version is shown top-right next to the **Report a Problem** and **Tour** buttons.
+When you launch the app you see five tabs across the top: **Transfer**, **Merge**, **Offload**, **Verify** and **History**. Top-right are **Settings**, **Report a Problem** and **? Tour**, with the running version beside them.
 
 ![ST SyncTool overview](screenshots/00_overview.png)
 
-> **Tip:** every tab has a **Use demo folder** link or a tour that loads safe zero-byte sample files, so you can practice each flow without touching real media. Press **? Tour** any time for a guided walkthrough.
+> **Tip:** every tab has demo data or a guided tour, so you can practice each flow without touching real media. Press **? Tour** any time for a walkthrough.
 
 ---
 
@@ -19,7 +19,7 @@ Use the **Transfer** tab for a straightforward copy from one location to another
 1. Open the **Transfer** tab.
 2. Set **Source** and **Destination** with **Browse...**, or paste a path or a Google Drive URL into either field. **Use demo folder** fills both with safe sample folders to practice on.
 3. The pre-flight summary shows source size, free space at the destination and an estimated time before you start.
-4. Pick an **On conflict** policy: Overwrite, Skip or a preserve option. Optional: tick **Paranoid verification** to re-hash every file after copying, or **Auto-extract multipart .zips** to unpack archives on arrival.
+4. Pick an **On conflict** policy: Overwrite, Skip or a preserve option. Optional: tick **Paranoid verification** to re-hash every file after copying, **Auto-extract multipart .zips** to unpack archives on arrival, or **Export ASC MHL (.mhl)** to write an industry-standard sidecar a post house can verify in Silverstack or YoYotta.
 5. Click **Start Transfer**. The log records every file, and a manifest is written when it finishes. Use **Generate Manifest Only** to fingerprint a folder without copying.
 
 Drive to Drive transfers run server-side, so no local disk space is used.
@@ -37,7 +37,7 @@ Use the **Offload** tab to copy a camera card to one or more destinations with f
 1. Open the **Offload** tab.
 2. Under **Sources (read-only)**, click **Browse...** on Source 1 and pick the card or folder. The app auto-detects inserted media cards when **Auto-detect media cards** is ticked. Click **+ Add Source** to offload more than one card at once.
 3. Under **Destinations**, click **Browse...** on Dest 1 and pick the first destination (for example a shuttle drive). Click **+ Add Destination** to copy to a second location in the same run. Two clean destinations is what unlocks the "safe to format" clearance.
-4. Optional: tick **Contact sheets** for thumbnail sheets, or **Stop on first destination failure** to halt if any destination errors.
+4. Optional: tick **Contact sheets** for thumbnail sheets, **Export ASC MHL** for a delivery sidecar, or **Stop on first destination failure** to halt if any destination errors.
 5. Click **Start Offload**. Progress shows per destination in the status area, and the log records every file.
 6. When it finishes, each source shows a clearance verdict. A green **"All N files verified on K destinations. Card is safe to format"** appears only when at least two destinations verified clean. Otherwise an amber notice explains why it is not cleared.
 
@@ -72,13 +72,30 @@ Use the **Verify** tab to confirm an archive still matches its manifest, file by
 4. Click **Run Verification**. The summary tiles show OK, Extra files, Missing and Mismatch counts, and the results log lists every file.
 5. To check every registered project at once, click **Verify All Projects** for a single consolidated report.
 
-A verify report is saved to `~/Documents/STSyncTool/logs/` after each run.
+A verify report is saved to `~/Documents/STSyncTool/Verify Reports/` after each run.
 
 ---
 
-## Reporting a problem
+## 5. Review activity (History)
 
-If something goes wrong, click **Report a Problem** in the top-right. It bundles your recent logs plus the app version and OS info into a single zip, then reveals it in Finder. Attach that zip to an email describing what happened. Nothing is uploaded automatically.
+Use the **History** tab to see every offload, transfer, merge and verify — across every machine in the team — in one filterable list.
+
+![History tab](screenshots/05_history.png)
+
+1. Open the **History** tab. Your own machine's jobs appear instantly and work offline.
+2. Use the **Operation / Workstation / User / Project** dropdowns to filter. Each row shows the date, machine, operation, a one-line summary and the verdict (VERIFIED, COMPLETE, FAIL and so on).
+3. Click **Refresh org activity** to pull other machines' summaries (kilobytes, never the raw files) so you see the whole team's work.
+4. **Double-click a row** to open that job's custody log (for jobs run on this machine).
+5. If a machine stops reporting, a banner flags it (for example "1 machine has not reported recently: Cart-3") so nothing silently falls off the backup.
+
+Activity ships automatically to the shared team folder — no setup needed.
+
+---
+
+## Settings and reporting a problem
+
+- **Settings** (top-right) holds the shared-folder options for the org-wide History. It comes pre-configured, so most users never need to open it.
+- **Report a Problem** (top-right) bundles your recent logs plus the app version and OS info into a single zip and reveals it in Finder. Attach that zip to an email describing what happened — nothing is uploaded automatically.
 
 ---
 

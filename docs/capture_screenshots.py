@@ -14,10 +14,14 @@ the demo folders are zero-byte stubs created under Application Support.
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Render against a clean, throwaway home so captures never show real-folder
+# clutter (e.g. a "reports waiting to upload" banner from leftover files).
+os.environ.setdefault("ST_SYNC_HOME", tempfile.mkdtemp(prefix="st_sync_shots_"))
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -143,6 +147,14 @@ def main():
     except Exception as e:
         print(f"  (verify prep skipped: {e})")
     _save(app, window, "04_verify.png")
+
+    # 5. History tab — demo activity (incl. a stale machine for the banner).
+    window.tabs.setCurrentIndex(idx["History"])
+    try:
+        window._history_tab.load_demo_data()
+    except Exception as e:
+        print(f"  (history prep skipped: {e})")
+    _save(app, window, "05_history.png")
 
     print("Done.")
 
