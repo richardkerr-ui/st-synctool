@@ -184,7 +184,12 @@ class TestMainWindowSmoke:
         monkeypatch.setattr(ot.OffloadTab, "_start_volume_watcher", lambda self: None)
         monkeypatch.setattr(mt.project_registry, "list_projects", lambda: [])
         monkeypatch.setattr(proj, "list_dest_presets", lambda: [])
-        # M7.5: keep the launch update-check off the network in tests.
+        # Suppress background workers that pytest-qt's event pumping would fire
+        # mid-suite: the auth startup worker can call _launch_wizard (a modal that
+        # aborts headlessly), and the M7.5 update-check spawns a network thread.
+        # Both are correct in the live app; tests must not trigger them.
+        monkeypatch.setattr(mw._StartupCheckWorker, "start", lambda self: None)
+        monkeypatch.setattr(mw.MainWindow, "_start_update_check", lambda self: None)
         monkeypatch.setattr(mw.update_check, "check_for_update", lambda *a, **k: None)
 
         w = mw.MainWindow()

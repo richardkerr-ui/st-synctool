@@ -157,9 +157,12 @@ class MainWindow(QMainWindow):
         self._refresh_scheduled_verify_banner()
 
         # M7.5: update-available banner (hidden until a newer release is found).
+        # Defer the check onto the event loop so it only runs in the live app,
+        # never during bare construction in tests (avoids a QThread outliving
+        # the window at teardown).
         self._update_banner = self._build_update_banner()
         root.addWidget(self._update_banner)
-        self._start_update_check()
+        QTimer.singleShot(0, self._start_update_check)
 
         # Tutorial overlay (parented to central widget so it covers the tabs)
         # Created here so tab references are valid; started later.
