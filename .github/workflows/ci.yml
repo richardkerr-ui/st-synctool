@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: pytest (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install pytest-cov
+
+      - name: Run full test suite (incl. PyQt6 GUI tests)
+        # The macOS runner has no display, so render Qt off-screen. This is the
+        # one environment where the pytest-qt GUI tests run automatically; the
+        # Linux dev sandbox cannot (no PyQt6), so they are excluded there.
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          pytest -q --cov=core --cov=utils --cov-report=term-missing

@@ -1,5 +1,7 @@
 # ST SyncTool
 
+[![CI](https://github.com/richardkerr-ui/st-synctool/actions/workflows/ci.yml/badge.svg)](https://github.com/richardkerr-ui/st-synctool/actions/workflows/ci.yml)
+
 A desktop sync tool for reconciling production files between local SSDs and Google Drive (or a NAS), built for Signal Theory's video production workflow.
 
 Handles multi-GB video / audio / PSD / After Effects assets without re-uploading the world every time someone tweaks a comp.
