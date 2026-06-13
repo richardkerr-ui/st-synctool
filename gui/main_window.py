@@ -590,9 +590,9 @@ class MainWindow(QMainWindow):
                 "widget": None,
                 "title":  "Welcome to ST SyncTool",
                 "body":   (
-                    "This quick tour walks you through the four main tabs: "
-                    "Transfer, Merge, Offload, and Verify. "
-                    "You can skip at any time and replay it via the '? Tour' button."
+                    "This quick tour walks you through the five tabs — Transfer, "
+                    "Merge, Offload, Verify and History — plus Settings and "
+                    "Report a Problem. Skip any time and replay it via '? Tour'."
                 ),
             },
 
@@ -600,11 +600,12 @@ class MainWindow(QMainWindow):
             {
                 "tab":    0,
                 "widget": lambda: self.tabs.tabBar(),
-                "title":  "Four-tab workflow",
+                "title":  "The workflow",
                 "body":   (
                     "Work flows left to right: Transfer files in, Merge "
-                    "conflicts, Offload to drives, then Verify integrity. "
-                    "Each tab is independent — use only the ones you need."
+                    "conflicts, Offload to drives, Verify integrity — and "
+                    "History shows every job across all machines. Each tab is "
+                    "independent; use only the ones you need."
                 ),
                 "padding": 4,
             },
@@ -637,6 +638,17 @@ class MainWindow(QMainWindow):
                     "Controls what happens when a file already exists at "
                     "the destination: Skip (leave it), Overwrite (replace it), "
                     "or Rename Copy (keep both). Overwrite is the default."
+                ),
+            },
+            {
+                "tab":    0,
+                "widget": lambda: tt.export_mhl_chk,
+                "title":  "Export ASC MHL",
+                "body":   (
+                    "Tick this to also write an industry-standard ASC MHL (.mhl) "
+                    "sidecar next to the manifest, so post houses can verify your "
+                    "delivery in Silverstack, YoYotta and similar — without "
+                    "trusting our app."
                 ),
             },
             {
@@ -716,12 +728,33 @@ class MainWindow(QMainWindow):
             },
             {
                 "tab":    2,
+                "widget": lambda: ot._thumb_check,
+                "title":  "Contact sheets & MHL",
+                "body":   (
+                    "Optionally generate thumbnail contact sheets per card, and "
+                    "tick 'Export ASC MHL' to write a .mhl alongside each manifest "
+                    "for post-house verification."
+                ),
+            },
+            {
+                "tab":    2,
                 "widget": lambda: ot._start_btn,
                 "title":  "Start Offload",
                 "body":   (
                     "Copies all sources to all destinations simultaneously with "
                     "paranoid checksum verification. Designed for end-of-day "
                     "camera card offloads to two drives at once."
+                ),
+            },
+            {
+                "tab":    2,
+                "widget": lambda: ot._start_btn,
+                "title":  "\"Safe to format\" clearance",
+                "body":   (
+                    "After an offload, each source shows a verdict. You only get a "
+                    "green \"safe to format\" once at least TWO destinations verified "
+                    "clean — otherwise it's amber with the reason. Never wipe a card "
+                    "on a single copy."
                 ),
             },
 
@@ -750,8 +783,72 @@ class MainWindow(QMainWindow):
                     "was corrupted in transit."
                 ),
             },
+            {
+                "tab":    3,
+                "widget": lambda: vt.deep_chk,
+                "title":  "Deep verify (Drive)",
+                "body":   (
+                    "For a Google Drive folder, tick this to stream every file "
+                    "back and re-hash it, instead of trusting Drive's metadata. "
+                    "It uses bandwidth, so an estimate is shown up front."
+                ),
+            },
+            {
+                "tab":    3,
+                "widget": lambda: vt.batch_btn,
+                "title":  "Verify all projects",
+                "body":   (
+                    "Re-verify every registered project in one run and get a "
+                    "consolidated report — handy for periodically re-checking "
+                    "your whole archive."
+                ),
+            },
 
-            # ── Auth / header ─────────────────────────────────────────────
+            # ── History tab ───────────────────────────────────────────────
+            {
+                "tab":    4,
+                "widget": lambda: self.tabs.tabBar(),
+                "title":  "History — org-wide activity",
+                "body":   (
+                    "Every offload, transfer, merge and verify across all "
+                    "machines, in one list. Your own jobs show instantly and "
+                    "offline; this is the single record of who did what, when."
+                ),
+                "padding": 4,
+            },
+            {
+                "tab":    4,
+                "widget": lambda: self._history_tab.refresh_btn,
+                "title":  "Refresh org activity",
+                "body":   (
+                    "Pulls the other machines' summaries (kilobytes, never the "
+                    "raw logs) so you see the whole org. Use the dropdowns to "
+                    "filter by operation, machine, user or project, and "
+                    "double-click a row to open its custody log."
+                ),
+            },
+
+            # ── Header: Settings, Report a Problem, account ───────────────
+            {
+                "tab":    None,
+                "widget": lambda: self._settings_btn,
+                "title":  "Settings",
+                "body":   (
+                    "Configure the shared Drive folder your activity logs ship "
+                    "to (pre-set for Signal Theory) and toggle log shipping. "
+                    "Most users never need to touch this."
+                ),
+            },
+            {
+                "tab":    None,
+                "widget": lambda: self._feedback_btn,
+                "title":  "Report a Problem",
+                "body":   (
+                    "Hit a bug? This bundles your recent logs plus app and OS "
+                    "info into a single zip and reveals it in Finder — just email "
+                    "it to us. Nothing is uploaded automatically."
+                ),
+            },
             {
                 "tab":    None,
                 "widget": lambda: self._account_label,

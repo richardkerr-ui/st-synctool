@@ -304,6 +304,25 @@ class TestMainWindowSmoke:
         for i in range(window.tabs.count()):
             window.tabs.setCurrentIndex(i)  # must not raise
 
+    def test_tutorial_steps_reference_real_widgets(self, window):
+        # Every tour step's widget lambda must resolve to a live QWidget — guards
+        # against typo'd attribute names after GUI changes. (on_show not invoked.)
+        from PyQt6.QtWidgets import QWidget
+        steps = window._build_tutorial_steps()
+        assert len(steps) >= 20  # comprehensive tour across all five tabs
+        for step in steps:
+            w = step.get("widget")
+            if w is not None:
+                resolved = w()
+                assert isinstance(resolved, QWidget), step.get("title")
+
+    def test_tutorial_covers_new_features(self, window):
+        titles = {s["title"] for s in window._build_tutorial_steps()}
+        for expected in ("Export ASC MHL", "Deep verify (Drive)",
+                         "History — org-wide activity", "Settings",
+                         "Report a Problem"):
+            assert expected in titles, expected
+
     # M11.2: Settings
     def test_settings_button_present(self, window):
         assert hasattr(window, "_settings_btn")
