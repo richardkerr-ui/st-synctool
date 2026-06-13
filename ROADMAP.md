@@ -114,9 +114,10 @@ Blackmagic offers no lightweight official CLI. Spike (max 1 day): evaluate (a) f
 
 Intended outcome: move Verify from "spot-check on demand" toward archival assurance, in three independent steps. Richard approved M5.1 and M5.2 on 2026-06-12; M5.3 stays parked unless archives fail in the field.
 
-### M5.0 Extract verify logic to core/ (prep, small)
+### M5.0 Extract verify logic to core/ (prep, small) ✅ DONE 2026-06-12 (GUI tests need one manual Mac run)
 `VerifyWorker._verify_local` currently lives in `gui/verify_tab.py` (PyQt6), so its hash loop is only testable on macOS and is mirrored by hand in the contract tests. Move the verification loop into `core/` (e.g. `core/verify.py`), leave a thin Qt worker that emits signals. Prerequisite for M5.1 and M5.2 so their logic lands headlessly testable.
 **Done when:** verify logic imports cleanly without PyQt6, existing verify behavior unchanged, contract tests use the real function instead of the mirror and GUI tests still pass on the Mac.
+**Findings:** New `core/verify.py` (no PyQt6 import): `verify_local`, `verify_gdrive` and a `verify_folder` URL dispatcher, all taking optional `progress_cb(pct, path)` / `log_cb(msg, level)` callbacks and returning the same per-file result dicts as before (`OK/MISSING/MISMATCH/FORMAT_FAIL` plus the additive `format_status`/`format_detail`). Logic moved verbatim — behavior unchanged. `verify_gdrive` now *raises* `RuntimeError` on an rclone failure instead of swallowing it via an error signal; the worker catches and emits `error()`. `gui/verify_tab.py::VerifyWorker` is now a thin adapter: `run()` calls `verify_folder` with callbacks wired to its Qt signals (dropped the duplicated `_verify_local`/`_verify_gdrive`/`_expected_checksums` and the now-unused `logging`, `compute_all`, `media_verify` imports). The contract-test mirror in `test_manifest_writer_reader_matrix.py` now drives the real `core.verify.verify_local` instead of a hand-copied loop. New `tests/test_verify.py` (24 tests): local OK/MISSING/MISMATCH, empty-expected, dest>checksums precedence, callbacks, FORMAT_FAIL override, advisory keeps OK, media-verify exception swallowed; gdrive OK/MISSING/MISMATCH, no-common-hash, lsjson failure raises, extras logged; dispatcher both ways. Suite 1225 → **1240 passed**, core+utils coverage held at **88%**, `core/verify.py` 95%. **Pending one manual Mac run** of `tests/test_drive_verify.py` (the real Qt `VerifyWorker`, PyQt6-only) to confirm the thin adapter still drives end-to-end; covered automatically once M7.2 CI lands.
 
 ### M5.1 Deep Drive verify (small)
 Optional "Deep verify (downloads files)" checkbox for Drive folders. Streams each file through rclone to a temp hash (`rclone cat | sha256`), no full local copy retained. Honest progress estimate shown up front since this is bandwidth-bound. Default remains the 1-second metadata check.
@@ -247,6 +248,6 @@ Export an ASC Media Hash List (.mhl) alongside `st_manifest.json` so post houses
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 (manual e2e pending) → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 → M5.1 → M5.2 → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M8 → M10.3.
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 (manual e2e pending) → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 → M5.2 → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M8 → M10.3.
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.

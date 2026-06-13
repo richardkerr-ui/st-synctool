@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
@@ -9,10 +8,9 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from core.manifest import load_manifest
-from core.checksum import compute_all
 from gui import theme
 from core import rclone_bridge
-import core.media_verify as _media_verify
+from core import verify as _verify
 from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
 
 
@@ -28,164 +26,17 @@ class VerifyWorker(QObject):
         self.manifest = manifest
 
     def run(self):
+        # M5.0: all verification logic now lives in core.verify (headless,
+        # testable). This worker is a thin adapter wiring callbacks to signals.
         try:
-            if is_gdrive_url(str(self.folder)):
-                self._verify_gdrive()
-            else:
-                self._verify_local()
+            results = _verify.verify_folder(
+                self.folder, self.manifest,
+                progress_cb=lambda pct, path: self.progress.emit(pct, path),
+                log_cb=lambda msg, level: self.log.emit(msg, level),
+            )
+            self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
-
-    def _expected_checksums(self, entry):
-        """Pull the most authoritative checksum block out of a manifest entry."""
-        return (entry.get("dest_checksums")
-                or entry.get("source_checksums")
-                or entry.get("checksums", {}))
-
-    def _verify_local(self):
-        folder = Path(self.folder)
-        files = self.manifest.get("files", {})
-        total = max(len(files), 1)
-        results = []
-        _seq_dirs_seen: set = set()
-
-        for i, (rel_path, entry) in enumerate(files.items()):
-            self.progress.emit(int(i / total * 100), rel_path)
-            abs_path = folder / rel_path
-
-            if not abs_path.exists():
-                results.append({"path": rel_path, "status": "MISSING",
-                                "detail": "File not found on disk"})
-                self.log.emit(f"  MISSING: {rel_path}", "error")
-                continue
-
-            expected_cs = self._expected_checksums(entry)
-            algo = ("sha256" if "sha256" in expected_cs else
-                    "xxhash3_64" if "xxhash3_64" in expected_cs else "md5")
-            actual = compute_all(
-                abs_path,
-                include_xxhash=(algo == "xxhash3_64"),
-                include_md5=(algo == "md5"),
-            )
-            expected_val = (expected_cs.get(algo) or "").lower()
-            actual_val   = (actual.get(algo) or "").lower()
-
-            hash_ok = expected_val == actual_val and bool(expected_val)
-            if hash_ok:
-                result = {"path": rel_path, "status": "OK",
-                          "detail": f"{algo}: {actual_val[:16]}..."}
-                self.log.emit(f"  OK: {rel_path}", "success")
-            else:
-                result = {"path": rel_path, "status": "MISMATCH",
-                          "detail": f"Expected {expected_val[:16]}... | Got {actual_val[:16]}..."}
-                self.log.emit(f"  MISMATCH: {rel_path}", "error")
-
-            # ── Format-specific media verification (additive) ─────────────
-            try:
-                mv_result = _media_verify.verify_file(
-                    abs_path, abs_path, _seq_dirs_seen
-                )
-            except Exception as mv_exc:
-                logging.getLogger(__name__).warning(
-                    "[MediaVerify] Unexpected error for %s: %s", rel_path, mv_exc
-                )
-                mv_result = None
-
-            if mv_result is not None:
-                if not mv_result.ok and not mv_result.advisory:
-                    result["format_status"] = "FAILED"
-                    result["format_detail"] = mv_result.detail
-                    if hash_ok:
-                        result["status"] = "FORMAT_FAIL"
-                    self.log.emit(
-                        f"  FORMAT FAIL: {rel_path} — {mv_result.detail}", "error"
-                    )
-                elif mv_result.advisory:
-                    result["format_status"] = "ADVISORY"
-                    result["format_detail"] = mv_result.detail
-                else:
-                    result["format_status"] = "OK"
-                    result["format_detail"] = mv_result.detail
-
-            results.append(result)
-
-        self.progress.emit(100, "Complete")
-        self.finished.emit(results)
-
-    def _verify_gdrive(self):
-        """Verify a Drive folder by pulling hashes via rclone lsjson and comparing
-        to the manifest. No file downloads — purely metadata-based."""
-        self.log.emit("Fetching Drive folder hashes via rclone lsjson...", "info")
-        remote, flags = gdrive_url_to_rclone(str(self.folder))
-        try:
-            items = rclone_bridge.lsjson(remote, extra_flags=flags, with_checksum=True)
-        except Exception as e:
-            self.error.emit(f"rclone lsjson failed: {e}")
-            return
-
-        # Build {rel_path: hashes_dict} from Drive listing
-        drive_files = {}
-        for item in items:
-            if item.get("IsDir"):
-                continue
-            hashes = {k.lower(): (v or "").lower()
-                      for k, v in (item.get("Hashes") or {}).items()}
-            drive_files[item["Path"]] = hashes
-
-        files = self.manifest.get("files", {})
-        total = max(len(files), 1)
-        results = []
-
-        for i, (rel_path, entry) in enumerate(files.items()):
-            self.progress.emit(int(i / total * 100), rel_path)
-
-            if rel_path not in drive_files:
-                results.append({"path": rel_path, "status": "MISSING",
-                                "detail": "Not present in Drive folder"})
-                self.log.emit(f"  MISSING: {rel_path}", "error")
-                continue
-
-            expected_cs = self._expected_checksums(entry)
-            drive_hashes = drive_files[rel_path]
-
-            # Pick the strongest hash available on both sides
-            algo = None
-            for candidate in ("sha256", "sha1", "md5"):
-                if candidate in expected_cs and candidate in drive_hashes:
-                    algo = candidate
-                    break
-
-            if algo is None:
-                results.append({"path": rel_path, "status": "MISMATCH",
-                                "detail": "No common hash algorithm between manifest and Drive"})
-                self.log.emit(f"  MISMATCH (no common hash): {rel_path}", "error")
-                continue
-
-            expected_val = (expected_cs.get(algo) or "").lower()
-            actual_val   = drive_hashes.get(algo, "")
-
-            if expected_val == actual_val and expected_val:
-                results.append({"path": rel_path, "status": "OK",
-                                "detail": f"{algo}: {actual_val[:16]}..."})
-                self.log.emit(f"  OK: {rel_path}", "success")
-            else:
-                results.append({"path": rel_path, "status": "MISMATCH",
-                                "detail": f"Expected {expected_val[:16]}... | Got {actual_val[:16]}..."})
-                self.log.emit(f"  MISMATCH: {rel_path}", "error")
-
-        # Report extras on Drive not covered by manifest (info only)
-        extras = set(drive_files.keys()) - set(files.keys())
-        # Filter out internal/junk files
-        extras = {p for p in extras if Path(p).name not in
-                  ("st_manifest.json", ".DS_Store", "Thumbs.db", "desktop.ini")}
-        if extras:
-            self.log.emit(
-                f"  Note: {len(extras)} file(s) present on Drive but not in manifest",
-                "warning",
-            )
-
-        self.progress.emit(100, "Complete")
-        self.finished.emit(results)
 
 
 class VerifyTab(QWidget):

@@ -24,7 +24,6 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from core.checksum import compute_all
 from core.comparison import three_way_diff, DiffState
 from core.manifest import load_manifest, MANIFEST_FILENAME
 from core.offload import (
@@ -169,27 +168,18 @@ class TestReaderThreeWayDiff:
 # ---------------------------------------------------------------------------
 
 def _verify_local_contract(manifest: dict, folder: Path) -> list:
-    """Mirror of gui/verify_tab.py VerifyWorker._verify_local's core loop."""
+    """M5.0: drive the REAL verify loop (core.verify.verify_local) rather than a
+    hand-mirrored copy, then reduce to (path, status). A FORMAT_FAIL on a clip
+    whose bytes match is still a hash OK for this contract, so collapse it back
+    to OK; MISSING/MISMATCH pass through."""
+    from core.verify import verify_local
+    results = verify_local(folder, manifest)
     statuses = []
-    for rel_path, entry in manifest["files"].items():
-        abs_path = folder / rel_path
-        if not abs_path.exists():
-            statuses.append((rel_path, "MISSING"))
-            continue
-        expected_cs = (entry.get("dest_checksums")
-                       or entry.get("source_checksums")
-                       or entry.get("checksums", {}))
-        algo = ("sha256" if "sha256" in expected_cs else
-                "xxhash3_64" if "xxhash3_64" in expected_cs else "md5")
-        actual = compute_all(
-            abs_path,
-            include_xxhash=(algo == "xxhash3_64"),
-            include_md5=(algo == "md5"),
-        )
-        expected_val = (expected_cs.get(algo) or "").lower()
-        actual_val = (actual.get(algo) or "").lower()
-        ok = expected_val == actual_val and bool(expected_val)
-        statuses.append((rel_path, "OK" if ok else "MISMATCH"))
+    for r in results:
+        status = r["status"]
+        if status == "FORMAT_FAIL":
+            status = "OK"  # hash matched; format check is a separate axis
+        statuses.append((r["path"], status))
     return statuses
 
 
