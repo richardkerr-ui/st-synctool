@@ -179,7 +179,9 @@ On launch, query the GitHub releases API for the latest version (5s timeout, sil
 
 ---
 
-## M8: AI assist features (approved 2026-06-12, post-beta)
+## M8: AI assist features (post-beta — ON HOLD, do not implement, 2026-06-12)
+
+**Status (2026-06-12):** Richard does not want AI features built at this time. M8 stays documented for the future but is on hold — do not start any M8 sub-item until Richard explicitly reactivates it. Not part of the beta or the immediate post-beta plan.
 
 Optional Claude API integrations. Approved by Richard with the note that every Signal Theory user will have a Claude account. Token cost is negligible (cents per use with claude-haiku-4-5); the design decision is auth, settled as follows: **one Signal Theory workspace API key** configured centrally (env var `ST_SYNC_ANTHROPIC_KEY` or the existing `~/.config/st_synctool/config.json`), so end users never handle billing. A regular Claude.ai subscription does not include API access, so per-user keys would mean per-user developer accounts; central key avoids that entirely.
 
@@ -229,7 +231,7 @@ Design decided 2026-06-12 after Richard raised in-app reload of older jobs: the 
 A History view that renders the merged card index: rows like "Jun 12 · Cart 3 · Offload — A001 → NAS, Shuttle · 312 files · 1.2 TB · VERIFIED" with dropdown filters for operation, workstation/user, project and date range. Own machine's history loads instantly from local files (offline-capable); "Refresh org activity" downloads only the other machines' summary files (kilobytes). No background polling. Selecting a job offers: open its custody log (fetched on demand), re-verify a destination against that job's manifest (uses M5.2) and recall the job's source/dest setup as a preset (promotes the M4.3 offload-presets idea from optional to required here). All query/merge logic in core/; the GUI renders rows and dropdowns only. M8.3 AI Q&A later reads the same merged index for org-wide answers.
 **Done when:** filter and row-formatting logic unit tested headlessly, GUI smoke test on the Mac, refresh works against a junk Drive folder end-to-end, README gains a History section.
 
-**Sequencing (approved):** M9.1 + M9.2 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta (the summary line is written by the same shipping step, so they land together); M9.3 post-beta, before or alongside M8.3 which depends on the same index.
+**Sequencing (approved):** M9.1 + M9.2 right after M7.2 (CI) so beta testers' activity flows centrally from day one of the beta (the summary line is written by the same shipping step, so they land together); M9.3 post-beta.
 
 
 ---
@@ -253,6 +255,6 @@ Export an ASC Media Hash List (.mhl) alongside `st_manifest.json` so post houses
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M8 → M10.3.
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M10.3. (M8 AI assist on hold — not scheduled.)
 
-M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
+M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is ON HOLD as of 2026-06-12 — Richard does not want AI features built at this time; do not start it. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.
