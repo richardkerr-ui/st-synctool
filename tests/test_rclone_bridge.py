@@ -471,6 +471,82 @@ class TestCancelCurrent:
 
 
 # ---------------------------------------------------------------------------
+# cat_sha256 — streaming hash of a remote file (M5.1 deep Drive verify)
+# ---------------------------------------------------------------------------
+
+class FakeCatProc:
+    """Binary-stream stand-in for `rclone cat` Popen."""
+
+    def __init__(self, stdout=b"", stderr=b"", returncode=0, hang=False):
+        self.stdout = io.BytesIO(stdout)
+        self.stderr = io.BytesIO(stderr)
+        self.returncode = returncode
+        self._hang = hang
+        self.killed = False
+
+    def wait(self, timeout=None):
+        if self._hang and not self.killed:
+            raise subprocess.TimeoutExpired(cmd="rclone", timeout=timeout)
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+        self._hang = False
+        self.returncode = -9
+
+    def poll(self):
+        return self.returncode
+
+
+class TestCatSha256:
+    def _patch(self, fake):
+        return patch("core.rclone_bridge.subprocess.Popen", return_value=fake)
+
+    def test_hashes_streamed_bytes(self):
+        import hashlib
+        data = b"alpha bravo charlie" * 1000
+        fake = FakeCatProc(stdout=data, returncode=0)
+        with self._patch(fake):
+            digest = rb.cat_sha256("gdrive:a.mov")
+        assert digest == hashlib.sha256(data).hexdigest()
+
+    def test_chunked_read_matches_full(self):
+        import hashlib
+        data = bytes(range(256)) * 5000
+        fake = FakeCatProc(stdout=data, returncode=0)
+        with self._patch(fake):
+            digest = rb.cat_sha256("gdrive:a.mov", chunk_size=64)
+        assert digest == hashlib.sha256(data).hexdigest()
+
+    def test_nonzero_exit_raises(self):
+        fake = FakeCatProc(stdout=b"", stderr=b"directory not found", returncode=3)
+        with self._patch(fake):
+            with pytest.raises(RuntimeError, match="rclone cat failed"):
+                rb.cat_sha256("gdrive:missing.mov")
+
+    def test_timeout_raises_and_kills(self):
+        fake = FakeCatProc(stdout=b"x", hang=True)
+        with self._patch(fake):
+            with pytest.raises(TimeoutError):
+                rb.cat_sha256("gdrive:a.mov", timeout=1)
+        assert fake.killed is True
+
+    def test_current_proc_cleared(self):
+        fake = FakeCatProc(stdout=b"data", returncode=0)
+        with self._patch(fake):
+            rb.cat_sha256("gdrive:a.mov")
+        assert rb._current_proc is None
+
+    def test_extra_flags_passed(self):
+        fake = FakeCatProc(stdout=b"data", returncode=0)
+        with patch("core.rclone_bridge.subprocess.Popen", return_value=fake) as popen:
+            rb.cat_sha256("gdrive:a.mov", extra_flags=["--drive-root-folder-id", "X"])
+        args = popen.call_args[0][0]
+        assert "cat" in args and "--drive-root-folder-id" in args
+        assert args[-1] == "gdrive:a.mov"
+
+
+# ---------------------------------------------------------------------------
 # is_rclone_installed
 # ---------------------------------------------------------------------------
 

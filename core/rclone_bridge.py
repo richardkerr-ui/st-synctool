@@ -144,6 +144,60 @@ def cancel_current() -> bool:
         return False
 
 
+def cat_sha256(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
+    """
+    Stream a single remote file via `rclone cat` and return its SHA-256, without
+    retaining the file on disk or buffering it in memory (M5.1 deep Drive verify).
+
+    Bytes are read from stdout in chunks and folded into the hash incrementally,
+    so a multi-GB clip costs only one chunk of RAM. Honours cancel_current() by
+    registering the process in _current_proc.
+
+    Returns the lowercase hex digest. Raises RuntimeError on a non-zero rclone
+    exit (e.g. file missing, auth failure) or TimeoutError on timeout.
+    """
+    import hashlib
+
+    global _current_proc
+    args = ["cat"]
+    if extra_flags:
+        args.extend(extra_flags)
+    args.append(remote_path)
+
+    proc = subprocess.Popen(
+        [RCLONE_BIN] + args,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    with _current_proc_lock:
+        _current_proc = proc
+
+    h = hashlib.sha256()
+    try:
+        while True:
+            chunk = proc.stdout.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise TimeoutError(f"rclone cat timed out for {remote_path}")
+        stderr = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
+        if proc.returncode != 0:
+            raise RuntimeError(f"rclone cat failed for {remote_path}: {stderr.strip()}")
+        return h.hexdigest().lower()
+    finally:
+        for s in (proc.stdout, proc.stderr):
+            try:
+                s.close()
+            except Exception:
+                pass
+        with _current_proc_lock:
+            _current_proc = None
+
+
 def lsjson(remote_path, extra_flags=None, with_checksum=True):
     args = ["lsjson", "--recursive"]
     if with_checksum:

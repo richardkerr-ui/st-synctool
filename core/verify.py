@@ -226,13 +226,118 @@ def verify_gdrive(
     return results
 
 
+# M5.1: deep Drive verify is bandwidth-bound. Assumed sustained download for the
+# up-front time estimate (deliberately conservative; the real run shows actual).
+DEEP_VERIFY_ASSUMED_MBPS = 100
+
+
+def _human_bytes(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} PB"
+
+
+def _human_duration(secs: float) -> str:
+    secs = int(secs)
+    h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+    return f"{h}h {m}m" if h else (f"{m}m {s}s" if m else f"{s}s")
+
+
+def estimate_deep_verify_seconds(total_bytes: int, mbps: float = DEEP_VERIFY_ASSUMED_MBPS) -> float:
+    """Estimated download time for a deep verify, in seconds (bandwidth-bound)."""
+    if total_bytes <= 0 or mbps <= 0:
+        return 0.0
+    bytes_per_sec = mbps * 1_000_000 / 8
+    return total_bytes / bytes_per_sec
+
+
+def _join_remote(remote: str, rel: str) -> str:
+    """Join an rclone remote folder spec with a relative file path."""
+    if remote.endswith(":") or remote.endswith("/"):
+        return f"{remote}{rel}"
+    return f"{remote}/{rel}"
+
+
+def verify_gdrive_deep(
+    folder,
+    manifest: dict,
+    progress_cb: Optional[ProgressCallback] = None,
+    log_cb: Optional[LogCallback] = None,
+    cat_fn: Optional[Callable] = None,
+) -> list:
+    """
+    Deep-verify a Drive folder by streaming every file through `rclone cat` to a
+    SHA-256 and comparing to the manifest (M5.1). No file is retained locally.
+    Bandwidth-bound, so an honest size + time estimate is logged up front.
+
+    cat_fn is injectable for testing; defaults to rclone_bridge.cat_sha256.
+    """
+    progress = progress_cb or _noop_progress
+    log = log_cb or _noop_log
+    cat = cat_fn or rclone_bridge.cat_sha256
+
+    remote, flags = gdrive_url_to_rclone(str(folder))
+    files = manifest.get("files", {})
+    total = max(len(files), 1)
+
+    total_bytes = sum(int(e.get("size") or 0) for e in files.values())
+    est = estimate_deep_verify_seconds(total_bytes)
+    log(
+        f"Deep verify will download {_human_bytes(total_bytes)} across "
+        f"{len(files)} file(s) — est. {_human_duration(est)} @ "
+        f"{DEEP_VERIFY_ASSUMED_MBPS} Mbps (bandwidth-bound, no local copy kept)",
+        "info",
+    )
+
+    results: list = []
+    for i, (rel_path, entry) in enumerate(files.items()):
+        progress(int(i / total * 100), rel_path)
+        expected_val = (expected_checksums(entry).get("sha256") or "").lower()
+
+        if not expected_val:
+            results.append({"path": rel_path, "status": "MISMATCH",
+                            "detail": "No sha256 in manifest for deep comparison"})
+            log(f"  MISMATCH (no sha256 in manifest): {rel_path}", "error")
+            continue
+
+        try:
+            actual_val = cat(_join_remote(remote, rel_path), extra_flags=flags).lower()
+        except Exception as e:
+            results.append({"path": rel_path, "status": "MISSING",
+                            "detail": f"Could not read from Drive: {e}"})
+            log(f"  MISSING: {rel_path} — {e}", "error")
+            continue
+
+        if actual_val == expected_val:
+            results.append({"path": rel_path, "status": "OK",
+                            "detail": f"sha256: {actual_val[:16]}... (downloaded)"})
+            log(f"  OK: {rel_path}", "success")
+        else:
+            results.append({"path": rel_path, "status": "MISMATCH",
+                            "detail": f"Expected {expected_val[:16]}... | Got {actual_val[:16]}..."})
+            log(f"  MISMATCH: {rel_path}", "error")
+
+    progress(100, "Complete")
+    return results
+
+
 def verify_folder(
     folder,
     manifest: dict,
     progress_cb: Optional[ProgressCallback] = None,
     log_cb: Optional[LogCallback] = None,
+    deep: bool = False,
 ) -> list:
-    """Dispatch to Drive or local verification based on URL detection."""
+    """
+    Dispatch to local, Drive-metadata, or deep-Drive verification.
+
+    deep=True only applies to Drive folders (downloads each file to hash it);
+    it is ignored for local folders, which are always hashed directly.
+    """
     if is_gdrive_url(str(folder)):
+        if deep:
+            return verify_gdrive_deep(folder, manifest, progress_cb, log_cb)
         return verify_gdrive(folder, manifest, progress_cb, log_cb)
     return verify_local(folder, manifest, progress_cb, log_cb)

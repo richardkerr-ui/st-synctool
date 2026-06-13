@@ -1,7 +1,7 @@
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QPushButton, QProgressBar, QFileDialog, QMessageBox, QFrame,
+    QPushButton, QProgressBar, QFileDialog, QMessageBox, QFrame, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
@@ -20,10 +20,11 @@ class VerifyWorker(QObject):
     finished = pyqtSignal(list)
     error    = pyqtSignal(str)
 
-    def __init__(self, folder, manifest):
+    def __init__(self, folder, manifest, deep=False):
         super().__init__()
         self.folder   = folder  # Keep raw string; could be URL
         self.manifest = manifest
+        self.deep     = deep    # M5.1: download + hash each Drive file
 
     def run(self):
         # M5.0: all verification logic now lives in core.verify (headless,
@@ -33,6 +34,7 @@ class VerifyWorker(QObject):
                 self.folder, self.manifest,
                 progress_cb=lambda pct, path: self.progress.emit(pct, path),
                 log_cb=lambda msg, level: self.log.emit(msg, level),
+                deep=self.deep,
             )
             self.finished.emit(results)
         except Exception as e:
@@ -73,6 +75,19 @@ class VerifyTab(QWidget):
         )
         mrow.addWidget(self.manifest_input)
         ig.addLayout(mrow)
+
+        # M5.1: deep Drive verify — downloads each file and re-hashes it instead
+        # of trusting Drive's metadata. Bandwidth-bound, so it is opt-in and only
+        # meaningful for Drive folders.
+        self.deep_chk = QCheckBox("Deep verify (downloads files) — Drive only")
+        self.deep_chk.setToolTip(
+            "Streams each Drive file through rclone to compute its SHA-256 locally,\n"
+            "instead of trusting Google's stored hash. No local copy is kept.\n"
+            "Bandwidth-bound: an estimate is shown when you start."
+        )
+        self.deep_chk.setEnabled(False)
+        ig.addWidget(self.deep_chk)
+        self.folder_input.input.textChanged.connect(self._update_deep_enabled)
 
         root.addWidget(input_group)
 
@@ -200,8 +215,12 @@ class VerifyTab(QWidget):
         self.cancel_btn.setEnabled(True)
         self.status_label.setText("Verifying…")
 
+        deep = folder_is_url and self.deep_chk.isChecked()
+        if deep:
+            self.log.log("Deep verify enabled — files will be downloaded and re-hashed.", "info")
+
         self._thread = QThread()
-        self._worker = VerifyWorker(folder_str, self._manifest)
+        self._worker = VerifyWorker(folder_str, self._manifest, deep=deep)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(
@@ -213,6 +232,13 @@ class VerifyTab(QWidget):
         self._worker.finished.connect(self._thread.quit)
         self._worker.error.connect(self._thread.quit)
         self._thread.start()
+
+    def _update_deep_enabled(self, text):
+        """Deep verify only applies to Drive folders; disable + uncheck for local."""
+        is_url = is_gdrive_url(text.strip())
+        self.deep_chk.setEnabled(is_url)
+        if not is_url:
+            self.deep_chk.setChecked(False)
 
     def _cancel_verify(self):
         if self._thread and self._thread.isRunning():

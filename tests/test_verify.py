@@ -194,3 +194,93 @@ def test_dispatch_gdrive(monkeypatch):
                         lambda *a, **k: called.setdefault("gdrive", True) or [])
     verify.verify_folder("https://drive...", {"files": {}})
     assert called.get("gdrive")
+
+
+def test_dispatch_gdrive_deep(monkeypatch):
+    monkeypatch.setattr(verify, "is_gdrive_url", lambda s: True)
+    called = {}
+    monkeypatch.setattr(verify, "verify_gdrive_deep",
+                        lambda *a, **k: called.setdefault("deep", True) or [])
+    verify.verify_folder("https://drive...", {"files": {}}, deep=True)
+    assert called.get("deep")
+
+
+def test_dispatch_deep_ignored_for_local(folder, monkeypatch):
+    # deep=True must not trigger a download path for local folders.
+    monkeypatch.setattr(verify, "is_gdrive_url", lambda s: False)
+    called = {}
+    monkeypatch.setattr(verify, "verify_local",
+                        lambda *a, **k: called.setdefault("local", True) or [])
+    verify.verify_folder(folder, _manifest({"clips/a.mov": b"alpha"}), deep=True)
+    assert called.get("local")
+
+
+# ── M5.1 deep Drive verify ───────────────────────────────────────────────────
+
+def test_estimate_deep_verify_seconds():
+    # 100 Mbps = 12.5 MB/s. 125 MB should take ~10s.
+    secs = verify.estimate_deep_verify_seconds(125_000_000, mbps=100)
+    assert 9 < secs < 11
+    assert verify.estimate_deep_verify_seconds(0) == 0.0
+
+
+def test_join_remote():
+    assert verify._join_remote("gdrive:", "a/b.mov") == "gdrive:a/b.mov"
+    assert verify._join_remote("gdrive:folder", "a.mov") == "gdrive:folder/a.mov"
+    assert verify._join_remote("gdrive:folder/", "a.mov") == "gdrive:folder/a.mov"
+
+
+def _deep_setup(monkeypatch, cat_map):
+    """cat_map: {remote_path: sha256 or Exception}. Returns a cat_fn."""
+    monkeypatch.setattr(verify, "gdrive_url_to_rclone", lambda s: ("gdrive:", []))
+    def cat_fn(remote_path, extra_flags=None):
+        val = cat_map[remote_path]
+        if isinstance(val, Exception):
+            raise val
+        return val
+    return cat_fn
+
+
+def test_deep_ok_and_mismatch(monkeypatch):
+    manifest = _manifest({"a.mov": b"alpha", "b.mov": b"bravo"})
+    cat_fn = _deep_setup(monkeypatch, {
+        "gdrive:a.mov": _sha256(b"alpha"),       # matches
+        "gdrive:b.mov": _sha256(b"WRONG"),       # mismatch
+    })
+    results = {r["path"]: r["status"] for r in
+               verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn)}
+    assert results == {"a.mov": "OK", "b.mov": "MISMATCH"}
+
+
+def test_deep_missing_on_cat_error(monkeypatch):
+    manifest = _manifest({"a.mov": b"alpha"})
+    cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": RuntimeError("not found")})
+    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn)[0]
+    assert r["status"] == "MISSING"
+    assert "not found" in r["detail"]
+
+
+def test_deep_no_sha256_is_mismatch(monkeypatch):
+    manifest = {"files": {"a.mov": {"size": 5, "checksums": {"md5": "abc"}}}}
+    cat_fn = _deep_setup(monkeypatch, {})  # cat never called
+    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn)[0]
+    assert r["status"] == "MISMATCH"
+    assert "No sha256" in r["detail"]
+
+
+def test_deep_logs_estimate(monkeypatch):
+    manifest = _manifest({"a.mov": b"alpha"})
+    cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": _sha256(b"alpha")})
+    logs = []
+    verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn,
+                              log_cb=lambda m, l: logs.append(m))
+    assert any("Deep verify will download" in m for m in logs)
+
+
+def test_deep_progress_completes(monkeypatch):
+    manifest = _manifest({"a.mov": b"alpha"})
+    cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": _sha256(b"alpha")})
+    prog = []
+    verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn,
+                              progress_cb=lambda p, path: prog.append((p, path)))
+    assert prog[-1] == (100, "Complete")

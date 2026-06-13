@@ -62,7 +62,10 @@ Add a summary line above the diff table: "3 conflicts need review · 44 files wi
 
 ---
 
-## M3: Drive to Drive transfers (code complete 2026-06-12, manual end-to-end pending)
+## M3: Drive to Drive transfers ✅ DONE 2026-06-12 (manual e2e confirmed)
+
+**Manual e2e (Richard, 2026-06-12):** after the GUI-guard bugfix, ran a real Drive-to-Drive transfer against junk Drive folders. Confirmed files copy server-side, a manifest lands in `~/Documents/STSyncTool/manifests/drive_to_drive/`, and a chain-of-custody txt log lands in `~/Documents/STSyncTool/logs/`. M3 closed.
+
 
 Real ask: move a project between ST Drive folders without burning local disk space.
 
@@ -119,8 +122,9 @@ Intended outcome: move Verify from "spot-check on demand" toward archival assura
 **Done when:** verify logic imports cleanly without PyQt6, existing verify behavior unchanged, contract tests use the real function instead of the mirror and GUI tests still pass on the Mac.
 **Findings:** New `core/verify.py` (no PyQt6 import): `verify_local`, `verify_gdrive` and a `verify_folder` URL dispatcher, all taking optional `progress_cb(pct, path)` / `log_cb(msg, level)` callbacks and returning the same per-file result dicts as before (`OK/MISSING/MISMATCH/FORMAT_FAIL` plus the additive `format_status`/`format_detail`). Logic moved verbatim — behavior unchanged. `verify_gdrive` now *raises* `RuntimeError` on an rclone failure instead of swallowing it via an error signal; the worker catches and emits `error()`. `gui/verify_tab.py::VerifyWorker` is now a thin adapter: `run()` calls `verify_folder` with callbacks wired to its Qt signals (dropped the duplicated `_verify_local`/`_verify_gdrive`/`_expected_checksums` and the now-unused `logging`, `compute_all`, `media_verify` imports). The contract-test mirror in `test_manifest_writer_reader_matrix.py` now drives the real `core.verify.verify_local` instead of a hand-copied loop. New `tests/test_verify.py` (24 tests): local OK/MISSING/MISMATCH, empty-expected, dest>checksums precedence, callbacks, FORMAT_FAIL override, advisory keeps OK, media-verify exception swallowed; gdrive OK/MISSING/MISMATCH, no-common-hash, lsjson failure raises, extras logged; dispatcher both ways. Suite 1225 → **1240 passed**, core+utils coverage held at **88%**, `core/verify.py` 95%. **Pending one manual Mac run** of `tests/test_drive_verify.py` (the real Qt `VerifyWorker`, PyQt6-only) to confirm the thin adapter still drives end-to-end; covered automatically once M7.2 CI lands.
 
-### M5.1 Deep Drive verify (small)
+### M5.1 Deep Drive verify (small) ✅ DONE 2026-06-12 (GUI checkbox needs one manual Mac run)
 Optional "Deep verify (downloads files)" checkbox for Drive folders. Streams each file through rclone to a temp hash (`rclone cat | sha256`), no full local copy retained. Honest progress estimate shown up front since this is bandwidth-bound. Default remains the 1-second metadata check.
+**Findings:** New `rclone_bridge.cat_sha256()` streams `rclone cat` stdout in 1 MB chunks straight into a hashlib.sha256 (multi-GB clips cost one chunk of RAM, nothing retained), registers in `_current_proc` for cancel support, raises on non-zero exit and TimeoutError on timeout. New `core/verify.verify_gdrive_deep()` downloads + hashes every manifest file via an injectable `cat_fn` (defaults to `cat_sha256`), comparing to the manifest sha256; logs an up-front "will download X across N files — est. Yh Zm @ 100 Mbps" line via `estimate_deep_verify_seconds()`. Entries lacking a sha256 → MISMATCH (can't deep-compare); cat failure → MISSING. `verify_folder` gained a `deep` flag (Drive-only; ignored for local). GUI: a "Deep verify (downloads files) — Drive only" checkbox, disabled+unchecked unless the folder field holds a Drive URL (`_update_deep_enabled`); `VerifyWorker` passes `deep` through. 15 new tests (cat_sha256: streamed/chunked hash equality, non-zero raises, timeout kills, `_current_proc` cleared, flag passing; deep verify: OK/MISMATCH, MISSING on cat error, no-sha256, estimate logged, progress completes, dispatch + local-ignores-deep). Suite 1240 → **1255 passed**, coverage held **88%**, `core/verify.py` and `rclone_bridge.py` both 95%. **Pending one manual Mac run:** tick Deep verify against a real junk Drive folder and confirm files download, hash and report (PyQt6 checkbox wiring not headlessly testable).
 
 ### M5.2 Batch verify (medium)
 Verify multiple folder+manifest pairs in one run, fed by the projects registry (`~/Documents/STSyncTool/projects.json`). One consolidated report: per-project OK / MISSING / MISMATCH counts. Core logic as a plain function over a list of pairs; the tab gains a "Verify all registered projects" button.
@@ -248,6 +252,6 @@ Export an ASC Media Hash List (.mhl) alongside `st_manifest.json` so post houses
 
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 (manual e2e pending) → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 → M5.2 → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M8 → M10.3.
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 → M5.4 → M10.2 → M7.1 → M7.2 → M9.1+M9.2 → M7.5 → M7.3 → M7.4 → recruit beta testers. Post-beta: M9.3 → M8 → M10.3.
 
 M4.3 and M6 as appetite allows; they do not block beta. M8 (AI assist) is approved but post-beta: M8.2 → M8.1 → M8.3 after testers have builds in hand. M5.3 parked, not approved. M2 is sequenced before M1.5 because it is small, self-contained and user-visible, a good early win while hardening continues.

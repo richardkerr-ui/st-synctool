@@ -246,6 +246,10 @@ For each file in the manifest, checks the corresponding file in the folder:
 
 For Drive folders, hash comparison uses rclone's metadata-based lookup (no file downloads). A 9 GB folder verifies in about one second.
 
+### Deep verify (Drive only)
+
+The default Drive check trusts Google's stored hashes. For higher assurance, tick **Deep verify (downloads files)** — only enabled for Drive folders. It streams every file through rclone to compute its SHA-256 locally and compares that to the manifest, so corruption that Google's metadata would not reveal is caught. No local copy is kept (each file is hashed as it streams, then discarded). Because it is bandwidth-bound, an honest size and time estimate is logged when you start. The default 1-second metadata check is unchanged.
+
 Any files present in the folder but not in the manifest are noted as a warning (not failures).
 
 ### Output
