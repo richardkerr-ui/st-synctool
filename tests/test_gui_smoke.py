@@ -409,6 +409,22 @@ class TestHistoryTabSmoke:
         tab.reload()
         assert not tab.staleness_label.isVisible()
 
+    def test_load_demo_data_populates_when_empty(self, qtbot, monkeypatch):
+        import gui.history_tab as ht
+        monkeypatch.setattr(ht.activity_index, "load_org_records", lambda **k: [])
+        t = ht.HistoryTab()
+        qtbot.addWidget(t)
+        assert t.table.rowCount() == 0
+        t.load_demo_data()
+        assert t.table.rowCount() >= 5  # demo rows loaded
+        assert "demo" in t.status_label.text()
+
+    def test_load_demo_data_does_not_mask_real_records(self, tab):
+        # `tab` fixture already has 2 real records; demo must not overwrite them.
+        before = tab.table.rowCount()
+        tab.load_demo_data()
+        assert tab.table.rowCount() == before
+
     def test_staleness_label_shows_warning(self, tab, monkeypatch):
         import gui.history_tab as ht
         monkeypatch.setattr(ht.history, "staleness_warning",

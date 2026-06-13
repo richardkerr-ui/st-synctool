@@ -812,9 +812,11 @@ class MainWindow(QMainWindow):
                 "body":   (
                     "Every offload, transfer, merge and verify across all "
                     "machines, in one list. Your own jobs show instantly and "
-                    "offline; this is the single record of who did what, when."
+                    "offline; this is the single record of who did what, when. "
+                    "We've loaded a few demo jobs so you can see the layout."
                 ),
                 "padding": 4,
+                "on_show": lambda: self._history_tab.load_demo_data(),
             },
             {
                 "tab":    4,

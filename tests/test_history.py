@@ -201,3 +201,24 @@ def test_staleness_warning_singular():
 
 def test_staleness_warning_empty_records():
     assert history.staleness_warning([]) is None
+
+
+# --------------------------------------------------------------------------- #
+# demo activity records (History tab / tour)
+# --------------------------------------------------------------------------- #
+
+def test_demo_activity_records_shape_and_staleness():
+    from core.demo import demo_activity_records
+    recs = demo_activity_records(now=datetime(2026, 6, 13))
+    assert len(recs) >= 5
+    # Every record has the fields the History view formats.
+    for r in recs:
+        for k in ("operation", "timestamp", "workstation", "user", "verdict"):
+            assert k in r
+    # Spans multiple machines and operations (so filters demo).
+    assert len({r["workstation"] for r in recs}) >= 3
+    assert {"offload", "transfer", "verify", "merge"} <= {r["operation"] for r in recs}
+    # Includes a deliberately stale machine so the banner demonstrates.
+    assert history.staleness_warning(recs, now=datetime(2026, 6, 13)) is not None
+    # And rows render.
+    assert len(history.rows_for(recs)) == len(recs)

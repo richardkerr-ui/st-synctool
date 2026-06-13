@@ -101,6 +101,20 @@ class HistoryTab(QWidget):
         self._apply_filters()
         self._refresh_staleness()
 
+    def load_demo_data(self):
+        """Populate the tab with illustrative org activity for the onboarding
+        tour / a fresh install, but only when there is no real history yet so it
+        never masks actual records."""
+        if self._records:
+            return
+        from core.demo import demo_activity_records
+        self._records = demo_activity_records()
+        self._populate_filter_options()
+        self._apply_filters()
+        self._refresh_staleness()
+        self.status_label.setText(
+            f"{len(self._records)} job(s)  (demo — click Refresh org activity to load real data)")
+
     def _refresh_staleness(self):
         warning = history.staleness_warning(self._records)
         if warning:

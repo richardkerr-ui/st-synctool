@@ -397,3 +397,51 @@ def ensure_demo_merge_folders() -> tuple[Path, Path, Path]:
         manifest_path.write_text(json.dumps(manifest, indent=2))
 
     return local_root, server_root, manifest_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# History demo — illustrative org activity records for the History tab / tour
+# ─────────────────────────────────────────────────────────────────────────────
+
+def demo_activity_records(now=None) -> list:
+    """Representative activity records for the History tab when it is empty
+    (onboarding tour / fresh install). Spans several machines, operations and
+    verdicts, and includes one machine that is deliberately stale (>7 days) so
+    the org-health staleness banner demonstrates too. Timestamps are relative to
+    `now` so the staleness window is always meaningful.
+
+    Returns a list of plain dicts in the activity-shard shape (no files written).
+    """
+    from datetime import datetime, timedelta
+    now = now or datetime.now()
+
+    def at(days_ago, hours=0):
+        return (now - timedelta(days=days_ago, hours=hours)).isoformat()
+
+    return [
+        {"operation": "offload", "timestamp": at(0, 1), "workstation": "KC-RichardK",
+         "user": "richard.kerr", "project": "Mythical_S1", "source": "A001",
+         "dests": ["NAS", "Shuttle"], "file_count": 312, "bytes": 1288490188,
+         "verdict": "VERIFIED", "log_filename": "A001 09.14.02 demo.txt"},
+        {"operation": "transfer", "timestamp": at(0, 4), "workstation": "KC-RichardK",
+         "user": "richard.kerr", "project": "Mythical_S1", "source": "Edit_Pull",
+         "dests": ["Local"], "file_count": 48, "bytes": 53687091,
+         "verdict": "COMPLETE", "log_filename": ""},
+        {"operation": "offload", "timestamp": at(1), "workstation": "KC-RichardK",
+         "user": "richard.kerr", "project": "Mythical_S1", "source": "C001",
+         "dests": ["NAS"], "file_count": 96, "bytes": 402653184,
+         "verdict": "NOT_CLEARED", "log_filename": "C001 18.40.51 demo.txt"},
+        {"operation": "verify", "timestamp": at(2), "workstation": "Cart-2",
+         "user": "ed.dit", "project": "Archive_Q2", "source": "Archive_Q2",
+         "dests": [], "file_count": 904, "bytes": 0, "verdict": "FAIL",
+         "log_filename": ""},
+        {"operation": "merge", "timestamp": at(3), "workstation": "Cart-2",
+         "user": "ed.dit", "project": "ProjectY", "source": "ProjectY",
+         "dests": ["nas:/ProjectY"], "file_count": 21, "bytes": 8388608,
+         "verdict": "COMPLETE", "log_filename": ""},
+        # Deliberately stale (>7 days) so the staleness banner demonstrates.
+        {"operation": "offload", "timestamp": at(12), "workstation": "Cart-3",
+         "user": "sam.dit", "project": "Reshoots", "source": "B002",
+         "dests": ["NAS", "Shuttle"], "file_count": 144, "bytes": 644245094,
+         "verdict": "VERIFIED", "log_filename": "B002 22.03.10 demo.txt"},
+    ]
