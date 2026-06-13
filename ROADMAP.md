@@ -13,13 +13,35 @@ Structured for execution via `/loop`. Milestones are ordered by dependency: hard
 ### Loop session notes
 
 - **Next item: M7.4 (Quick start guide).** Order: M7.4 → M9 integration → M9.3 → M10.3 → M7.1 (last, blocked on Apple Dev account). Skip M7.1 — do not work it until Richard has the Apple Developer account.
-- **Baseline 2026-06-13 (latest):** non-GUI suite **1375 passed** (after M7.3), core+utils coverage **90%**. Full suite on CI (macOS, incl. GUI) was 1551 passed / 91% pre-M7.3; M7.3 adds 3 GUI smoke tests. Last commit `e0d7064` + the M7.3 commit, committed locally (not pushed in this autonomous run).
+- **Baseline 2026-06-13 (latest):** non-GUI suite **1375 passed** (after M7.3), core+utils coverage **90%**. Full suite on CI (macOS, incl. GUI) **1564 passed / 91%** (run 27470092097). Last commit `b4ad03c` (M7.3), pushed to `origin/main`, CI green.
 - **CI now runs the full pytest-qt GUI suite** on every push (macOS runner, `QT_QPA_PLATFORM=offscreen`). When adding GUI code that starts a worker/modal in `MainWindow.__init__`, defer it via `QTimer` AND suppress it in the `test_gui_smoke.py` MainWindow fixture (monkeypatch the worker's `start`), or CI aborts with exit 134 (pytest-qt pumps events at setup). After a GUI-touching change, push and watch the run: `gh run list --workflow=ci.yml --limit 1` then `gh run watch <id> --exit-status`.
 - **M9.1+M9.2 are core-complete** (`core/log_sync.py`, `core/activity_index.py`) but the integration (fire `ship_logs` after each op + on launch, a Settings field for the shared Drive remote base + opt-out toggle, GUI status line/banner, `append_activity` call sites, manual e2e) is **blocked on a Settings remote that does not exist yet** — do not attempt until a Settings remote-config story exists; it rides with M9.3.
 - **Pushing:** commit locally by default. Pushing to `main` requires explicit user OK in interactive sessions (the auto-approver blocks unprompted pushes); in an autonomous 3 AM run, commit locally and report — do not assume push permission.
 - Rebuild the graph each session: `code-review-graph build --repo . --data-dir /tmp/crg_<uid>`. Stale `/tmp/crg_data` dirs from prior sessions may be owned by another uid and unwritable, so use a fresh uniquely named dir and query `graph.db` read-only.
 - Run `/cover-risk` at the start of any milestone touching `core/` to re-rank targets.
 - Any GUI changes get logic extracted into `core/` so it is testable headlessly, with a thin Qt layer on top.
+
+---
+
+## Manual checks outstanding (single source of truth, updated 2026-06-13)
+
+The only checks still needing Richard. The GUI smoke/worker tests that older findings tag "needs one manual Mac run" are **no longer manual** — M7.2 CI runs the full pytest-qt suite on every push, so those are retired; do not re-run them by hand. What remains genuinely needs real rclone against real Drive, real hardware, or an account that CI cannot provide.
+
+**Actionable now (nothing blocking it):**
+- [ ] **M5.1 deep-verify e2e** — tick "Deep verify (downloads files)" against a junk Drive folder, confirm files stream-download, hash and report.
+
+**Blocked until a prerequisite lands (do not attempt yet):**
+- [ ] **M9.1 log-shipping e2e** — one ship to a junk Drive folder. Blocked on the Settings remote-config story (rides with M9.3).
+- [ ] **M5.3 scheduled-verify e2e** — enable the schedule, confirm the launchd agent loads, force a failing archive, confirm the next-launch banner appears and dismisses. Blocked on M7.1 packaging (needs a stable `.app` executable path).
+- [ ] **M7.1 signed DMG** — the whole item. Blocked on an Apple Developer account ($99/yr, Richard to set up). Also gates beta-tester recruitment.
+- [ ] **M8 AI assist** — one live API check per feature. On hold (not scheduled).
+
+**Optional "does it feel right" visual checks (fully test-covered, not obligations):**
+- [ ] M7.3 — feedback save dialog + Finder reveal of the zip.
+- [ ] M5.1 / M5.2 / M5.4 — Drive checkbox, "Verify All Projects" button, the persisted verify-report file landing on disk.
+
+**Already confirmed (do not re-do):**
+- [x] **M3 Drive→Drive e2e** — Richard confirmed 2026-06-12.
 
 ---
 
@@ -55,7 +77,7 @@ End-to-end fixtures with real files in `/tmp`: offload to two destinations then 
 
 ---
 
-## M2: Merge tab summary header ✅ DONE 2026-06-12 (GUI smoke test needs one manual Mac run)
+## M2: Merge tab summary header ✅ DONE 2026-06-12 (GUI smoke tests now covered by M7.2 CI)
 
 Add a summary line above the diff table: "3 conflicts need review · 44 files will sync automatically · 2 deletions held for you." Keep the full table as-is.
 
@@ -90,7 +112,7 @@ Real ask: move a project between ST Drive folders without burning local disk spa
 
 ## M4: Offload improvements
 
-### M4.1 Resume interrupted offload ✅ DONE 2026-06-12 (GUI resume prompt needs one manual Mac run)
+### M4.1 Resume interrupted offload ✅ DONE 2026-06-12 (GUI resume prompt now covered by M7.2 CI)
 Today a failed offload leaves `.st_staging_{ts}/` plus a failure report and a restart recopies the whole card. Add resume: on start, detect existing staging for the same source/destination pair, re-verify already staged files against the source pre-hash manifest, copy only what is missing or mismatched, then commit normally.
 
 - Logic in `core/offload.py`. Staging folder gains a small state file (source manifest reference + completed-file list) written atomically as files verify.
@@ -122,16 +144,16 @@ Blackmagic offers no lightweight official CLI. Spike (max 1 day): evaluate (a) f
 
 Intended outcome: move Verify from "spot-check on demand" toward archival assurance, in three independent steps. Richard approved M5.1 and M5.2 on 2026-06-12; M5.3 stays parked unless archives fail in the field.
 
-### M5.0 Extract verify logic to core/ (prep, small) ✅ DONE 2026-06-12 (GUI tests need one manual Mac run)
+### M5.0 Extract verify logic to core/ (prep, small) ✅ DONE 2026-06-12 (GUI tests now covered by M7.2 CI)
 `VerifyWorker._verify_local` currently lives in `gui/verify_tab.py` (PyQt6), so its hash loop is only testable on macOS and is mirrored by hand in the contract tests. Move the verification loop into `core/` (e.g. `core/verify.py`), leave a thin Qt worker that emits signals. Prerequisite for M5.1 and M5.2 so their logic lands headlessly testable.
 **Done when:** verify logic imports cleanly without PyQt6, existing verify behavior unchanged, contract tests use the real function instead of the mirror and GUI tests still pass on the Mac.
 **Findings:** New `core/verify.py` (no PyQt6 import): `verify_local`, `verify_gdrive` and a `verify_folder` URL dispatcher, all taking optional `progress_cb(pct, path)` / `log_cb(msg, level)` callbacks and returning the same per-file result dicts as before (`OK/MISSING/MISMATCH/FORMAT_FAIL` plus the additive `format_status`/`format_detail`). Logic moved verbatim — behavior unchanged. `verify_gdrive` now *raises* `RuntimeError` on an rclone failure instead of swallowing it via an error signal; the worker catches and emits `error()`. `gui/verify_tab.py::VerifyWorker` is now a thin adapter: `run()` calls `verify_folder` with callbacks wired to its Qt signals (dropped the duplicated `_verify_local`/`_verify_gdrive`/`_expected_checksums` and the now-unused `logging`, `compute_all`, `media_verify` imports). The contract-test mirror in `test_manifest_writer_reader_matrix.py` now drives the real `core.verify.verify_local` instead of a hand-copied loop. New `tests/test_verify.py` (24 tests): local OK/MISSING/MISMATCH, empty-expected, dest>checksums precedence, callbacks, FORMAT_FAIL override, advisory keeps OK, media-verify exception swallowed; gdrive OK/MISSING/MISMATCH, no-common-hash, lsjson failure raises, extras logged; dispatcher both ways. Suite 1225 → **1240 passed**, core+utils coverage held at **88%**, `core/verify.py` 95%. **Pending one manual Mac run** of `tests/test_drive_verify.py` (the real Qt `VerifyWorker`, PyQt6-only) to confirm the thin adapter still drives end-to-end; covered automatically once M7.2 CI lands.
 
-### M5.1 Deep Drive verify (small) ✅ DONE 2026-06-12 (GUI checkbox needs one manual Mac run)
+### M5.1 Deep Drive verify (small) ✅ DONE 2026-06-12 (checkbox wiring CI-covered; deep-verify e2e against a real Drive folder still pending — see Manual checks outstanding)
 Optional "Deep verify (downloads files)" checkbox for Drive folders. Streams each file through rclone to a temp hash (`rclone cat | sha256`), no full local copy retained. Honest progress estimate shown up front since this is bandwidth-bound. Default remains the 1-second metadata check.
 **Findings:** New `rclone_bridge.cat_sha256()` streams `rclone cat` stdout in 1 MB chunks straight into a hashlib.sha256 (multi-GB clips cost one chunk of RAM, nothing retained), registers in `_current_proc` for cancel support, raises on non-zero exit and TimeoutError on timeout. New `core/verify.verify_gdrive_deep()` downloads + hashes every manifest file via an injectable `cat_fn` (defaults to `cat_sha256`), comparing to the manifest sha256; logs an up-front "will download X across N files — est. Yh Zm @ 100 Mbps" line via `estimate_deep_verify_seconds()`. Entries lacking a sha256 → MISMATCH (can't deep-compare); cat failure → MISSING. `verify_folder` gained a `deep` flag (Drive-only; ignored for local). GUI: a "Deep verify (downloads files) — Drive only" checkbox, disabled+unchecked unless the folder field holds a Drive URL (`_update_deep_enabled`); `VerifyWorker` passes `deep` through. 15 new tests (cat_sha256: streamed/chunked hash equality, non-zero raises, timeout kills, `_current_proc` cleared, flag passing; deep verify: OK/MISMATCH, MISSING on cat error, no-sha256, estimate logged, progress completes, dispatch + local-ignores-deep). Suite 1240 → **1255 passed**, coverage held **88%**, `core/verify.py` and `rclone_bridge.py` both 95%. **Pending one manual Mac run:** tick Deep verify against a real junk Drive folder and confirm files download, hash and report (PyQt6 checkbox wiring not headlessly testable).
 
-### M5.2 Batch verify (medium) ✅ DONE 2026-06-12 (GUI button needs one manual Mac run)
+### M5.2 Batch verify (medium) ✅ DONE 2026-06-12 (GUI button now covered by M7.2 CI)
 Verify multiple folder+manifest pairs in one run, fed by the projects registry (`~/Documents/STSyncTool/projects.json`). One consolidated report: per-project OK / MISSING / MISMATCH counts. Core logic as a plain function over a list of pairs; the tab gains a "Verify all registered projects" button.
 **Findings:** All logic in `core/verify.py`. `ProjectVerifySummary` (frozen dataclass) with `passed`/`verdict` properties; `summarize_results()` reduces a per-file results list to counts (OK/MISSING/MISMATCH/FORMAT_FAIL). `pairs_from_registry(projects=None)` reads the projects registry (injectable), loads each project's `latest_manifest`, and returns `(pairs, skipped)` — skipping projects with no manifest on record, no folder, or a manifest that fails to load (each with a reason). `batch_verify(pairs, ..., deep=False, verify_fn=verify_folder)` runs each pair through the real per-folder verifier (local or Drive, deep flag honoured), turning any per-project exception into an ERROR summary rather than aborting the batch; progress reported at project granularity. `format_batch_report(summaries, skipped)` renders the consolidated plain-text report (OK/FAIL/ERROR tallies, per-project lines, skipped section). GUI: thin `BatchVerifyWorker` adapter + a "Verify All Projects" button in `gui/verify_tab.py` wiring callbacks to Qt signals. 8 new unit tests in `test_verify.py` (summary counts/verdict, mixed batch incl. ERROR isolation, progress completion, deep-flag passthrough, registry pair building with all skip reasons, manifest-load-failure skip, report rendering). Suite 1255 → **1263 passed**, core+utils coverage held at **88%**, `core/verify.py` 95%. **Pending one manual Mac run:** click "Verify All Projects" against the registry and confirm the consolidated report renders (PyQt6 button wiring not headlessly testable); covered automatically once M7.2 CI lands.
 
@@ -141,7 +163,7 @@ launchd-based monthly verify of registered archive folders, writing reports to `
 **Deferred to M7.1 (documented, not a gap):** the launchd `ProgramArguments` must point at the installed `.app` executable, which does not exist until the M7.1 DMG packaging lands — a dev `python main.py` path would be wrong for an end user. So the **Settings toggle that calls `install_schedule`/`uninstall_schedule`** is intentionally wired up alongside M7.1 packaging when a stable executable path exists. Until then the core install/uninstall functions are tested and ready. **Pending one manual Mac run** once packaged: enable the schedule, confirm the agent loads, force a failing archive and confirm the next-launch banner appears and dismisses.
 
 
-### M5.4 Persist format-verification results ✅ DONE 2026-06-12 (GUI persistence needs one manual Mac run)
+### M5.4 Persist format-verification results ✅ DONE 2026-06-12 (GUI persistence now covered by M7.2 CI)
 Known gap: the Verify tab's format-aware media checks run but their results are never written anywhere, so the evidence is lost when the window closes. Persist per-file media-verify outcomes into the verify report and, where a manifest is present, into a `media_verify` block in the manifest entry. Pairs naturally with M5.0's extraction.
 **Done when:** results persist and reload, schema documented in SCHEMA_INTEROP_SPEC, round-trip tested.
 **Findings:** All logic in `core/verify.py` (headless). `media_verify_block(result)` returns `{status, detail, verified_at}` only for results that actually ran a format check (carry `format_status`), so non-media entries stay untouched. `persist_media_verify_to_manifest(manifest_path, results)` loads the on-disk manifest, writes the block onto each matching file entry (skipping paths absent from the manifest), saves back atomically (tmp+rename) and returns the updated dict; raises FileNotFoundError if no manifest. `build_verify_report` / `write_verify_report` persist one JSON report per run to `~/Documents/STSyncTool/logs/verify_report_<label>_<ts>.json` carrying every per-file result verbatim (incl. `format_status`/`format_detail`) plus a summary and OK/FAIL verdict; label sanitised for the filename, `now`/`log_dir` injectable. Both round-trip through json. GUI `VerifyWorker` is the thin adapter: after `verify_folder` returns it calls `write_verify_report` and (when a manifest path is known) `persist_media_verify_to_manifest`, both wrapped so persistence can never fail the verify itself. New schema section "Part 3 — Persisted format-verification results (M5.4)" in SCHEMA_INTEROP_SPEC.md documents the `media_verify` block and the report shape. README Verify > Output updated. 8 new tests in `test_verify.py` (block-only-for-format-results, manifest round-trip with reload + untouched non-media + no leftover tmp, skip-absent-paths, missing-manifest-raises, report shape/verdict, report round-trip with label sanitisation, no-label filename). Suite 1289 → **1296 passed**, core+utils coverage held **89%**, `core/verify.py` 97%. **Pending one manual Mac run** of the Verify tab to confirm the report file lands and the manifest gains `media_verify` blocks (PyQt6 worker wiring not headlessly testable); covered automatically once M7.2 CI lands. This also closes the [[project_media_verify_gaps]] memory's "results not persisted" gap.
@@ -253,7 +275,7 @@ A History view that renders the merged card index: rows like "Jun 12 · Cart 3 �
 
 ## M10: Field trust features (approved 2026-06-12)
 
-### M10.1 "Safe to format" clearance (small, high trust value) ✅ DONE 2026-06-12 (GUI smoke test needs one manual Mac run)
+### M10.1 "Safe to format" clearance (small, high trust value) ✅ DONE 2026-06-12 (GUI smoke test now covered by M7.2 CI)
 The scariest moment in a DIT's day is wiping a card. After an offload the app already holds per-file verification results for every destination. Show an explicit verdict per source: green "All N files verified on K destinations. Card X is safe to format" only when at least 2 destinations verified clean; otherwise an amber "Not cleared: ..." with the reason. Verdict computation in `core/offload.py` or a new `core/clearance.py`; recorded in the chain-of-custody log.
 **Done when:** verdict function unit tested (2+ clean dests, 1 dest only, any FAILED cell, partial verify), custody log carries the verdict, GUI smoke test on the Mac.
 **Findings:** New `core/clearance.py`: `compute_clearance(source_label, results)` returns a frozen `ClearanceVerdict` (cleared, clean/total dest counts, reason) with `to_text()`. A destination is clean only when state==DONE, per-file `verified is True` and no `MEDIA VERIFY FAILED` line; cleared requires `MIN_CLEAN_DESTS = 2` clean destinations with none failed or unverified. Severity order in the reason: hard failure > unverified > insufficient redundancy. Pure module — reads `result.state.value` by string so it does not import `core.offload` (no circular import) and is drivable by stand-in objects. `write_chain_of_custody_log` now emits a `CLEARANCE: SAFE TO FORMAT / NOT CLEARED — …` line per source. GUI: the offload results dialog (`gui/offload_tab.py`) renders the verdict per source beneath the existing eject indicator (thin — calls `compute_clearance`, picks colour/icon only). 18 unit tests in `test_clearance.py` (2+ clean, 1 dest, FAILED state, verified=False, media-verify failed vs advisory, unverified/skipped, failure-outranks-unverified, source filtering, empty, frozen, enum-like state). Suite 1209 → **1225 passed**, core+utils coverage 87% → **88%**, `clearance.py` 100%. **Pending one manual Mac run** of the offload results dialog to confirm the clearance line renders (PyQt6 unavailable in sandbox); covered automatically once M7.2 CI lands.
