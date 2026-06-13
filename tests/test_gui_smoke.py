@@ -276,6 +276,24 @@ class TestMainWindowSmoke:
                             staticmethod(lambda *a, **k: ("", "")))
         window._report_problem()  # must not raise
 
+    # M11.2: Settings
+    def test_settings_button_present(self, window):
+        assert hasattr(window, "_settings_btn")
+        assert window._settings_btn.text() == "Settings"
+
+    def test_settings_dialog_loads_and_saves(self, qtbot, tmp_path, monkeypatch):
+        from gui.settings_dialog import SettingsDialog
+        from core import settings as app_settings
+        cfg = tmp_path / "config.json"
+        monkeypatch.setattr(app_settings, "SETTINGS_PATH", cfg)
+        dlg = SettingsDialog()
+        qtbot.addWidget(dlg)
+        dlg.remote_base_input.setText("gdrive:Acts")
+        dlg.shipping_chk.setChecked(False)
+        dlg._save()
+        assert app_settings.activity_remote_base(path=cfg) == "gdrive:Acts"
+        assert app_settings.log_shipping_enabled(path=cfg) is False
+
 
 # ---------------------------------------------------------------------------
 # M4.1: resume prompt (OffloadTab)

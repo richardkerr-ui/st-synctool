@@ -150,10 +150,25 @@ class MainWindow(QMainWindow):
         self._feedback_btn.setToolTip("Bundle recent logs and app info into a zip to email")
         self._feedback_btn.clicked.connect(self._report_problem)
 
+        # M11.2: Settings (org activity remote base + log-shipping toggle).
+        self._settings_btn = QPushButton("Settings")
+        self._settings_btn.setFixedHeight(24)
+        self._settings_btn.setStyleSheet("""
+            QPushButton {
+                background:#2a2a2a; color:#888;
+                border:1px solid #3a3a3a; border-radius:4px;
+                font-size:11px; padding:0 8px;
+            }
+            QPushButton:hover { background:#3a3a3a; color:#ccc; }
+        """)
+        self._settings_btn.setToolTip("Configure the org-wide activity log")
+        self._settings_btn.clicked.connect(self._open_settings)
+
         header.addWidget(title)
         header.addWidget(subtitle)
         header.addStretch()
         header.addWidget(self._account_label)
+        header.addWidget(self._settings_btn)
         header.addWidget(self._feedback_btn)
         header.addWidget(self._tour_btn)
         header.addSpacing(6)
@@ -688,6 +703,11 @@ class MainWindow(QMainWindow):
         self._tutorial.resize(self.centralWidget().size())
         self._tutorial.set_steps(self._build_tutorial_steps())
         self._tutorial.start()
+
+    def _open_settings(self):
+        """M11.2: open the Settings dialog (thin — all logic in core.settings)."""
+        from gui.settings_dialog import SettingsDialog
+        SettingsDialog(self).exec()
 
     def _report_problem(self):
         """M7.3: build a feedback zip and reveal it in Finder for the tester to email.
