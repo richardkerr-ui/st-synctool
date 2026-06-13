@@ -522,6 +522,16 @@ If an offload is interrupted (power loss, crash, yanked drive), the partial copy
 
 ---
 
+## Org-wide activity log
+
+Every offload, transfer, merge and verify writes its custody log and manifest locally first — the local copy is the source of truth and never depends on the network. The app then ships those files (append-only, never deleting anything remotely) to a shared Google Drive folder via the rclone remote every user already has, so the org gets a single view of all production activity. The remote layout mirrors the local folders, namespaced per machine and user: `ST_SyncTool_Activity/{workstation}/{user}/...`.
+
+Offline is treated as the normal case, not the edge case. A "shipped" ledger records exactly what is confirmed uploaded; anything not in the ledger is retried at the next trigger (after each operation and on every app launch), so an offload done off the network ships automatically the next time the app opens with internet. Alerting is quiet on the cart and loud in the office: a passive status line ("Activity log: N reports waiting to upload"), escalating to a gentle banner only when files have been pending 7+ days, never a popup.
+
+Alongside the raw files, each completed job appends one compact summary line to a per-machine index (`activity_{workstation}.jsonl`: operation, time, user, project, source, destinations, file count, bytes, verdict, log filename). Because each machine writes only its own shard there are no write conflicts and no server. Org-wide views merge the shards (kilobytes) and fetch a raw custody log only when a human opens one. Per-workstation staleness ("Cart 3 hasn't reported since June 2") falls out of the merged shards for free.
+
+---
+
 ## Known limitations
 
 - **Drive → Drive transfers run server-side.** Paste a Drive URL in both Source and Destination; rclone copies directly between the folders with no local disk used. Paranoid verify is unavailable for this direction (there are no local files to hash); verification relies on Drive checksums. The manifest is built from the destination's Drive metadata and saved to the central archive only. The 750 GB/day limit applies to server-side copies too and is enforced in pre-flight.
