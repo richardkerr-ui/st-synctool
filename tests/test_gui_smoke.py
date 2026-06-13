@@ -384,6 +384,21 @@ class TestHistoryTabSmoke:
         tab._open_row_log(0, 0)
         assert "not available" in tab.status_label.text()
 
+    def test_staleness_label_hidden_when_fresh(self, tab, monkeypatch):
+        import gui.history_tab as ht
+        monkeypatch.setattr(ht.history, "staleness_warning", lambda *a, **k: None)
+        tab.reload()
+        assert not tab.staleness_label.isVisible()
+
+    def test_staleness_label_shows_warning(self, tab, monkeypatch):
+        import gui.history_tab as ht
+        monkeypatch.setattr(ht.history, "staleness_warning",
+                            lambda *a, **k: "⚠ 1 machine has not reported recently: Cart 3 (last reported Jun 2)")
+        tab.show()
+        tab.reload()
+        assert tab.staleness_label.isVisible()
+        assert "Cart 3" in tab.staleness_label.text()
+
 
 # ---------------------------------------------------------------------------
 # M4.1: resume prompt (OffloadTab)

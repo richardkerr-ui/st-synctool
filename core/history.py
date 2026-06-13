@@ -134,3 +134,25 @@ def query_history(records: list, *, operation: Optional[str] = None,
 def rows_for(records: list, **query_kwargs) -> list:
     """Convenience: :func:`query_history` then :func:`format_row` for each result."""
     return [format_row(r) for r in query_history(records, **query_kwargs)]
+
+
+def staleness_warning(records: list, *, now: Optional[datetime] = None) -> Optional[str]:
+    """A one-line org-health warning naming workstations that have not reported in
+    a while (>= STALE_AFTER_DAYS), or None when every machine is current.
+
+    This is the headline payoff of the merged shards: an office producer can see
+    at a glance whether any cart has stopped backing up.
+    """
+    stale = [s for s in activity_index.staleness(records, now=now) if s.stale]
+    if not stale:
+        return None
+    parts = []
+    for s in stale:
+        try:
+            d = datetime.fromisoformat(s.last_reported)
+            when = f"{d:%b} {d.day}"
+        except (ValueError, TypeError):
+            when = s.last_reported or "unknown"
+        parts.append(f"{s.workstation} (last reported {when})")
+    noun = "machine has" if len(stale) == 1 else "machines have"
+    return f"⚠ {len(stale)} {noun} not reported recently: " + ", ".join(parts)

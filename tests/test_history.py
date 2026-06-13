@@ -158,3 +158,46 @@ def test_rows_for_respects_filter():
     rows = history.rows_for(recs, operation="verify")
     assert len(rows) == 1
     assert rows[0].operation_label == "Verify"
+
+
+# --------------------------------------------------------------------------- #
+# staleness_warning (org-health line)
+# --------------------------------------------------------------------------- #
+
+from datetime import datetime, timedelta
+
+
+def _rec_at(ws, days_ago, now):
+    return {"operation": "offload", "workstation": ws,
+            "timestamp": (now - timedelta(days=days_ago)).isoformat(),
+            "user": "u"}
+
+
+def test_staleness_warning_none_when_all_fresh():
+    now = datetime(2026, 6, 13)
+    recs = [_rec_at("Cart 1", 1, now), _rec_at("Cart 2", 3, now)]
+    assert history.staleness_warning(recs, now=now) is None
+
+
+def test_staleness_warning_flags_quiet_machines():
+    now = datetime(2026, 6, 13)
+    recs = [_rec_at("Cart 1", 1, now),           # fresh
+            _rec_at("Cart 3", 11, now),           # stale (last reported Jun 2)
+            _rec_at("Cart 5", 30, now)]           # stale
+    msg = history.staleness_warning(recs, now=now)
+    assert msg is not None
+    assert "2 machines have not reported" in msg
+    assert "Cart 3 (last reported Jun 2)" in msg
+    assert "Cart 5" in msg
+    assert "Cart 1" not in msg  # fresh machine not listed
+
+
+def test_staleness_warning_singular():
+    now = datetime(2026, 6, 13)
+    recs = [_rec_at("Cart 3", 10, now)]
+    msg = history.staleness_warning(recs, now=now)
+    assert "1 machine has not reported" in msg
+
+
+def test_staleness_warning_empty_records():
+    assert history.staleness_warning([]) is None

@@ -66,6 +66,15 @@ class HistoryTab(QWidget):
         filt.addWidget(self.refresh_btn)
         root.addLayout(filt)
 
+        # Org-health staleness warning (hidden unless a machine has gone quiet).
+        self.staleness_label = QLabel("")
+        self.staleness_label.setWordWrap(True)
+        self.staleness_label.setStyleSheet(
+            f"color:{theme.CHARCOAL};background:{theme.ACCENT_CORAL};"
+            "border-radius:4px;padding:5px 8px;font-size:12px;")
+        self.staleness_label.setVisible(False)
+        root.addWidget(self.staleness_label)
+
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:11px;")
         root.addWidget(self.status_label)
@@ -90,6 +99,15 @@ class HistoryTab(QWidget):
         self._records = activity_index.load_org_records()
         self._populate_filter_options()
         self._apply_filters()
+        self._refresh_staleness()
+
+    def _refresh_staleness(self):
+        warning = history.staleness_warning(self._records)
+        if warning:
+            self.staleness_label.setText(warning)
+            self.staleness_label.setVisible(True)
+        else:
+            self.staleness_label.setVisible(False)
 
     def _populate_filter_options(self):
         for field, combo in self._filter_combos.items():
