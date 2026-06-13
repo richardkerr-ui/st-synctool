@@ -20,6 +20,7 @@ Structured for execution via `/loop`. Milestones are ordered by dependency: hard
 - Rebuild the graph each session: `code-review-graph build --repo . --data-dir /tmp/crg_<uid>`. Stale `/tmp/crg_data` dirs from prior sessions may be owned by another uid and unwritable, so use a fresh uniquely named dir and query `graph.db` read-only.
 - Run `/cover-risk` at the start of any milestone touching `core/` to re-rank targets.
 - Any GUI changes get logic extracted into `core/` so it is testable headlessly, with a thin Qt layer on top.
+- **rclone I/O seam (2026-06-13):** every rclone command routes through `rclone_bridge._run`, which delegates to a swappable runner. `set_rclone_runner(fn)` / `reset_rclone_runner()` let tests install `tests/fakes.FakeRclone` (an in-memory remote) to exercise the full Drive paths without a network. `test_activity_pipeline.py` uses it to integration-test ship→fetch→merge→render end-to-end. Use this seam (not real rclone) when adding Drive-path tests; `cat_sha256` is the one exception (own Popen — inject `cat_fn` at the verify layer instead).
 
 ---
 
@@ -33,8 +34,8 @@ The only checks still needing Richard. The GUI smoke/worker tests that older fin
 - [x] **M7.4 guide read-through** — `docs/QUICKSTART.md` approved by Richard 2026-06-13.
 
 **Blocked until a prerequisite lands (do not attempt yet):**
-- [ ] **M9.1 log-shipping e2e** — set an activity remote base in Settings, run an offload/transfer, confirm the logs + manifests appear under `{remote}/{workstation}/{user}/`. The Settings field (M11.2) and launch trigger (M11.3) now exist, so this is unblocked and ready to run on the Mac.
-- [ ] **M9.3 org-refresh e2e** — with a remote base set and another machine's shard present, click "Refresh org activity" in the History tab and confirm the other machine's jobs appear. Local-only history already works offline; this exercises the remote shard pull.
+- [ ] **M9.1 log-shipping e2e** — set an activity remote base in Settings, run an offload/transfer, confirm the logs + manifests appear under `{remote}/{workstation}/{user}/`. **Wiring now integration-covered** by `test_activity_pipeline.py` through the rclone seam (FakeRclone), so this shrinks to a single real-Google smoke run for confidence.
+- [ ] **M9.3 org-refresh e2e** — with a remote base set and another machine's shard present, click "Refresh org activity" and confirm the other machine's jobs appear. **Wiring now integration-covered** (ship→fetch→merge→render runs end-to-end against FakeRclone); shrinks to a real-Google smoke run.
 - [ ] **M5.3 scheduled-verify e2e** — enable the schedule, confirm the launchd agent loads, force a failing archive, confirm the next-launch banner appears and dismisses. Blocked on M7.1 packaging (needs a stable `.app` executable path).
 - [ ] **M7.1 sign + notarize + fresh-Mac launch** — build scripts + unsigned DMG done and validated (2026-06-13). Remaining: code-sign/notarize/staple per `docs/release.md` then the fresh-Mac acceptance launch. Blocked on an Apple Developer account ($99/yr, Richard to set up). Also gates beta-tester recruitment.
 - [ ] **M8 AI assist** — one live API check per feature. On hold (not scheduled).

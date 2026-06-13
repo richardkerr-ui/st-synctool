@@ -38,8 +38,38 @@ def is_rclone_installed() -> bool:
     return find_binary(RCLONE_BIN) is not None
 
 
+# --------------------------------------------------------------------------- #
+# I/O seam (M11.x): every rclone command goes through _run, which delegates to a
+# swappable runner. The default shells out to the rclone binary; tests install a
+# fake runner with set_rclone_runner() to exercise the full Drive paths (verify,
+# transfer, merge, log-shipping, org-refresh) without a network or real rclone.
+# --------------------------------------------------------------------------- #
+
+_RUNNER = None  # None -> use _run_subprocess (the real backend)
+
+
+def set_rclone_runner(fn):
+    """Install a fake rclone runner. Returns the previous one (or None)."""
+    global _RUNNER
+    prev = _RUNNER
+    _RUNNER = fn
+    return prev
+
+
+def reset_rclone_runner():
+    """Restore the real subprocess runner."""
+    global _RUNNER
+    _RUNNER = None
+
+
 def _run(args, timeout=300, log_cb=None, progress_cb=None):
-    """Run an rclone command and stream stderr for progress and log events.
+    """Dispatch an rclone command through the active runner (real or fake)."""
+    runner = _RUNNER or _run_subprocess
+    return runner(args, timeout=timeout, log_cb=log_cb, progress_cb=progress_cb)
+
+
+def _run_subprocess(args, timeout=300, log_cb=None, progress_cb=None):
+    """Real backend: run an rclone command and stream stderr for progress + log.
 
     progress_cb receives (pct: int, info: dict) where info contains:
         line         -- original stats line (always present)
