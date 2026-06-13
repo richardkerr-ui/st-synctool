@@ -11,7 +11,21 @@ def _qcolor(hex_str):
     return QColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
+def _run_scheduled_verify_headless():
+    """M5.3: invoked by the launchd agent — run a batch verify and exit, no GUI."""
+    from core.scheduled_verify import run_scheduled_verify
+    state = run_scheduled_verify(log_cb=lambda m, l: print(f"[{l}] {m}"))
+    print(f"Scheduled verify complete: {state['ok']} OK, "
+          f"{state['failed']} failed, {state['error']} error")
+    return 0
+
+
 def main():
+    # M5.3: the monthly launchd agent relaunches us with this flag; run the
+    # verify headlessly and quit without ever constructing the GUI.
+    if "--scheduled-verify" in sys.argv:
+        sys.exit(_run_scheduled_verify_headless())
+
     run_preflight()
 
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"

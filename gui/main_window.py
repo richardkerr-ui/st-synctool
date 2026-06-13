@@ -137,6 +137,12 @@ class MainWindow(QMainWindow):
         self._auth_banner = self._build_auth_banner()
         root.addWidget(self._auth_banner)
 
+        # M5.3: scheduled-verify failure banner (hidden unless the last monthly
+        # run recorded unacknowledged failures).
+        self._sched_banner = self._build_scheduled_verify_banner()
+        root.addWidget(self._sched_banner)
+        self._refresh_scheduled_verify_banner()
+
         # Tutorial overlay (parented to central widget so it covers the tabs)
         # Created here so tab references are valid; started later.
         self._tutorial = None  # built lazily after tabs exist
@@ -191,6 +197,49 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Setup wizard + auth health
     # ------------------------------------------------------------------
+
+    def _build_scheduled_verify_banner(self) -> QWidget:
+        banner = QWidget()
+        banner.setObjectName("schedBanner")
+        banner.setStyleSheet(f"""
+            QWidget#schedBanner {{
+                background-color: {theme.CHARCOAL_LIGHT};
+                border-bottom: 2px solid {theme.ACCENT_CORAL};
+            }}
+            QWidget#schedBanner QLabel {{
+                color: {theme.CREAM};
+                background: transparent;
+            }}
+        """)
+        layout = QHBoxLayout(banner)
+        layout.setContentsMargins(12, 8, 12, 8)
+        self._sched_banner_label = QLabel()
+        self._sched_banner_label.setWordWrap(True)
+        layout.addWidget(self._sched_banner_label, stretch=1)
+        view_btn = QPushButton("Open Verify")
+        view_btn.setStyleSheet(theme.primary_button_style())
+        view_btn.clicked.connect(lambda: self.tabs.setCurrentWidget(self._verify_tab))
+        layout.addWidget(view_btn)
+        dismiss_btn = QPushButton("Dismiss")
+        dismiss_btn.setStyleSheet(theme.primary_button_style())
+        dismiss_btn.clicked.connect(self._dismiss_scheduled_verify_banner)
+        layout.addWidget(dismiss_btn)
+        banner.setVisible(False)
+        return banner
+
+    def _refresh_scheduled_verify_banner(self):
+        from core import scheduled_verify
+        state = scheduled_verify.read_pending_failures()
+        if state:
+            self._sched_banner_label.setText(scheduled_verify.format_failure_banner(state))
+            self._sched_banner.setVisible(True)
+        else:
+            self._sched_banner.setVisible(False)
+
+    def _dismiss_scheduled_verify_banner(self):
+        from core import scheduled_verify
+        scheduled_verify.acknowledge_failures()
+        self._sched_banner.setVisible(False)
 
     def _build_auth_banner(self) -> QWidget:
         banner = QWidget()
