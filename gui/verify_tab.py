@@ -41,6 +41,32 @@ class VerifyWorker(QObject):
             self.error.emit(str(e))
 
 
+class BatchVerifyWorker(QObject):
+    """M5.2: verify every registered project in one run. Thin adapter over
+    core.verify.pairs_from_registry + batch_verify."""
+    progress = pyqtSignal(int, str)
+    log      = pyqtSignal(str, str)
+    finished = pyqtSignal(list, list)   # summaries, skipped
+    error    = pyqtSignal(str)
+
+    def __init__(self, deep=False):
+        super().__init__()
+        self.deep = deep
+
+    def run(self):
+        try:
+            pairs, skipped = _verify.pairs_from_registry()
+            summaries = _verify.batch_verify(
+                pairs,
+                progress_cb=lambda pct, label: self.progress.emit(pct, label),
+                log_cb=lambda msg, level: self.log.emit(msg, level),
+                deep=self.deep,
+            )
+            self.finished.emit(summaries, skipped)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class VerifyTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -98,6 +124,15 @@ class VerifyTab(QWidget):
         self.verify_btn.setStyleSheet(theme.primary_button_style())
         self.verify_btn.clicked.connect(self._run_verify)
         btn_row.addWidget(self.verify_btn)
+
+        self.batch_btn = QPushButton("📋  Verify All Projects")
+        self.batch_btn.setFixedHeight(36)
+        self.batch_btn.setToolTip(
+            "Verify every project in the registry against its latest manifest,\n"
+            "producing one consolidated OK / MISSING / MISMATCH report."
+        )
+        self.batch_btn.clicked.connect(self._run_batch_verify)
+        btn_row.addWidget(self.batch_btn)
 
         self.cancel_btn = QPushButton("✕  Cancel")
         self.cancel_btn.setFixedHeight(36)
@@ -212,6 +247,7 @@ class VerifyTab(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         self.verify_btn.setEnabled(False)
+        self.batch_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.status_label.setText("Verifying…")
 
@@ -233,6 +269,65 @@ class VerifyTab(QWidget):
         self._worker.error.connect(self._thread.quit)
         self._thread.start()
 
+    def _run_batch_verify(self):
+        # M5.2: verify every registered project in one run (consolidated report).
+        self.log.clear_log()
+        self.log.log("Starting batch verification of all registered projects...", "info")
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.verify_btn.setEnabled(False)
+        self.batch_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.status_label.setText("Batch verifying…")
+
+        self._thread = QThread()
+        self._worker = BatchVerifyWorker(deep=False)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(
+            lambda p, label: (self.progress_bar.setValue(p), self.status_label.setText(label))
+        )
+        self._worker.log.connect(self.log.log)
+        self._worker.finished.connect(self._on_batch_done)
+        self._worker.error.connect(self._on_verify_error)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.error.connect(self._thread.quit)
+        self._thread.start()
+
+    def _on_batch_done(self, summaries, skipped):
+        self.verify_btn.setEnabled(True)
+        self.batch_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setValue(100)
+        self.progress_bar.setVisible(False)
+
+        report = _verify.format_batch_report(summaries, skipped)
+        n_fail = sum(1 for s in summaries if s.verdict == "FAIL")
+        n_err = sum(1 for s in summaries if s.verdict == "ERROR")
+        n_ok = sum(1 for s in summaries if s.verdict == "OK")
+        level = "success" if (n_fail == 0 and n_err == 0) else "warning"
+        self.log.log(
+            f"Batch verification complete — {n_ok} OK | {n_fail} fail | {n_err} error "
+            f"across {len(summaries)} project(s)", level,
+        )
+        self.status_label.setText(f"{n_ok}/{len(summaries)} projects OK")
+
+        # Persist the consolidated report.
+        import getpass, socket
+        from datetime import datetime
+        log_dir = Path.home() / "Documents" / "STSyncTool" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = log_dir / f"batch_verify_{ts}.txt"
+        header = (
+            f"Date/Time  : {datetime.now().isoformat()}\n"
+            f"Workstation: {socket.gethostname()}\n"
+            f"User       : {getpass.getuser()}\n\n"
+        )
+        report_path.write_text(header + report)
+        self.log.log(f"  Report saved: {report_path}", "info")
+        QMessageBox.information(self, "Batch Verification Complete", report)
+
     def _update_deep_enabled(self, text):
         """Deep verify only applies to Drive folders; disable + uncheck for local."""
         is_url = is_gdrive_url(text.strip())
@@ -245,6 +340,7 @@ class VerifyTab(QWidget):
             self._thread.quit()
             self._thread.wait(3000)
         self.verify_btn.setEnabled(True)
+        self.batch_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.status_label.setText("Cancelled")
@@ -252,6 +348,7 @@ class VerifyTab(QWidget):
 
     def _on_verify_done(self, results):
         self.verify_btn.setEnabled(True)
+        self.batch_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self.progress_bar.setValue(100)
         self.progress_bar.setVisible(False)
@@ -277,6 +374,7 @@ class VerifyTab(QWidget):
 
     def _on_verify_error(self, msg):
         self.verify_btn.setEnabled(True)
+        self.batch_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.status_label.setText("Error")

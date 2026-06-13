@@ -24,6 +24,7 @@ No PyQt6 import here; the GUI layer wires the callbacks to Qt signals.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -321,6 +322,159 @@ def verify_gdrive_deep(
 
     progress(100, "Complete")
     return results
+
+
+# ---------------------------------------------------------------------------
+# M5.2 — Batch verify across the projects registry
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ProjectVerifySummary:
+    """Consolidated per-project outcome from a batch verify run."""
+
+    label: str
+    folder: str
+    total: int
+    ok: int
+    missing: int
+    mismatch: int
+    format_fail: int
+    error: str = ""  # set when the project could not be verified at all
+
+    @property
+    def passed(self) -> bool:
+        return (not self.error and self.missing == 0
+                and self.mismatch == 0 and self.format_fail == 0)
+
+    @property
+    def verdict(self) -> str:
+        if self.error:
+            return "ERROR"
+        return "OK" if self.passed else "FAIL"
+
+
+def summarize_results(label: str, folder, results: list) -> ProjectVerifySummary:
+    """Reduce a per-file results list to a ProjectVerifySummary."""
+    def _count(status: str) -> int:
+        return sum(1 for r in results if r.get("status") == status)
+    return ProjectVerifySummary(
+        label=label,
+        folder=str(folder),
+        total=len(results),
+        ok=_count("OK"),
+        missing=_count("MISSING"),
+        mismatch=_count("MISMATCH"),
+        format_fail=_count("FORMAT_FAIL"),
+    )
+
+
+def pairs_from_registry(projects: Optional[list] = None) -> tuple:
+    """
+    Build (pairs, skipped) from the projects registry.
+
+    pairs   — list of {"label", "folder", "manifest"} ready for batch_verify.
+    skipped — list of (label, reason) for projects that can't be verified
+              (no manifest on record, no folder, or manifest fails to load).
+
+    projects is injectable for testing; defaults to core.projects.list_projects().
+    """
+    from core.manifest import load_manifest
+    if projects is None:
+        from core import projects as _projects
+        projects = _projects.list_projects()
+
+    pairs: list = []
+    skipped: list = []
+    for p in projects:
+        label = p.get("display_name") or p.get("project_id") or "(unnamed)"
+        folder = p.get("local_path") or p.get("server_path")
+        mpath = p.get("latest_manifest")
+        if not mpath or not Path(mpath).exists():
+            skipped.append((label, "no manifest on record"))
+            continue
+        if not folder:
+            skipped.append((label, "no folder on record"))
+            continue
+        try:
+            manifest = load_manifest(Path(mpath))
+        except Exception as e:
+            skipped.append((label, f"manifest load failed: {e}"))
+            continue
+        pairs.append({"label": label, "folder": folder, "manifest": manifest})
+    return pairs, skipped
+
+
+def batch_verify(
+    pairs: list,
+    progress_cb: Optional[ProgressCallback] = None,
+    log_cb: Optional[LogCallback] = None,
+    deep: bool = False,
+    verify_fn: Optional[Callable] = None,
+) -> list:
+    """
+    Verify a list of {"label", "folder", "manifest"} pairs and return one
+    ProjectVerifySummary per pair. A project that raises (unreadable folder,
+    rclone failure) becomes an ERROR summary rather than aborting the batch.
+
+    Progress is reported at project granularity. verify_fn is injectable for
+    testing; defaults to verify_folder.
+    """
+    progress = progress_cb or _noop_progress
+    log = log_cb or _noop_log
+    vfn = verify_fn or verify_folder
+
+    summaries: list = []
+    total = max(len(pairs), 1)
+    for i, pair in enumerate(pairs):
+        label = pair["label"]
+        folder = pair["folder"]
+        manifest = pair["manifest"]
+        progress(int(i / total * 100), label)
+        log(f"Verifying project: {label} ({folder})", "info")
+        try:
+            results = vfn(folder, manifest, log_cb=log, deep=deep)
+        except Exception as e:
+            summaries.append(ProjectVerifySummary(
+                label, str(folder), 0, 0, 0, 0, 0, error=str(e)))
+            log(f"  ERROR verifying {label}: {e}", "error")
+            continue
+        summary = summarize_results(label, folder, results)
+        summaries.append(summary)
+        log(f"  {label}: {summary.verdict} — {summary.ok} OK, "
+            f"{summary.missing} missing, {summary.mismatch} mismatch", "info")
+
+    progress(100, "Complete")
+    return summaries
+
+
+def format_batch_report(summaries: list, skipped: Optional[list] = None) -> str:
+    """Render a consolidated plain-text batch verify report."""
+    lines = [
+        "ST SyncTool — Batch Verification Report",
+        "=" * 60,
+        f"Projects verified: {len(summaries)}",
+        "",
+    ]
+    n_fail = sum(1 for s in summaries if s.verdict == "FAIL")
+    n_err = sum(1 for s in summaries if s.verdict == "ERROR")
+    n_ok = sum(1 for s in summaries if s.verdict == "OK")
+    lines.append(f"OK: {n_ok}   FAIL: {n_fail}   ERROR: {n_err}")
+    lines.append("")
+    for s in summaries:
+        lines.append(f"[{s.verdict}] {s.label}")
+        lines.append(f"        {s.folder}")
+        if s.error:
+            lines.append(f"        error: {s.error}")
+        else:
+            lines.append(
+                f"        {s.total} files — {s.ok} OK, {s.missing} missing, "
+                f"{s.mismatch} mismatch, {s.format_fail} format-fail")
+    if skipped:
+        lines += ["", "Skipped (not verifiable):"]
+        for label, reason in skipped:
+            lines.append(f"  - {label}: {reason}")
+    lines += ["", "END OF REPORT"]
+    return "\n".join(lines)
 
 
 def verify_folder(

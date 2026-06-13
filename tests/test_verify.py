@@ -284,3 +284,110 @@ def test_deep_progress_completes(monkeypatch):
     verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn,
                               progress_cb=lambda p, path: prog.append((p, path)))
     assert prog[-1] == (100, "Complete")
+
+
+# ── M5.2 batch verify ────────────────────────────────────────────────────────
+
+def test_summarize_results_counts():
+    results = [
+        {"path": "a", "status": "OK"},
+        {"path": "b", "status": "MISSING"},
+        {"path": "c", "status": "MISMATCH"},
+        {"path": "d", "status": "FORMAT_FAIL"},
+        {"path": "e", "status": "OK"},
+    ]
+    s = verify.summarize_results("Proj", "/tmp/p", results)
+    assert (s.total, s.ok, s.missing, s.mismatch, s.format_fail) == (5, 2, 1, 1, 1)
+    assert s.passed is False
+    assert s.verdict == "FAIL"
+
+
+def test_summary_passed_when_all_ok():
+    s = verify.summarize_results("P", "/f", [{"path": "a", "status": "OK"}])
+    assert s.passed is True
+    assert s.verdict == "OK"
+
+
+def test_batch_verify_mixed(monkeypatch):
+    # Project results scripted via an injected verify_fn keyed on folder.
+    scripted = {
+        "/good": [{"path": "a", "status": "OK"}, {"path": "b", "status": "OK"}],
+        "/bad":  [{"path": "a", "status": "OK"}, {"path": "b", "status": "MISMATCH"}],
+    }
+    def vfn(folder, manifest, log_cb=None, deep=False):
+        if folder == "/boom":
+            raise RuntimeError("folder gone")
+        return scripted[folder]
+    pairs = [
+        {"label": "Good", "folder": "/good", "manifest": {"files": {}}},
+        {"label": "Bad", "folder": "/bad", "manifest": {"files": {}}},
+        {"label": "Boom", "folder": "/boom", "manifest": {"files": {}}},
+    ]
+    summaries = verify.batch_verify(pairs, verify_fn=vfn)
+    by_label = {s.label: s for s in summaries}
+    assert by_label["Good"].verdict == "OK"
+    assert by_label["Bad"].verdict == "FAIL"
+    assert by_label["Boom"].verdict == "ERROR"
+    assert "folder gone" in by_label["Boom"].error
+
+
+def test_batch_verify_progress_completes():
+    pairs = [{"label": "P", "folder": "/f", "manifest": {"files": {}}}]
+    prog = []
+    verify.batch_verify(pairs, verify_fn=lambda *a, **k: [],
+                        progress_cb=lambda p, label: prog.append((p, label)))
+    assert prog[-1] == (100, "Complete")
+
+
+def test_batch_verify_passes_deep_flag():
+    seen = {}
+    def vfn(folder, manifest, log_cb=None, deep=False):
+        seen["deep"] = deep
+        return []
+    verify.batch_verify([{"label": "P", "folder": "/f", "manifest": {}}],
+                        verify_fn=vfn, deep=True)
+    assert seen["deep"] is True
+
+
+def test_pairs_from_registry(monkeypatch, tmp_path):
+    mpath = tmp_path / "m.json"
+    mpath.write_text("{}")
+    monkeypatch.setattr("core.manifest.load_manifest", lambda p: {"files": {"a": {}}})
+    projects = [
+        {"display_name": "Has manifest", "local_path": "/f1", "latest_manifest": str(mpath)},
+        {"display_name": "No manifest", "local_path": "/f2", "latest_manifest": ""},
+        {"display_name": "Missing file", "local_path": "/f3",
+         "latest_manifest": str(tmp_path / "nope.json")},
+        {"display_name": "No folder", "local_path": "", "latest_manifest": str(mpath)},
+    ]
+    pairs, skipped = verify.pairs_from_registry(projects=projects)
+    assert len(pairs) == 1 and pairs[0]["label"] == "Has manifest"
+    skip_labels = {label: reason for label, reason in skipped}
+    assert "No manifest" in skip_labels and "Missing file" in skip_labels
+    assert "No folder" in skip_labels
+
+
+def test_pairs_from_registry_manifest_load_failure(monkeypatch, tmp_path):
+    mpath = tmp_path / "m.json"
+    mpath.write_text("garbage")
+    def boom(p):
+        raise ValueError("bad json")
+    monkeypatch.setattr("core.manifest.load_manifest", boom)
+    projects = [{"display_name": "Broken", "local_path": "/f", "latest_manifest": str(mpath)}]
+    pairs, skipped = verify.pairs_from_registry(projects=projects)
+    assert pairs == []
+    assert "manifest load failed" in skipped[0][1]
+
+
+def test_format_batch_report():
+    summaries = [
+        verify.summarize_results("Good", "/g", [{"path": "a", "status": "OK"}]),
+        verify.summarize_results("Bad", "/b", [{"path": "a", "status": "MISMATCH"}]),
+        verify.ProjectVerifySummary("Err", "/e", 0, 0, 0, 0, 0, error="no access"),
+    ]
+    report = verify.format_batch_report(summaries, skipped=[("Skip", "no manifest")])
+    assert "Projects verified: 3" in report
+    assert "OK: 1" in report and "FAIL: 1" in report and "ERROR: 1" in report
+    assert "[OK] Good" in report and "[FAIL] Bad" in report and "[ERROR] Err" in report
+    assert "no access" in report
+    assert "Skip: no manifest" in report

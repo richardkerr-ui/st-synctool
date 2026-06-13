@@ -252,6 +252,10 @@ The default Drive check trusts Google's stored hashes. For higher assurance, tic
 
 Any files present in the folder but not in the manifest are noted as a warning (not failures).
 
+### Verify all projects (batch)
+
+The **Verify All Projects** button runs every project in the registry (`~/Documents/STSyncTool/projects.json`) against its latest manifest in one pass and produces a single consolidated report with per-project OK / MISSING / MISMATCH counts and an overall OK / FAIL / ERROR tally. Projects with no manifest on record, no folder, or an unreadable manifest are listed in a "Skipped" section with the reason. A project that fails to verify (unreadable folder, rclone error) is reported as ERROR without aborting the rest of the run.
+
 ### Output
 
 A verification report at `~/Documents/STSyncTool/logs/verify_<timestamp>.txt` with per-file status.
