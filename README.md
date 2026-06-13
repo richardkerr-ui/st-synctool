@@ -8,12 +8,15 @@ Handles multi-GB video / audio / PSD / After Effects assets without re-uploading
 
 ## What it does
 
-Four things, each in its own tab:
+Five tabs:
 
-- **Transfer** — push or pull a folder one-way, with integrity verification
+- **Transfer** — push or pull a folder one-way, with integrity verification (optional ASC MHL sidecar for delivery)
 - **Merge** — reconcile diverged copies using a three-way diff and apply only the changes
-- **Verify** — confirm a folder still matches a saved manifest
-- **Offload** — ingest from camera cards and audio recorders with pre-hash verification, staging, contact sheet generation, and chain-of-custody logging
+- **Offload** — ingest from camera cards and audio recorders with pre-hash verification, staging, contact sheet generation, chain-of-custody logging and a "safe to format" clearance
+- **Verify** — confirm a folder still matches a saved manifest (with deep Drive verify and batch verify across every registered project)
+- **History** — every offload, transfer, merge and verify across all machines in one filterable list, with org-health staleness flags
+
+Header tools sit top-right: a guided **? Tour**, **Report a Problem** (bundle logs to email), and **Settings**. A one-page walkthrough lives in [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ---
 
@@ -123,7 +126,7 @@ source .venv/bin/activate
 python3 main.py
 ```
 
-Three tabs across the top. Each has its own purpose.
+Five tabs across the top. Each has its own purpose.
 
 ---
 
@@ -162,8 +165,8 @@ Before starting, the app shows total source size, estimated transfer time at 150
 
 Two artifacts get written:
 
-1. **Manifest** (`st_manifest.json`) — saved into source and destination folders, plus a timestamped copy in `~/Documents/STSyncTool/manifests/`
-2. **Text log** — `~/Documents/STSyncTool/logs/transfer_<timestamp>.txt` with per-file hashes and status
+1. **Manifest** (`st_manifest.json`) — saved into source and destination folders, plus a timestamped copy in `~/Documents/STSyncTool/Manifests/`
+2. **Text log** — `~/Documents/STSyncTool/Transfer Reports/transfer_<timestamp>.txt` with per-file hashes and status
 
 ---
 
@@ -203,7 +206,7 @@ It updates live as you change per-row actions: resolving a conflict moves it fro
 
 ### Inputs
 
-- **Base Manifest** — optional. Auto-detects `st_manifest.json` in the local folder. Only override if you specifically want to compare against a different snapshot from `~/Documents/STSyncTool/manifests/`.
+- **Base Manifest** — optional. Auto-detects `st_manifest.json` in the local folder. Only override if you specifically want to compare against a different snapshot from `~/Documents/STSyncTool/Manifests/`.
 - **Local Folder** — your working copy
 - **Server** — the source of truth. Local path or Drive URL.
 
@@ -260,13 +263,13 @@ The **Verify All Projects** button runs every project in the registry (`~/Docume
 
 ### Scheduled monthly verification
 
-The app can install a macOS launchd agent that wakes once a month, verifies every registered project against its latest manifest, writes a consolidated report to `~/Documents/STSyncTool/logs/scheduled_verify_<timestamp>.txt`, and records the outcome. On the next normal launch, if the last scheduled run found problems, a dismissible banner appears ("2 archives failed verification on June 1"). No daemon and no background app — just a launchd agent the app installs on request and a headless run triggered with `--scheduled-verify`. (The install toggle ships with the signed app build, since the agent must point at the installed application.)
+The app can install a macOS launchd agent that wakes once a month, verifies every registered project against its latest manifest, writes a consolidated report to `~/Documents/STSyncTool/Verify Reports/scheduled_verify_<timestamp>.txt`, and records the outcome. On the next normal launch, if the last scheduled run found problems, a dismissible banner appears ("2 archives failed verification on June 1"). No daemon and no background app — just a launchd agent the app installs on request and a headless run triggered with `--scheduled-verify`. (The install toggle ships with the signed app build, since the agent must point at the installed application.)
 
 ### Output
 
-A verification report at `~/Documents/STSyncTool/logs/verify_<timestamp>.txt` with per-file status.
+A verification report at `~/Documents/STSyncTool/Verify Reports/verify_<timestamp>.txt` with per-file status.
 
-Every run also persists a machine-readable JSON report at `~/Documents/STSyncTool/logs/verify_report_<label>_<timestamp>.json` carrying each per-file result, including the format-aware media-verify outcome (`OK` / `ADVISORY` / `FAILED`), so the evidence survives the window closing. Where a manifest is present on disk, the same media-verify outcome is written into a `media_verify` block on each media file's manifest entry. Both formats are documented in `SCHEMA_INTEROP_SPEC.md`.
+Every run also persists a machine-readable JSON report at `~/Documents/STSyncTool/Verify Reports/verify_report_<label>_<timestamp>.json` carrying each per-file result, including the format-aware media-verify outcome (`OK` / `ADVISORY` / `FAILED`), so the evidence survives the window closing. Where a manifest is present on disk, the same media-verify outcome is written into a `media_verify` block on each media file's manifest entry. Both formats are documented in `SCHEMA_INTEROP_SPEC.md`.
 
 ---
 
@@ -318,7 +321,7 @@ A live grid shows each source/destination pair as: pending / copying / verifying
 
 ### Output
 
-For each offload, a chain-of-custody log is saved to `~/Documents/STSyncTool/offload_logs/`. It records source manifests, per-destination verification results, any filename renames, and contact sheet artifacts.
+For each offload, a chain-of-custody log is saved to `~/Documents/STSyncTool/Offload Reports/`. It records source manifests, per-destination verification results, any filename renames, and contact sheet artifacts.
 
 ### Safe to format
 
@@ -331,7 +334,7 @@ For every source the log carries an explicit `CLEARANCE:` verdict. A card is mar
 After the primary destination commits and verifies, a contact sheet is generated for the source label. One row per clip. Saved to:
 
 - `{primary_dest}/{source_label}/_contact_sheet_{ts}.pdf`
-- `~/Documents/STSyncTool/contact_sheets/_contact_sheet_{ts}.pdf`
+- `~/Documents/STSyncTool/Contact Sheets/_contact_sheet_{ts}.pdf`
 
 **Thumbnail count (adaptive, 1–4 max):**
 
@@ -404,7 +407,7 @@ The manifest is a JSON file that lists every file in a folder along with:
 **Where they live:**
 
 - In the folder itself (`<folder>/st_manifest.json`) — what the tool auto-detects
-- Timestamped copies in `~/Documents/STSyncTool/manifests/` — historical record
+- Timestamped copies in `~/Documents/STSyncTool/Manifests/` — historical record
 
 **When they get created:**
 
@@ -453,7 +456,7 @@ On the Transfer tab. Generates a manifest for a folder without copying anything.
 
 ### Historical manifests
 
-Every successful Transfer or Merge writes a timestamped manifest to `~/Documents/STSyncTool/manifests/`. Filename format:
+Every successful Transfer or Merge writes a timestamped manifest to `~/Documents/STSyncTool/Manifests/`. Filename format:
 
 ```
 st_manifest_<folder_name>_<YYYYMMDD>_<HHMMSS>.json
@@ -463,11 +466,15 @@ These accumulate over time. Safe to delete if you do not need the history.
 
 ### Logs
 
-All transfer and verification text logs:
+Human-readable reports live under `~/Documents/STSyncTool/`, split by type:
 
 ```
-~/Documents/STSyncTool/logs/
+Offload Reports/<date>/   chain-of-custody logs
+Verify Reports/           verify, batch-verify and scheduled-verify reports
+Transfer Reports/         transfer logs
 ```
+
+(See **Where your files go** above for the full layout.)
 
 ---
 
@@ -512,7 +519,7 @@ brew upgrade rclone
 
 ### Verify shows mass MISSING / MISMATCH against a Drive folder you know is correct
 
-You probably paired the wrong manifest with the wrong Drive folder. Most common cause: the manifest in your local folder got overwritten by a subsequent Transfer run. Look in `~/Documents/STSyncTool/manifests/` for the historical manifest from the time of the original upload, and use that instead.
+You probably paired the wrong manifest with the wrong Drive folder. Most common cause: the manifest in your local folder got overwritten by a subsequent Transfer run. Look in `~/Documents/STSyncTool/Manifests/` for the historical manifest from the time of the original upload, and use that instead.
 
 ---
 
@@ -536,7 +543,18 @@ Tick **Export ASC MHL (.mhl)** in the Transfer or Offload tab to write an ASC Me
 
 ## Report a problem
 
-A **Report a Problem** button in the window header bundles recent logs into a single zip a tester can email. It collects the last 14 days of files from `~/Documents/STSyncTool/logs/` and `~/Documents/STSyncTool/offload_logs/`, plus a `system_info.txt` carrying the app version, macOS version and Python version. You pick where to save the zip; the app then reveals it in Finder so you can attach it to an email describing the problem. Nothing is uploaded — the bundle never leaves your machine until you send it.
+A **Report a Problem** button in the window header bundles recent logs into a single zip a tester can email. It collects the last 14 days of files from `Offload Reports/`, `Verify Reports/` and `Transfer Reports/`, plus a `system_info.txt` carrying the app version, macOS version and Python version. You pick where to save the zip; the app then reveals it in Finder so you can attach it to an email describing the problem. Nothing is uploaded — the bundle never leaves your machine until you send it.
+
+---
+
+## Settings
+
+The **Settings** button in the header opens a small dialog for the org-activity options:
+
+- **Activity remote base** — the shared Drive folder logs ship to. It ships with a sensible default (the Signal Theory shared folder), so most users never touch it. You can paste a Google Drive folder URL, a full rclone base (`gdrive:Folder`) or a bare folder name to override; leave it blank to use the default.
+- **Ship logs to the shared folder** — the opt-out toggle. On by default once a base is set; turn it off to keep everything local.
+
+Settings persist to `~/.config/st_synctool/config.json` (shared with the active rclone remote). An `ST_SYNC_ACTIVITY_REMOTE` environment variable overrides the base for a single run.
 
 ---
 
@@ -588,30 +606,55 @@ Paths are defined in one place (`core/paths.py`) and can be redirected with the 
 
 ```
 st_synctool/
-  main.py                  Entry point
+  main.py                  Entry point (prepends bundled-binary dirs to PATH when frozen)
   core/
+    paths.py               Single source of truth for the on-disk layout (ST_SYNC_HOME)
+    version.py             __version__ — single source for the app version
     checksum.py            SHA-256 / SHA-1 / MD5 / xxhash3_64 file hashing
     manifest.py            Manifest schema, generate/save/load
     comparison.py          Three-way diff logic
+    diff_summary.py        Merge summary header counts
     transfer.py            Local-to-local and rclone transfer orchestration
-    rclone_bridge.py       Subprocess wrapper around rclone CLI
+    rclone_bridge.py       Subprocess wrapper around rclone CLI (swappable runner seam)
     merge_ops.py           Single-file push/pull/delete operations
+    merge_logic.py         Server-manifest routing for the Merge tab
     offload.py             Camera card ingest: pre-hash, staging, verify, commit, COC log
+    clearance.py           "Safe to format" verdict (M10.1)
+    verify.py              Verify logic: local, Drive, deep, batch, report persistence (M5.x)
+    media_verify.py        Format-aware media checks (ffprobe)
+    quota.py               Google rate-limit classification + daily upload floor (M10.2)
+    scheduled_verify.py    launchd monthly verify + failure banner (M5.3)
+    asc_mhl.py             ASC MHL v2.0 export (M10.3)
+    settings.py            Typed settings store + activity-base resolution (M11.1)
+    log_sync.py            Org log shipping to the shared Drive folder (M9.1)
+    activity_index.py      Per-machine activity shards: write/merge/fetch/staleness (M9.2/9.3)
+    history.py             History row formatting, filtering, staleness line (M9.3)
+    feedback.py            "Report a Problem" log+info zip bundle (M7.3)
+    update_check.py        GitHub release check (M7.5)
     thumbnail.py           Frame extraction, tile compositor, contact sheet PDF output
     projects.py            Projects registry and destination preset persistence
     amphetamine.py         AppleScript wrapper for Amphetamine.app
+    demo.py                Demo data for every tab (transfer/merge/offload/verify/history)
   utils/
     file_utils.py          folder_size, free_space, format_bytes
-    gdrive_utils.py        URL parsing, rclone remote detection
+    gdrive_utils.py        URL parsing, rclone remote detection, folder-id connstr
+    resources.py           Bundled-binary discovery for the frozen .app (M7.1)
   gui/
-    main_window.py         Tab container
+    main_window.py         5-tab container + header (Settings/Report/Tour), banners, tour
     transfer_tab.py        Transfer tab UI + worker
     merge_tab.py           Merge tab UI + worker
     verify_tab.py          Verify tab UI + worker
     offload_tab.py         Offload tab UI + workers
+    history_tab.py         History tab UI (M9.3)
+    settings_dialog.py     Settings dialog (M11.2)
+    setup_wizard.py        First-run rclone setup wizard
+    tutorial_overlay.py    Guided onboarding tour overlay
     path_input_widget.py   Reusable path input with browse button
     log_widget.py          Reusable colored log output
     diff_table.py          Diff table with per-row dropdowns
+  STSyncTool.spec          PyInstaller build spec (M7.1)
+  build.sh                 Build .app + DMG (optional codesign)
+  docs/                    QUICKSTART.md, release.md (build runbook)
   requirements.txt
 ```
 
@@ -679,14 +722,20 @@ No code changes needed.
 
 ### Key paths
 
-| Name | Path |
+All on-disk paths resolve through **`core/paths.py`** (the single source of truth), with the base redirectable via the `ST_SYNC_HOME` env var (the test suite uses this so it never writes into the real Documents folder).
+
+| Accessor (`core.paths`) | Path |
 |------|------|
+| `base_dir()` | `~/Documents/STSyncTool/` (or `$ST_SYNC_HOME`) |
+| `manifests_dir()` | `…/Manifests/` |
+| `offload_reports_dir()` | `…/Offload Reports/<date>/` |
+| `verify_reports_dir()` | `…/Verify Reports/` |
+| `transfer_reports_dir()` | `…/Transfer Reports/` |
+| `contact_sheets_dir()` | `…/Contact Sheets/` |
+| `projects_registry()` | `…/projects.json` |
+| `app_state_dir()` | `…/.app-state/` (hidden: ledger, tally, scheduled-verify state, `activity/` shards) |
 | `MANIFEST_FILENAME` | `st_manifest.json` — written to local + server root |
-| `LOCAL_MANIFEST_DIR` | `~/Documents/STSyncTool/manifests/` |
-| `APP_CONFIG` | `~/.config/st_synctool/config.json` |
-| `PROJECTS_REGISTRY` | `~/Documents/STSyncTool/projects.json` |
-| `CONTACT_SHEETS_DIR` | `~/Documents/STSyncTool/contact_sheets/` |
-| `OFFLOAD_LOGS_DIR` | `~/Documents/STSyncTool/offload_logs/` |
+| App config | `~/.config/st_synctool/config.json` (active remote + Settings) |
 
 ### Checksum algorithm selection
 
