@@ -464,7 +464,9 @@ class TestConflictActionChangedSignal:
         assert fired[0][0] == "x.mov"
         assert fired[0][1] == new_action
 
-    def test_signal_does_not_fire_for_non_conflict_rows(self, qapp):
+    def test_signal_fires_for_non_conflict_rows(self, qapp):
+        # M2: conflict_action_changed now fires for EVERY row's combo, not just
+        # conflicts, so the summary header stays live on any action change.
         from gui.diff_table import DiffTable
         table = DiffTable()
         rows = [DiffResult(path="y.mov", state=DiffState.LOCAL_ONLY, yours_entry=_entry())]
@@ -472,8 +474,9 @@ class TestConflictActionChangedSignal:
         fired = []
         table.conflict_action_changed.connect(lambda p, a: fired.append((p, a)))
         combo = table._action_combos.get("y.mov")
-        if combo:
-            options = [combo.itemText(i) for i in range(combo.count())]
-            if len(options) > 1:
-                combo.setCurrentIndex(1)
-        assert not fired, "signal should not fire for LOCAL_ONLY rows"
+        assert combo is not None, "every row should get an action combo"
+        options = [combo.itemText(i) for i in range(combo.count())]
+        if len(options) > 1:
+            combo.setCurrentIndex(1)
+            assert fired, "signal should fire for non-conflict rows (M2 live header)"
+            assert fired[0][0] == "y.mov"
