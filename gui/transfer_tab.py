@@ -353,13 +353,10 @@ class TransferTab(QWidget):
         gdrive_mode = src_is_url or dst_is_url
         mirror_mode = self.mirror_chk.isChecked()
 
-        if src_is_url and dst_is_url:
-            QMessageBox.critical(
-                self, "Unsupported",
-                "Drive-to-Drive transfers aren't supported yet. "
-                "Sync down to a local folder first, then up to the destination."
-            )
-            return
+        # M3: Drive-to-Drive (both sides URLs) is supported — rclone copies
+        # server-side with no local disk. route_transfer dispatches it to
+        # transfer_folder_rclone; pre_flight_checks sizes the remote source and
+        # enforces the 750 GB/day limit. No guard here.
 
         try:
             pre_flight_checks(
