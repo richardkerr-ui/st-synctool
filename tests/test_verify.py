@@ -496,3 +496,32 @@ def test_write_verify_report_no_label(tmp_path):
     now = datetime(2026, 6, 12, 14, 30, 0)
     path = verify.write_verify_report("/x", [], label="", log_dir=tmp_path, now=now)
     assert path.name == "verify_report_20260612_143000.json"
+
+
+# --------------------------------------------------------------------------- #
+# M9.2: verify_folder records a 'verify' activity line
+# --------------------------------------------------------------------------- #
+
+def test_verify_folder_logs_activity(tmp_path, monkeypatch):
+    import hashlib
+    from core import verify as v
+    from core import activity_index as ai
+    monkeypatch.setattr(ai, "ACTIVITY_DIR", tmp_path / "activity")
+
+    folder = tmp_path / "A001"; folder.mkdir()
+    data = b"clip-bytes"
+    (folder / "clip.mov").write_bytes(data)
+    sha = hashlib.sha256(data).hexdigest()
+    manifest = {
+        "label": "ProjX", "workstation": "Cart 1", "user": "dit",
+        "file_count": 1, "total_size_bytes": len(data),
+        "files": {"clip.mov": {"type": "file", "size": len(data),
+                               "checksums": {"sha256": sha}}},
+    }
+    results = v.verify_folder(folder, manifest)
+    assert all(r["status"] == "OK" for r in results)
+
+    shards = ai.find_shards(tmp_path / "activity")
+    recs = ai.merge_shards(shards)
+    assert any(r["operation"] == "verify" and r["verdict"] == "OK"
+               and r["project"] == "ProjX" for r in recs)

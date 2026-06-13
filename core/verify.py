@@ -497,9 +497,29 @@ def verify_folder(
     """
     if is_gdrive_url(str(folder)):
         if deep:
-            return verify_gdrive_deep(folder, manifest, progress_cb, log_cb)
-        return verify_gdrive(folder, manifest, progress_cb, log_cb)
-    return verify_local(folder, manifest, progress_cb, log_cb)
+            results = verify_gdrive_deep(folder, manifest, progress_cb, log_cb)
+        else:
+            results = verify_gdrive(folder, manifest, progress_cb, log_cb)
+    else:
+        results = verify_local(folder, manifest, progress_cb, log_cb)
+    _log_verify_activity(folder, manifest, results)
+    return results
+
+
+def _log_verify_activity(folder, manifest: dict, results: list) -> None:
+    """M9.2: record one 'verify' line in the local activity index. Never raises —
+    activity logging must not affect the verify it describes."""
+    try:
+        from core.activity_index import record_from_manifest, safe_append_activity
+        label = manifest.get("label") or str(folder).rstrip("/").rsplit("/", 1)[-1]
+        summary = summarize_results(label, folder, results)
+        safe_append_activity(record_from_manifest(
+            manifest, operation="verify",
+            source=str(folder).rstrip("/").rsplit("/", 1)[-1],
+            verdict=summary.verdict,
+        ))
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
