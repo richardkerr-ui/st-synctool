@@ -528,6 +528,12 @@ On launch the app quietly asks GitHub for the latest published release (5-second
 
 ---
 
+## Report a problem
+
+A **Report a Problem** button in the window header bundles recent logs into a single zip a tester can email. It collects the last 14 days of files from `~/Documents/STSyncTool/logs/` and `~/Documents/STSyncTool/offload_logs/`, plus a `system_info.txt` carrying the app version, macOS version and Python version. You pick where to save the zip; the app then reveals it in Finder so you can attach it to an email describing the problem. Nothing is uploaded — the bundle never leaves your machine until you send it.
+
+---
+
 ## Org-wide activity log
 
 Every offload, transfer, merge and verify writes its custody log and manifest locally first — the local copy is the source of truth and never depends on the network. The app then ships those files (append-only, never deleting anything remotely) to a shared Google Drive folder via the rclone remote every user already has, so the org gets a single view of all production activity. The remote layout mirrors the local folders, namespaced per machine and user: `ST_SyncTool_Activity/{workstation}/{user}/...`.

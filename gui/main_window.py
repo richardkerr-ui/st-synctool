@@ -136,10 +136,25 @@ class MainWindow(QMainWindow):
         self._tour_btn.setToolTip("Replay the onboarding tour")
         self._tour_btn.clicked.connect(self._launch_tutorial)
 
+        # M7.3: "Report a Problem" — zips recent logs + version/OS info to email.
+        self._feedback_btn = QPushButton("Report a Problem")
+        self._feedback_btn.setFixedHeight(24)
+        self._feedback_btn.setStyleSheet("""
+            QPushButton {
+                background:#2a2a2a; color:#888;
+                border:1px solid #3a3a3a; border-radius:4px;
+                font-size:11px; padding:0 8px;
+            }
+            QPushButton:hover { background:#3a3a3a; color:#ccc; }
+        """)
+        self._feedback_btn.setToolTip("Bundle recent logs and app info into a zip to email")
+        self._feedback_btn.clicked.connect(self._report_problem)
+
         header.addWidget(title)
         header.addWidget(subtitle)
         header.addStretch()
         header.addWidget(self._account_label)
+        header.addWidget(self._feedback_btn)
         header.addWidget(self._tour_btn)
         header.addSpacing(6)
         header.addWidget(version)
@@ -673,6 +688,35 @@ class MainWindow(QMainWindow):
         self._tutorial.resize(self.centralWidget().size())
         self._tutorial.set_steps(self._build_tutorial_steps())
         self._tutorial.start()
+
+    def _report_problem(self):
+        """M7.3: build a feedback zip and reveal it in Finder for the tester to email.
+
+        Thin GUI — all collection/zip logic lives in core.feedback."""
+        from PyQt6.QtWidgets import QMessageBox, QFileDialog
+        from core import feedback
+
+        suggested = feedback.default_bundle_path()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save feedback bundle", str(suggested), "Zip archives (*.zip)"
+        )
+        if not path:
+            return
+        try:
+            bundle = feedback.build_feedback_zip(path)
+        except Exception as exc:  # never let a feedback failure crash the app
+            QMessageBox.warning(self, "Report a Problem",
+                                f"Could not build the feedback bundle:\n{exc}")
+            return
+
+        from PyQt6.QtGui import QDesktopServices
+        from PyQt6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(bundle.path.parent)))
+        QMessageBox.information(
+            self, "Report a Problem",
+            f"Saved {bundle.file_count} log file(s) and app info to:\n{bundle.path}\n\n"
+            "Attach this zip to an email describing the problem.",
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

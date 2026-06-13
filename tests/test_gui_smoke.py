@@ -244,6 +244,37 @@ class TestMainWindowSmoke:
         labels = window.findChildren(type(window._update_banner_label))
         assert any(lbl.text() == f"v{APP_VERSION}" for lbl in labels)
 
+    # M7.3: Report a Problem
+    def test_feedback_button_present(self, window):
+        assert hasattr(window, "_feedback_btn")
+        assert "Report" in window._feedback_btn.text()
+
+    def test_report_problem_builds_bundle(self, window, monkeypatch, tmp_path):
+        import gui.main_window as mw
+        from core import feedback
+        dest = tmp_path / "fb.zip"
+        # Stub the save dialog to return our path, and the reveal/info dialogs to no-ops.
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from PyQt6.QtGui import QDesktopServices
+        monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                            staticmethod(lambda *a, **k: (str(dest), "")))
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(QDesktopServices, "openUrl", staticmethod(lambda *a, **k: True))
+        # Point the bundle at an empty tmp base so it does not read real logs.
+        monkeypatch.setattr(feedback, "STSYNC_DIR", tmp_path)
+        orig = feedback.build_feedback_zip
+        monkeypatch.setattr(feedback, "build_feedback_zip",
+                            lambda path, **k: orig(path, base_dir=tmp_path))
+        window._report_problem()
+        assert dest.exists()
+
+    def test_report_problem_cancelled_is_noop(self, window, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                            staticmethod(lambda *a, **k: ("", "")))
+        window._report_problem()  # must not raise
+
 
 # ---------------------------------------------------------------------------
 # M4.1: resume prompt (OffloadTab)
