@@ -542,6 +542,10 @@ Offline is treated as the normal case, not the edge case. A "shipped" ledger rec
 
 Alongside the raw files, each completed job appends one compact summary line to a per-machine index (`activity_{workstation}.jsonl`: operation, time, user, project, source, destinations, file count, bytes, verdict, log filename). Because each machine writes only its own shard there are no write conflicts and no server. Org-wide views merge the shards (kilobytes) and fetch a raw custody log only when a human opens one. Per-workstation staleness ("Cart 3 hasn't reported since June 2") falls out of the merged shards for free.
 
+### History
+
+The History view renders the merged index as readable rows ("Jun 12 · Cart 3 · Offload · A001 → NAS, Shuttle · 312 files · 1.2 GiB · VERIFIED") with dropdown filters for operation, workstation, user and project plus a date range. Your own machine's history loads instantly from local files and works offline; refreshing org activity downloads only the other machines' summary shards, never the raw logs. The query and row-formatting logic lives in `core/history.py` (headless and unit tested); the GUI renders rows and dropdowns only. The History tab and the org refresh land with the shared-remote Settings work.
+
 ---
 
 ## Known limitations
