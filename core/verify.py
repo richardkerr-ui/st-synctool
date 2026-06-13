@@ -23,8 +23,10 @@ No PyQt6 import here; the GUI layer wires the callbacks to Qt signals.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -35,6 +37,9 @@ from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
 
 ProgressCallback = Callable[[int, str], None]
 LogCallback = Callable[[str, str], None]
+
+# M5.4 — where persisted verify reports land.
+VERIFY_LOGS_DIR = Path.home() / "Documents" / "STSyncTool" / "logs"
 
 # Files that legitimately live in a Drive folder without being in the manifest.
 _IGNORED_EXTRAS = frozenset(
@@ -495,3 +500,137 @@ def verify_folder(
             return verify_gdrive_deep(folder, manifest, progress_cb, log_cb)
         return verify_gdrive(folder, manifest, progress_cb, log_cb)
     return verify_local(folder, manifest, progress_cb, log_cb)
+
+
+# ---------------------------------------------------------------------------
+# M5.4 — Persist format-verification results
+# ---------------------------------------------------------------------------
+#
+# The format-aware media checks already run inside verify_local (format_status /
+# format_detail on each result dict), but until now the evidence was lost when
+# the window closed. These two helpers persist it: into a standalone JSON verify
+# report, and — where a manifest is present on disk — into a `media_verify` block
+# on each file entry. Both round-trip through json. The schema is documented in
+# SCHEMA_INTEROP_SPEC.md.
+
+def _utc_now_iso(now: Optional[datetime]) -> str:
+    return (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(path)
+
+
+def media_verify_block(result: dict, *, now: Optional[datetime] = None) -> Optional[dict]:
+    """Extract the persistable media-verify block from a per-file result, or None.
+
+    Only results that actually ran a format check (i.e. carry `format_status`)
+    yield a block; plain hash-only entries return None so non-media files stay
+    untouched in the manifest.
+    """
+    status = result.get("format_status")
+    if not status:
+        return None
+    return {
+        "status": status,                              # OK | ADVISORY | FAILED
+        "detail": result.get("format_detail", ""),
+        "verified_at": _utc_now_iso(now),
+    }
+
+
+def persist_media_verify_to_manifest(
+    manifest_path,
+    results: list,
+    *,
+    now: Optional[datetime] = None,
+    log_cb: Optional[LogCallback] = None,
+) -> dict:
+    """Write per-file media-verify outcomes into a manifest's file entries.
+
+    Loads the manifest JSON at `manifest_path`, sets
+    `files[path]["media_verify"] = {status, detail, verified_at}` for every
+    result that ran a format check, writes the manifest back atomically and
+    returns the updated dict. Results whose path is absent from the manifest
+    (or which ran no format check) are skipped. Raises FileNotFoundError if the
+    manifest does not exist.
+    """
+    log = log_cb or _noop_log
+    path = Path(manifest_path)
+    manifest = json.loads(path.read_text())
+    files = manifest.get("files", {})
+
+    written = 0
+    for r in results:
+        block = media_verify_block(r, now=now)
+        if block is None:
+            continue
+        entry = files.get(r.get("path"))
+        if not isinstance(entry, dict):
+            continue
+        entry["media_verify"] = block
+        written += 1
+
+    _atomic_write_json(path, manifest)
+    log(f"  Persisted media-verify results for {written} file(s) into manifest", "info")
+    return manifest
+
+
+def build_verify_report(
+    folder,
+    results: list,
+    *,
+    label: str = "",
+    deep: bool = False,
+    now: Optional[datetime] = None,
+) -> dict:
+    """Build the JSON-serialisable verify report dict (per-file + summary)."""
+    summary = summarize_results(label, folder, results)
+    return {
+        "schema": "verify_report",
+        "schema_version": 1,
+        "generated_at": _utc_now_iso(now),
+        "folder": str(folder),
+        "label": label,
+        "deep": bool(deep),
+        "summary": {
+            "total": summary.total,
+            "ok": summary.ok,
+            "missing": summary.missing,
+            "mismatch": summary.mismatch,
+            "format_fail": summary.format_fail,
+        },
+        "verdict": summary.verdict,
+        # Per-file rows carry the format_status / format_detail fields verbatim,
+        # so the media-verify evidence survives the window closing.
+        "files": [dict(r) for r in results],
+    }
+
+
+def write_verify_report(
+    folder,
+    results: list,
+    *,
+    label: str = "",
+    deep: bool = False,
+    log_dir=VERIFY_LOGS_DIR,
+    now: Optional[datetime] = None,
+    log_cb: Optional[LogCallback] = None,
+) -> Path:
+    """Persist a JSON verify report to `log_dir` and return its path.
+
+    The report includes every per-file result (hash status plus any media-verify
+    outcome) and a summary, so format-verification evidence is no longer lost
+    when the window closes. Round-trippable via json.loads.
+    """
+    log = log_cb or _noop_log
+    report = build_verify_report(folder, results, label=label, deep=deep, now=now)
+    ts = (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in label).strip("_")
+    fname = f"verify_report_{safe_label + '_' if safe_label else ''}{ts}.json"
+    path = Path(log_dir) / fname
+    _atomic_write_json(path, report)
+    log(f"  Verify report written to {path}", "info")
+    return path

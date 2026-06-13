@@ -391,3 +391,108 @@ def test_format_batch_report():
     assert "[OK] Good" in report and "[FAIL] Bad" in report and "[ERROR] Err" in report
     assert "no access" in report
     assert "Skip: no manifest" in report
+
+
+# ── M5.4: persist format-verification results ─────────────────────────────────
+
+import json
+from datetime import datetime, timezone
+
+
+def _results_with_format():
+    return [
+        {"path": "clips/a.braw", "status": "OK", "detail": "sha256: abc...",
+         "format_status": "OK", "format_detail": "BRAW structure OK"},
+        {"path": "clips/b.braw", "status": "FORMAT_FAIL", "detail": "sha256: def...",
+         "format_status": "FAILED", "format_detail": "truncated stream"},
+        {"path": "docs/notes.txt", "status": "OK", "detail": "sha256: 123..."},  # no format check
+    ]
+
+
+def test_media_verify_block_only_for_format_results():
+    now = datetime(2026, 6, 12, tzinfo=timezone.utc)
+    res = _results_with_format()
+    assert verify.media_verify_block(res[0], now=now)["status"] == "OK"
+    assert verify.media_verify_block(res[1], now=now)["status"] == "FAILED"
+    assert verify.media_verify_block(res[1], now=now)["detail"] == "truncated stream"
+    assert verify.media_verify_block(res[2], now=now) is None  # no format_status
+
+
+def test_persist_media_verify_to_manifest_roundtrip(tmp_path):
+    mpath = tmp_path / "st_manifest.json"
+    manifest = {
+        "schema_version": "1.2",
+        "files": {
+            "clips/a.braw": {"size": 1, "checksums": {"sha256": "x"}},
+            "clips/b.braw": {"size": 2, "checksums": {"sha256": "y"}},
+            "docs/notes.txt": {"size": 3, "checksums": {"sha256": "z"}},
+        },
+    }
+    mpath.write_text(json.dumps(manifest))
+    now = datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc)
+
+    returned = verify.persist_media_verify_to_manifest(mpath, _results_with_format(), now=now)
+
+    # Reload from disk to prove it round-trips.
+    reloaded = json.loads(mpath.read_text())
+    a = reloaded["files"]["clips/a.braw"]["media_verify"]
+    b = reloaded["files"]["clips/b.braw"]["media_verify"]
+    assert a["status"] == "OK" and b["status"] == "FAILED"
+    assert a["verified_at"] == now.isoformat()
+    # Non-media entry untouched; original checksum data preserved.
+    assert "media_verify" not in reloaded["files"]["docs/notes.txt"]
+    assert reloaded["files"]["clips/a.braw"]["checksums"] == {"sha256": "x"}
+    assert returned == reloaded
+    assert not mpath.with_suffix(".json.tmp").exists()
+
+
+def test_persist_skips_paths_absent_from_manifest(tmp_path):
+    mpath = tmp_path / "st_manifest.json"
+    mpath.write_text(json.dumps({"files": {"clips/a.braw": {"size": 1}}}))
+    # b.braw not in manifest -> skipped silently, no crash.
+    verify.persist_media_verify_to_manifest(mpath, _results_with_format())
+    reloaded = json.loads(mpath.read_text())
+    assert "media_verify" in reloaded["files"]["clips/a.braw"]
+    assert "clips/b.braw" not in reloaded["files"]
+
+
+def test_persist_missing_manifest_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        verify.persist_media_verify_to_manifest(tmp_path / "nope.json", [])
+
+
+def test_build_verify_report_shape():
+    now = datetime(2026, 6, 12, tzinfo=timezone.utc)
+    report = verify.build_verify_report(
+        "/Volumes/A001", _results_with_format(), label="A001", deep=False, now=now)
+    assert report["schema"] == "verify_report"
+    assert report["folder"] == "/Volumes/A001"
+    assert report["label"] == "A001"
+    assert report["generated_at"] == now.isoformat()
+    assert report["summary"] == {"total": 3, "ok": 2, "missing": 0,
+                                 "mismatch": 0, "format_fail": 1}
+    assert report["verdict"] == "FAIL"   # one FORMAT_FAIL
+    # Per-file format evidence preserved verbatim.
+    assert report["files"][0]["format_status"] == "OK"
+    assert report["files"][1]["format_detail"] == "truncated stream"
+
+
+def test_write_verify_report_roundtrip(tmp_path):
+    now = datetime(2026, 6, 12, 14, 30, 0)
+    path = verify.write_verify_report(
+        "/Volumes/A001", _results_with_format(), label="A 001",
+        log_dir=tmp_path, now=now)
+    assert path.exists()
+    assert path.parent == tmp_path
+    assert "A_001" in path.name          # label sanitised for filename
+    assert path.name.endswith("20260612_143000.json")
+    reloaded = json.loads(path.read_text())
+    assert reloaded["schema"] == "verify_report"
+    assert reloaded["summary"]["format_fail"] == 1
+    assert not path.with_suffix(".json.tmp").exists()
+
+
+def test_write_verify_report_no_label(tmp_path):
+    now = datetime(2026, 6, 12, 14, 30, 0)
+    path = verify.write_verify_report("/x", [], label="", log_dir=tmp_path, now=now)
+    assert path.name == "verify_report_20260612_143000.json"

@@ -260,6 +260,8 @@ The **Verify All Projects** button runs every project in the registry (`~/Docume
 
 A verification report at `~/Documents/STSyncTool/logs/verify_<timestamp>.txt` with per-file status.
 
+Every run also persists a machine-readable JSON report at `~/Documents/STSyncTool/logs/verify_report_<label>_<timestamp>.json` carrying each per-file result, including the format-aware media-verify outcome (`OK` / `ADVISORY` / `FAILED`), so the evidence survives the window closing. Where a manifest is present on disk, the same media-verify outcome is written into a `media_verify` block on each media file's manifest entry. Both formats are documented in `SCHEMA_INTEROP_SPEC.md`.
+
 ---
 
 ## Offload tab

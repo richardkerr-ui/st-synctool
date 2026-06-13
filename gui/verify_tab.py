@@ -20,11 +20,13 @@ class VerifyWorker(QObject):
     finished = pyqtSignal(list)
     error    = pyqtSignal(str)
 
-    def __init__(self, folder, manifest, deep=False):
+    def __init__(self, folder, manifest, deep=False, manifest_path=None, label=""):
         super().__init__()
         self.folder   = folder  # Keep raw string; could be URL
         self.manifest = manifest
         self.deep     = deep    # M5.1: download + hash each Drive file
+        self.manifest_path = manifest_path  # M5.4: where to persist media_verify
+        self.label    = label
 
     def run(self):
         # M5.0: all verification logic now lives in core.verify (headless,
@@ -36,6 +38,17 @@ class VerifyWorker(QObject):
                 log_cb=lambda msg, level: self.log.emit(msg, level),
                 deep=self.deep,
             )
+            # M5.4: persist the format-verification evidence so it survives the
+            # window closing. Persistence must never fail the verify itself.
+            log_cb = lambda msg, level: self.log.emit(msg, level)
+            try:
+                _verify.write_verify_report(
+                    self.folder, results, label=self.label, deep=self.deep, log_cb=log_cb)
+                if self.manifest_path:
+                    _verify.persist_media_verify_to_manifest(
+                        self.manifest_path, results, log_cb=log_cb)
+            except Exception as pe:
+                self.log.emit(f"  Could not persist verify results: {pe}", "warning")
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
@@ -256,7 +269,9 @@ class VerifyTab(QWidget):
             self.log.log("Deep verify enabled — files will be downloaded and re-hashed.", "info")
 
         self._thread = QThread()
-        self._worker = VerifyWorker(folder_str, self._manifest, deep=deep)
+        self._worker = VerifyWorker(
+            folder_str, self._manifest, deep=deep,
+            manifest_path=manifest_str, label=Path(folder_str).name)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(

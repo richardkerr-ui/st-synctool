@@ -177,6 +177,69 @@ Write these against real fixtures, in `tests/` (these are durable, unlike the ov
 
 ---
 
+## Part 3 — Persisted format-verification results (M5.4)
+
+The Verify tab runs format-aware media checks (BRAW/R3D/audio structural checks)
+alongside hash verification, but their outcome used to vanish when the window
+closed. M5.4 persists it in two places. Both are produced by `core/verify.py`
+and round-trip through `json`.
+
+### media_verify block on a manifest file entry
+
+Where a manifest is present on disk, `persist_media_verify_to_manifest()` writes
+a `media_verify` block onto each file entry that actually ran a format check:
+
+```json
+"DCIM/A001_C001.braw": {
+  "type": "file",
+  "size": 12345,
+  "checksums": { "sha256": "<full 64-char>" },
+  "hash_algorithm": "sha256",
+  "media_verify": {
+    "status": "OK",                       // OK | ADVISORY | FAILED
+    "detail": "BRAW structure OK (gen 5)",
+    "verified_at": "<ISO8601 UTC>"
+  }
+}
+```
+
+- The block appears **only** on entries whose result carried `format_status`
+  (i.e. media files the checker recognised). Non-media entries are left
+  untouched, so adding the block is non-breaking and sparse.
+- `status` mirrors the in-memory `format_status`; `detail` mirrors
+  `format_detail`. `verified_at` is the persist time, ISO8601 UTC.
+- Readers that don't know the field ignore it (additive, like `offload`).
+
+### Standalone verify report
+
+`write_verify_report()` persists one report per run to
+`~/Documents/STSyncTool/logs/verify_report_{label_}{ts}.json`:
+
+```json
+{
+  "schema": "verify_report",
+  "schema_version": 1,
+  "generated_at": "<ISO8601 UTC>",
+  "folder": "/Volumes/Archive/A001",
+  "label": "A001",
+  "deep": false,
+  "summary": { "total": 312, "ok": 310, "missing": 0, "mismatch": 0, "format_fail": 2 },
+  "verdict": "FAIL",
+  "files": [
+    { "path": "DCIM/A001_C001.braw", "status": "OK", "detail": "sha256: ...",
+      "format_status": "OK", "format_detail": "BRAW structure OK (gen 5)" }
+  ]
+}
+```
+
+- `files[]` carries each per-file result verbatim, including `format_status` /
+  `format_detail`, so the media-verify evidence is the record, not transient
+  cell state.
+- `verdict` is `OK` when nothing is missing/mismatched/format-failed, else `FAIL`
+  (same rule as the batch `ProjectVerifySummary`).
+
+---
+
 ## Out of scope for this change, tracked separately
 
 - `.DS_Store` ingest asymmetry: offload copies it, merge filters it via `comparison._is_ignored`. Unify the ignore list across both subsystems in a follow-up.
