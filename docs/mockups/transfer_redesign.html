@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ST SyncTool — Transfer redesign proof</title>
+<style>
+  /* ---- Per-tab accent system (the whole idea) ---------------------------- */
+  :root{
+    --accent:#5E9BD6;            /* swapped per active tab via JS */
+    --bg:#25282A;               /* CHARCOAL */
+    --panel:#2A2E30;
+    --field:#1E2123;
+    --field-border:#3F4347;
+    --text:#FAF7F0;             /* CREAM */
+    --muted:#888B8E;
+    --coral:#EE5340;
+    --radius:8px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{
+    background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .window{max-width:1180px;margin:24px auto;background:var(--bg);
+    border:1px solid #1b1d1f;border-radius:12px;overflow:hidden;
+    box-shadow:0 20px 60px rgba(0,0,0,.45);}
+  /* macOS title bar */
+  .titlebar{background:#ECECEC;height:36px;display:flex;align-items:center;
+    padding:0 14px;gap:8px;}
+  .dot{width:12px;height:12px;border-radius:50%;}
+  .dot.r{background:#FF5F57;}.dot.y{background:#FEBC2E;}.dot.g{background:#28C840;}
+  .titlebar .name{flex:1;text-align:center;color:#3a3a3a;font-weight:700;
+    font-size:13px;margin-right:48px;}
+
+  /* header */
+  .header{display:flex;align-items:center;padding:16px 22px 0;}
+  .brand{font-size:20px;font-weight:800;letter-spacing:.5px;}
+  .brand small{color:var(--muted);font-weight:500;font-size:12px;margin-left:10px;}
+  .header .tools{margin-left:auto;display:flex;align-items:center;gap:8px;}
+  .chip{font-size:11px;color:#9a9da0;border:1px solid #3a3e42;border-radius:5px;
+    padding:4px 9px;background:#2a2e30;cursor:default;}
+  .ver{color:#5b5e61;font-size:11px;margin-left:4px;}
+
+  /* tab bar */
+  .tabs{display:flex;gap:30px;padding:14px 24px 0;border-bottom:1px solid #303437;}
+  .tab{position:relative;padding:8px 2px 14px;color:var(--muted);font-weight:700;
+    letter-spacing:1.5px;font-size:13px;cursor:pointer;background:none;border:none;}
+  .tab.active{color:var(--text);}
+  .tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;
+    height:3px;border-radius:3px;background:var(--accent);}
+
+  /* body */
+  .body{padding:26px 28px 18px;}
+  .section-label{text-transform:uppercase;letter-spacing:2px;font-size:12px;
+    font-weight:700;color:var(--accent);margin:0 0 12px;}
+  .row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .field{flex:1;background:var(--field);border:1px solid var(--field-border);
+    border-radius:var(--radius);padding:12px 14px;color:var(--muted);display:flex;align-items:center;}
+  .field .caret{margin-left:auto;color:#6a6e71;}
+  .btn{background:#2f3336;color:var(--text);border:1px solid #3f4347;
+    border-radius:var(--radius);padding:11px 18px;font-weight:600;cursor:pointer;}
+  .btn:hover{background:#3a3e42;}
+  .demo-link{display:block;text-align:right;color:var(--muted);font-size:12px;
+    margin:2px 2px 0;}
+  .demo-link::before{content:"⊕ ";color:var(--accent);}
+
+  .group{margin-top:26px;}
+  .preflight{background:#222628;border:1px solid #303437;border-radius:var(--radius);
+    padding:16px 18px;display:flex;gap:42px;color:var(--muted);margin-top:6px;}
+  .preflight .k{font-size:11px;text-transform:uppercase;letter-spacing:1px;}
+  .preflight .v{color:#c9ccce;}
+  .preflight .hint{margin-left:auto;align-self:center;}
+
+  .opt{display:flex;align-items:center;gap:10px;margin:12px 0;}
+  .cb{width:18px;height:18px;border-radius:5px;border:1.5px solid #4a4e51;background:#1e2123;}
+  .cb.on{background:var(--accent);border-color:var(--accent);position:relative;}
+  .cb.on::after{content:"✓";position:absolute;inset:0;color:var(--bg);font-size:13px;
+    font-weight:800;display:flex;align-items:center;justify-content:center;}
+  select.conflict{background:var(--field);color:var(--text);border:1px solid var(--field-border);
+    border-radius:6px;padding:8px 10px;}
+  .mirror{display:flex;align-items:center;gap:10px;border:1px solid #5a2a26;
+    background:rgba(238,83,64,.08);color:var(--coral);border-radius:var(--radius);
+    padding:11px 14px;margin-top:8px;font-size:13px;}
+
+  .actions{display:flex;align-items:center;gap:12px;margin-top:30px;}
+  .primary{background:var(--accent);color:var(--bg);border:none;border-radius:var(--radius);
+    padding:13px 26px;font-weight:800;font-size:14px;cursor:pointer;letter-spacing:.3px;}
+  .ghost{background:#2a2e30;color:#cfd2d4;border:1px solid #3f4347;border-radius:var(--radius);
+    padding:13px 18px;cursor:pointer;}
+  .status{color:var(--muted);}
+  .actions .right{margin-left:auto;}
+
+  .logbar{display:flex;align-items:center;gap:10px;margin-top:26px;}
+  .logbar .lbl{color:#F6BE00;font-weight:700;letter-spacing:2px;font-size:12px;}
+  .logbar .right{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;}
+  .log{height:150px;background:#1b1e20;border:1px solid #303437;border-radius:var(--radius);margin-top:8px;}
+
+  .note{max-width:1180px;margin:14px auto 40px;color:#9a9da0;font-size:13px;text-align:center;}
+  .note b{color:var(--text);}
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="name">ST SyncTool — Signal Theory</span>
+    </div>
+
+    <div class="header">
+      <div class="brand">ST SyncTool <small>Signal Theory Productions</small></div>
+      <div class="tools">
+        <span class="chip">Settings</span>
+        <span class="chip">Report a Problem</span>
+        <span class="chip">? Tour</span>
+        <span class="ver">v1.0.0</span>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-accent="#5E9BD6">TRANSFER</button>
+      <button class="tab" data-accent="#B57EDC">MERGE</button>
+      <button class="tab" data-accent="#EE5340">OFFLOAD</button>
+      <button class="tab" data-accent="#3DBB8E">VERIFY</button>
+      <button class="tab" data-accent="#F6BE00">HISTORY</button>
+    </div>
+
+    <div class="body">
+      <div class="section-label">Source &amp; Destination</div>
+      <div class="row">
+        <div class="field">Paste a path or a Google Drive URL… <span class="caret">▾</span></div>
+        <button class="btn">Browse…</button>
+      </div>
+      <div class="row">
+        <div class="field">Paste a path or a Google Drive URL… <span class="caret">▾</span></div>
+        <button class="btn">Browse…</button>
+      </div>
+      <span class="demo-link">Use demo folder</span>
+
+      <div class="group">
+        <div class="preflight">
+          <div><div class="k">Source size</div><div class="v">—</div></div>
+          <div><div class="k">Free space</div><div class="v">—</div></div>
+          <div><div class="k">Est. time</div><div class="v">—</div></div>
+          <div class="hint">Enter paths to see the transfer summary</div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="section-label">Options</div>
+        <div class="opt">
+          <span>On conflict:</span>
+          <select class="conflict"><option>Overwrite</option><option>Skip existing</option><option>Rename copy</option></select>
+        </div>
+        <div class="opt"><span class="cb"></span> Auto-extract multipart .zips after transfer</div>
+        <div class="opt"><span class="cb"></span> Paranoid verification (independent SHA-256)</div>
+        <div class="opt"><span class="cb on"></span> Export ASC MHL (.mhl) sidecar for post-house verification</div>
+        <div class="mirror"><span class="cb"></span> ⚠ Mirror mode — deletes files at the destination not present in source</div>
+      </div>
+
+      <div class="actions">
+        <button class="primary">▶ Start Transfer</button>
+        <button class="ghost">✕ Cancel</button>
+        <span class="status">Ready</span>
+        <button class="ghost right">🗎 Generate Manifest Only</button>
+      </div>
+
+      <div class="logbar">
+        <span class="lbl">LOG</span>
+        <div class="right"><span class="cb on" style="--accent:#F6BE00"></span> Auto-clear between jobs
+          <button class="btn" style="padding:6px 12px">Save Log</button>
+          <button class="btn" style="padding:6px 12px">Clear</button></div>
+      </div>
+      <div class="log"></div>
+    </div>
+  </div>
+
+  <p class="note">Proof of the redesign on the <b>Transfer</b> tab. <b>Click the other tab names above</b> to see the per-tab accent swap (Merge purple, Offload coral, Verify green, History gold) — the rest of the styling stays consistent. Layout/controls match the real tab; colors and spacing are the proposal.</p>
+
+<script>
+  const root = document.documentElement;
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.addEventListener('click',()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      root.style.setProperty('--accent', t.dataset.accent);
+    });
+  });
+</script>
+</body>
+</html>

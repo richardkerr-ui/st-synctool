@@ -218,33 +218,10 @@ class MainWindow(QMainWindow):
         # Created here so tab references are valid; started later.
         self._tutorial = None  # built lazily after tabs exist
 
-        # Tabs
+        # Tabs — per-tab accent: the selected tab is underlined in its accent
+        # colour (set initially to Transfer's, updated on every tab change).
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #2a2a2a;
-                border-radius: 6px;
-                background: #1e1e1e;
-            }
-            QTabBar::tab {
-                background: #2a2a2a;
-                color: #888;
-                padding: 8px 22px;
-                margin-right: 2px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                font-size: 13px;
-            }
-            QTabBar::tab:selected {
-                background: #007acc;
-                color: white;
-                font-weight: bold;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #3a3a3a;
-                color: #ccc;
-            }
-        """)
+        self.tabs.setStyleSheet(theme.tabbar_stylesheet(theme.DEFAULT_ACCENT))
 
         self._transfer_tab = TransferTab(self)
         self._merge_tab    = MergeTab(self)
@@ -409,7 +386,10 @@ class MainWindow(QMainWindow):
         # Refresh the pending-activity banner once a ship pass completes.
         self._refresh_pending_activity_banner()
 
-    def _on_tab_changed(self, _index):
+    def _on_tab_changed(self, index):
+        # Recolour the tab-bar underline to the active tab's accent.
+        self.tabs.setStyleSheet(theme.tabbar_stylesheet(
+            theme.tab_accent(self.tabs.tabText(index))))
         # M9.1: after the user finishes an op and navigates, drain pending logs
         # and refresh the banner (no background polling — fires only on nav).
         self._start_log_shipping()

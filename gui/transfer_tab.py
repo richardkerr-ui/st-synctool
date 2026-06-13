@@ -74,11 +74,15 @@ class TransferTab(QWidget):
         self._build_ui()
 
     def _build_ui(self):
+        # GUI refresh: per-tab accent (blue for Transfer) tints section headers,
+        # checkboxes and the primary button via one cascading stylesheet.
+        self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Transfer")))
         root = QVBoxLayout(self)
-        root.setSpacing(10)
+        root.setSpacing(14)
+        root.setContentsMargins(20, 16, 20, 12)
 
         # ── Source & Destination ─────────────────────────────────────────────
-        io_group = QGroupBox("Source && Destination")
+        io_group = QGroupBox("SOURCE && DESTINATION")
         io_layout = QVBoxLayout(io_group)
 
         src_row = QHBoxLayout()
@@ -159,7 +163,7 @@ class TransferTab(QWidget):
         root.addWidget(pf_frame)
 
         # ── Options ──────────────────────────────────────────────────────────
-        opts_group = QGroupBox("Options")
+        opts_group = QGroupBox("OPTIONS")
         opts_layout = QVBoxLayout(opts_group)
 
         opts_row1 = QHBoxLayout()
@@ -189,16 +193,16 @@ class TransferTab(QWidget):
         danger = QFrame()
         danger.setObjectName("DangerZone")
         danger.setStyleSheet(
-            "QFrame#DangerZone {"
-            "  background:#2a1515; border:1px solid #5a2020; border-radius:6px;"
-            "}"
-            "QCheckBox { color:#A32D2D; }"
+            f"QFrame#DangerZone {{"
+            f"  background:transparent; border:1px solid {theme.CORAL}; border-radius:8px;"
+            f"}}"
+            f"QCheckBox {{ color:{theme.CORAL}; background:transparent; }}"
         )
         dl = QHBoxLayout(danger)
         dl.setContentsMargins(10, 6, 10, 6)
         dl.setSpacing(8)
         warn_icon = QLabel("⚠")
-        warn_icon.setStyleSheet("color:#A32D2D; font-size:13px; background:transparent;")
+        warn_icon.setStyleSheet(f"color:{theme.CORAL}; font-size:13px; background:transparent;")
         dl.addWidget(warn_icon)
         self.mirror_chk = QCheckBox(
             "Mirror mode — deletes files at destination not present in source"
@@ -213,8 +217,8 @@ class TransferTab(QWidget):
         btn_row = QHBoxLayout()
 
         self.start_btn = QPushButton("▶  Start Transfer")
-        self.start_btn.setFixedHeight(36)
-        self.start_btn.setStyleSheet(theme.primary_button_style())
+        self.start_btn.setObjectName("primaryBtn")  # accent fill via tab stylesheet
+        self.start_btn.setFixedHeight(40)
         self.start_btn.clicked.connect(self._start_transfer)
 
         self.cancel_btn = QPushButton("✕  Cancel")

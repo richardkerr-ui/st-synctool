@@ -103,3 +103,106 @@ def success_button_style():
         background-color: #044620;
     }}
     """
+
+
+# --------------------------------------------------------------------------- #
+# Per-tab accent system (GUI refresh 2026-06-13)
+# --------------------------------------------------------------------------- #
+# Each tab drives an accent colour (brightened for legibility on charcoal) that
+# tints its section headers, the active-tab underline, the primary button and
+# checked checkboxes. The look is one consistent layout recoloured per tab.
+
+TAB_ACCENTS = {
+    "Transfer": "#5E9BD6",   # blue   — movement
+    "Merge":    "#B57EDC",   # purple — reconcile
+    "Offload":  "#EE5340",   # coral  — card ingest
+    "Verify":   "#3DBB8E",   # green  — integrity
+    "History":  "#F6BE00",   # gold   — records
+}
+DEFAULT_ACCENT = TAB_ACCENTS["Transfer"]
+FIELD_BG = "#1E2123"
+
+
+def tab_accent(name: str) -> str:
+    return TAB_ACCENTS.get(name, DEFAULT_ACCENT)
+
+
+def accent_primary_button_style(accent: str) -> str:
+    """Big rounded primary action button filled with the tab accent."""
+    return f"""
+    QPushButton {{
+        background-color: {accent};
+        color: {CHARCOAL};
+        border: none;
+        border-radius: 8px;
+        padding: 12px 24px;
+        font-weight: 800;
+    }}
+    QPushButton:hover  {{ background-color: {accent}; }}
+    QPushButton:disabled {{ background-color: {BORDER}; color: {MUTED_TEXT}; }}
+    """
+
+
+def section_label_style(accent: str) -> str:
+    """Uppercase-style section header in the tab accent (set text upper-case)."""
+    return (f"color:{accent}; font-weight:700; font-size:12px; "
+            f"background:transparent;")
+
+
+def tab_stylesheet(accent: str) -> str:
+    """Cascading stylesheet applied to a whole tab widget so its group titles,
+    checkboxes and primary button pick up the tab accent in one shot."""
+    return f"""
+    QGroupBox {{
+        border: none;
+        margin-top: 16px;
+        font-weight: 700;
+        color: {accent};
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        left: 0px;
+        padding: 0 0 6px 0;
+        color: {accent};
+        font-size: 12px;
+    }}
+    QCheckBox::indicator {{
+        width: 16px; height: 16px;
+        border-radius: 4px;
+        border: 1px solid {BORDER};
+        background: {FIELD_BG};
+    }}
+    QCheckBox::indicator:checked {{
+        background: {accent};
+        border: 1px solid {accent};
+    }}
+    QPushButton#primaryBtn {{
+        background-color: {accent};
+        color: {CHARCOAL};
+        border: none; border-radius: 8px;
+        padding: 12px 24px; font-weight: 800;
+    }}
+    QPushButton#primaryBtn:disabled {{
+        background-color: {BORDER}; color: {MUTED_TEXT};
+    }}
+    """
+
+
+def tabbar_stylesheet(accent: str) -> str:
+    """Tab bar with the selected tab underlined in the active tab's accent."""
+    return f"""
+    QTabBar::tab {{
+        background: transparent;
+        color: {MUTED_TEXT};
+        padding: 8px 18px 12px;
+        margin-right: 18px;
+        border: none;
+        font-weight: 700;
+    }}
+    QTabBar::tab:selected {{
+        color: {CREAM};
+        border-bottom: 3px solid {accent};
+    }}
+    QTabWidget::pane {{ border: none; border-top: 1px solid #303437; }}
+    """
