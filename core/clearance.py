@@ -50,72 +50,95 @@ class ClearanceVerdict:
     clean_dest_count: int
     total_dest_count: int
     reason: str  # empty when cleared
+    # Of clean_dest_count, how many distinct destinations came from earlier
+    # offload runs (the M12.2 ledger) rather than this run. Lets the UI be
+    # transparent that redundancy was accumulated across runs.
+    from_earlier_count: int = 0
 
     def to_text(self) -> str:
         if self.cleared:
             plural = "destination" if self.clean_dest_count == 1 else "destinations"
-            return (
+            base = (
                 f"All files verified on {self.clean_dest_count} {plural}. "
                 f"{self.source_label} is safe to format."
             )
+            if self.from_earlier_count:
+                base += (
+                    f" ({self.from_earlier_count} from earlier "
+                    f"offload{'s' if self.from_earlier_count != 1 else ''}.)"
+                )
+            return base
         return f"Not cleared: {self.reason}"
 
 
-def compute_clearance(source_label: str, results: list) -> ClearanceVerdict:
+def compute_clearance(
+    source_label: str, results: list, prior_clean_dests=None
+) -> ClearanceVerdict:
     """
-    Compute the safe-to-format verdict for one source from its CellResults.
+    Compute the safe-to-format verdict for one source.
 
     ``results`` may contain cells for several sources; only those whose
     ``source_label`` matches are considered. A destination counts as *clean*
     when it committed (state DONE), its per-file hash verification passed
     (``verified is True``) and no media-format check hard-failed.
 
-    Cleared (green) only when at least MIN_CLEAN_DESTS destinations are clean
-    and none failed or went unverified. Any failure, any unverified
-    destination, or fewer than MIN_CLEAN_DESTS clean destinations yields an
-    amber verdict with a human-readable reason.
+    ``prior_clean_dests`` (M12.2-backed) is an iterable of destination labels
+    this same card was verified to in *earlier* offload runs. Redundancy is
+    counted as the number of **distinct** destinations across runs — so a card
+    offloaded to Dest 1 today and Dest 2 tomorrow clears, without recopying
+    Dest 1. A hard failure or unverified destination in the *current* run still
+    blocks clearance, so a fresh problem is never hidden by past success.
+
+    Cleared (green) only when at least MIN_CLEAN_DESTS distinct destinations are
+    clean and nothing in this run failed or went unverified.
     """
     cells = [r for r in results if r.source_label == source_label]
     total = len(cells)
+    prior = {d for d in (prior_clean_dests or [])}
 
-    if not cells:
+    if not cells and not prior:
         return ClearanceVerdict(
             source_label, False, 0, 0,
             "no destinations recorded for this source",
         )
 
-    clean = failed = unverified = 0
+    current_clean: set = set()
+    failed = unverified = 0
     for r in cells:
         state = _state_value(r.state)
         media_failed = _media_verify_failed(r)
         if state == _FAILED or r.verified is False or media_failed:
             failed += 1
         elif r.verified is True and state == _DONE:
-            clean += 1
+            current_clean.add(r.dest_label)
         else:
             # verified is None, or the cell never reached DONE (skipped, partial)
             unverified += 1
 
+    all_clean = current_clean | prior
+    clean = len(all_clean)
+    from_earlier = len(prior - current_clean)
+
     # Severity order: a hard failure outranks an unverified destination, which
-    # outranks insufficient redundancy.
+    # outranks insufficient redundancy. Failures/unverified are current-run only.
     if failed:
         reason = (
             f"verification failed on {failed} of {total} destination"
             f"{'s' if total != 1 else ''}"
         )
-        return ClearanceVerdict(source_label, False, clean, total, reason)
+        return ClearanceVerdict(source_label, False, clean, total, reason, from_earlier)
 
     if unverified:
         reason = (
             f"{unverified} destination{'s' if unverified != 1 else ''} not verified"
         )
-        return ClearanceVerdict(source_label, False, clean, total, reason)
+        return ClearanceVerdict(source_label, False, clean, total, reason, from_earlier)
 
     if clean < MIN_CLEAN_DESTS:
         reason = (
             f"only {clean} destination{'s' if clean != 1 else ''} verified clean; "
             f"at least {MIN_CLEAN_DESTS} required before formatting"
         )
-        return ClearanceVerdict(source_label, False, clean, total, reason)
+        return ClearanceVerdict(source_label, False, clean, total, reason, from_earlier)
 
-    return ClearanceVerdict(source_label, True, clean, total, "")
+    return ClearanceVerdict(source_label, True, clean, total, "", from_earlier)

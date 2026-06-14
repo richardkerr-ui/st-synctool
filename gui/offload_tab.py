@@ -329,10 +329,11 @@ class OffloadWorker(QObject):
 # ---------------------------------------------------------------------------
 
 class SummaryDialog(QDialog):
-    def __init__(self, results: list, log_path: str, parent=None):
+    def __init__(self, results: list, log_path: str, parent=None, prior_map=None):
         super().__init__(parent)
         self.setWindowTitle("Offload Complete — Summary")
         self.setMinimumWidth(640)
+        self._prior_map = prior_map or {}
         self._build_ui(results, log_path)
 
     def _build_ui(self, results: list, log_path: str):
@@ -375,7 +376,8 @@ class SummaryDialog(QDialog):
             # M10.1: safe-to-format clearance (verification-based, stricter than
             # eject). Logic lives in core.clearance; this only renders it.
             from core.clearance import compute_clearance
-            verdict = compute_clearance(src_label, results)
+            verdict = compute_clearance(
+                src_label, results, prior_clean_dests=self._prior_map.get(src_label))
             clr_color = theme.VERDICT_GREEN if verdict.cleared else theme.VERDICT_GOLD
             clr_icon  = "✓" if verdict.cleared else "⚠"
             clr_lbl = QLabel(f"{clr_icon} {verdict.to_text()}")
@@ -1420,20 +1422,58 @@ class OffloadTab(QWidget):
         )
         for sp in sheets:
             self._log.log(f"Contact sheet: {sp}", "success")
-        self._show_completion_banner(results)
-        dlg = SummaryDialog(results, log_path, self)
+        prior_map = self._prior_clean_dests(results, manifests)
+        self._show_completion_banner(results, prior_map)
+        dlg = SummaryDialog(results, log_path, self, prior_map=prior_map)
         dlg.exec()
 
-    def _show_completion_banner(self, results: list) -> None:
+    def _prior_clean_dests(self, results: list, manifests: dict) -> dict:
+        """M12.2-backed: for each source in this run, the set of distinct
+        destinations the *same card* was verified to in earlier offloads (matched
+        by content fingerprint). Used so clearance counts redundancy across runs.
+        Best-effort — any failure yields no prior dests (strict per-run verdict)."""
+        out: dict = {}
+        try:
+            from core import projects
+            from core.offload_ledger import (
+                fingerprint_from_manifest, fingerprint_source, match_prior_offloads,
+            )
+            history = projects.list_offload_fingerprints()
+            if not history:
+                return out
+            src_by_label = {}
+            for row in self._source_rows:
+                s = row.to_offload_source()
+                if s:
+                    src_by_label[s.label] = s
+            for label in {r.source_label for r in results}:
+                src = src_by_label.get(label)
+                if src is None:
+                    continue
+                mfst = (manifests or {}).get(label)
+                fp = (fingerprint_from_manifest(src, mfst) if mfst
+                      else fingerprint_source(src))
+                dests: set = set()
+                for m in match_prior_offloads(fp, history):
+                    dests |= set(m["record"].get("dests", []))
+                if dests:
+                    out[label] = dests
+        except Exception:
+            pass
+        return out
+
+    def _show_completion_banner(self, results: list, prior_map: dict = None) -> None:
         """M12.4: green SAFE TO FORMAT only when every source is cleared by the
-        M10.1 verdict (verified on >=2 destinations); red DO NOT EJECT otherwise.
-        Plays a completion sound when enabled in settings."""
+        M10.1 verdict (verified on >=2 distinct destinations, counted across runs
+        via M12.2); red DO NOT EJECT otherwise. Plays a sound when enabled."""
         from core.clearance import compute_clearance
         from core import settings
 
+        prior_map = prior_map or {}
         src_labels = list(dict.fromkeys(r.source_label for r in results))
         all_cleared = bool(src_labels) and all(
-            compute_clearance(s, results).cleared for s in src_labels
+            compute_clearance(s, results, prior_clean_dests=prior_map.get(s)).cleared
+            for s in src_labels
         )
         if all_cleared:
             text = "✓  SAFE TO FORMAT — every card verified on at least 2 destinations"

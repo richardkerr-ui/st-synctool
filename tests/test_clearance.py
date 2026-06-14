@@ -186,3 +186,44 @@ def test_accepts_enum_like_state():
     ]
     v = compute_clearance("A001", results)
     assert v.cleared is True
+
+
+# ── M12.2 cross-run aggregation (prior_clean_dests) ──────────────────────────
+
+def test_prior_dest_plus_one_current_clears():
+    # Card was on NAS in an earlier run; this run adds Shuttle → 2 distinct → safe.
+    results = [_clean("A001", "Shuttle")]
+    v = compute_clearance("A001", results, prior_clean_dests={"NAS"})
+    assert v.cleared is True
+    assert v.clean_dest_count == 2
+    assert v.from_earlier_count == 1
+
+
+def test_prior_same_dest_not_double_counted():
+    # Re-copying to the same destination adds no redundancy.
+    results = [_clean("A001", "NAS")]
+    v = compute_clearance("A001", results, prior_clean_dests={"NAS"})
+    assert v.cleared is False
+    assert v.clean_dest_count == 1
+    assert v.from_earlier_count == 0
+
+
+def test_current_failure_blocks_even_with_two_prior():
+    # A fresh failure must not be hidden by past success.
+    results = [FakeCell("A001", "Shuttle", state="failed", verified=False)]
+    v = compute_clearance("A001", results, prior_clean_dests={"NAS", "LTO"})
+    assert v.cleared is False
+    assert "failed" in v.reason
+
+
+def test_cleared_text_notes_earlier_offloads():
+    results = [_clean("A001", "Shuttle")]
+    v = compute_clearance("A001", results, prior_clean_dests={"NAS"})
+    assert "earlier" in v.to_text().lower()
+
+
+def test_two_prior_no_current_cells_clears():
+    # Source already fully redundant from earlier runs, nothing new this run.
+    v = compute_clearance("A001", [], prior_clean_dests={"NAS", "LTO"})
+    assert v.cleared is True
+    assert v.from_earlier_count == 2
