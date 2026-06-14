@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui import theme
-from gui.ui_helpers import make_interactive, awake_indicator
+from gui.ui_helpers import make_interactive, awake_indicator, open_path, reveal_in_finder
 from gui.log_widget import LogWidget
 from core.amphetamine import start_session, end_session
 from core.throughput import ThroughputMeter, format_rate, format_eta
@@ -413,6 +413,36 @@ class SummaryDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
+
+        # Clickable shortcuts so the DIT can jump straight to the output instead
+        # of copying paths out of the labels above.
+        dest_dirs = [
+            Path(r.final_path).parent for r in results
+            if r.state == CellState.DONE and r.final_path
+        ]
+        if dest_dirs:
+            reveal_btn = make_interactive(
+                buttons.addButton("Reveal destination", QDialogButtonBox.ButtonRole.ActionRole),
+                tooltip="Open the destination folder in Finder.",
+            )
+            reveal_btn.clicked.connect(lambda: reveal_in_finder(dest_dirs[0]))
+        if log_path:
+            log_btn = make_interactive(
+                buttons.addButton("Open custody log", QDialogButtonBox.ButtonRole.ActionRole),
+                tooltip="Open the chain-of-custody log for this offload.",
+            )
+            log_btn.clicked.connect(lambda: open_path(log_path))
+        sheet_paths = [
+            r.thumbnail_result["contact_sheet_path"] for r in results
+            if r.thumbnail_result and r.thumbnail_result.get("contact_sheet_path")
+        ]
+        if sheet_paths:
+            sheet_btn = make_interactive(
+                buttons.addButton("Open contact sheet", QDialogButtonBox.ButtonRole.ActionRole),
+                tooltip="Open the generated contact-sheet PDF.",
+            )
+            sheet_btn.clicked.connect(lambda: open_path(sheet_paths[0]))
+
         layout.addWidget(buttons)
 
 
@@ -613,6 +643,42 @@ class OffloadTab(QWidget):
         self._offered: set[str] = set()
         self._build_ui()
         self._start_volume_watcher()
+        self._install_shortcuts()
+        self._recall_last_dests()
+
+    def _recall_last_dests(self):
+        """Prefill the destination rows with the last successful offload's
+        destinations (a DIT offloads to the same RAID all day). Never clobbers
+        anything already typed — only fills the untouched default row."""
+        try:
+            dests = projects.get_app_setting("last_offload_dests", []) or []
+        except Exception:
+            dests = []
+        if not dests or any(r.to_dict().get("path") for r in self._dest_rows):
+            return
+        for row in list(self._dest_rows):
+            self._dests_layout.removeWidget(row)
+            row.deleteLater()
+        self._dest_rows.clear()
+        for d in dests:
+            row = DestRowWidget(len(self._dest_rows) + 1, self)
+            row.removed.connect(self._remove_dest)
+            row.set_from_dict(d)
+            self._dest_rows.append(row)
+            self._dests_layout.insertWidget(self._dests_layout.count() - 1, row)
+        if not self._dest_rows:
+            self._add_dest()
+
+    def _install_shortcuts(self):
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        # Esc cancels a running offload (no-op when idle); ⌘O browses the first
+        # source row's folder.
+        QShortcut(QKeySequence("Esc"), self, activated=self._cancel_offload)
+        QShortcut(QKeySequence("Ctrl+O"), self, activated=self._browse_first_source)
+
+    def _browse_first_source(self):
+        if self._source_rows:
+            self._source_rows[0]._browse()
 
     # ── UI construction ────────────────────────────────────────────────────
 
@@ -1165,6 +1231,15 @@ class OffloadTab(QWidget):
         # offloads. Non-blocking — the DIT can confirm and continue.
         if not self._confirm_no_duplicate_card(active_src, active_dst):
             return
+
+        # Remember this run's destinations so the next launch prefills them.
+        try:
+            projects.save_app_setting(
+                "last_offload_dests",
+                [r.to_dict() for r in self._dest_rows if r.to_dict().get("path")],
+            )
+        except Exception:
+            pass
 
         # A fresh run clears any previous completion banner.
         self._completion_banner.setVisible(False)

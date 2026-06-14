@@ -89,6 +89,13 @@ class VerifyTab(QWidget):
         self._manifest = None
         self._thread   = None
         self._build_ui()
+        self._install_shortcuts()
+
+    def _install_shortcuts(self):
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        # Esc cancels a running verify (no-op when idle); ⌘O browses for folder.
+        QShortcut(QKeySequence("Esc"), self, activated=self._cancel_verify)
+        QShortcut(QKeySequence("Ctrl+O"), self, activated=self.folder_input.browse_btn.click)
 
     def _build_ui(self):
         self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Verify")))

@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QStatusBar, QLabel, QPushButton
 )
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QShortcut, QKeySequence
 from PyQt6.QtCore import QTimer, Qt, QSettings
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -118,6 +118,8 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
+        # ⌘, opens Settings, the macOS-standard preferences shortcut.
+        QShortcut(QKeySequence("Ctrl+,"), self, activated=self._open_settings)
         root = QVBoxLayout(central)
         root.setContentsMargins(12, 12, 12, 8)
         root.setSpacing(0)

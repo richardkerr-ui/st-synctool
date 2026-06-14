@@ -32,6 +32,29 @@ def awake_indicator(parent=None):
     return lbl
 
 
+def open_path(path) -> None:
+    """Open a file or folder in its default app (folder → Finder window)."""
+    from PyQt6.QtGui import QDesktopServices
+    from PyQt6.QtCore import QUrl
+    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+
+def reveal_in_finder(path) -> None:
+    """Reveal an item in Finder with it selected (macOS `open -R`); fall back to
+    opening the containing folder elsewhere or if reveal fails."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    p = Path(path)
+    if sys.platform == "darwin" and p.exists():
+        try:
+            subprocess.run(["open", "-R", str(p)], check=False)
+            return
+        except Exception:
+            pass
+    open_path(p if p.is_dir() else p.parent)
+
+
 def make_interactive(*widgets, tooltip: str = None):
     """Give clickable controls (buttons, checkboxes) a pointing-hand cursor on
     hover, and optionally a long-hover explanatory tooltip.

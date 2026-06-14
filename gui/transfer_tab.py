@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 from pathlib import Path
 
-from gui.ui_helpers import make_interactive, awake_indicator
+from gui.ui_helpers import make_interactive, awake_indicator, reveal_in_finder
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.toast import show_toast
@@ -73,7 +73,15 @@ class TransferTab(QWidget):
         self._thread = None
         self._worker = None
         self._cancelled = False
+        self._last_dest = ""
         self._build_ui()
+        self._install_shortcuts()
+
+    def _install_shortcuts(self):
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        # Esc cancels a running transfer (no-op when idle); ⌘O browses for source.
+        QShortcut(QKeySequence("Esc"), self, activated=self._cancel_transfer)
+        QShortcut(QKeySequence("Ctrl+O"), self, activated=self.src_input.browse_btn.click)
 
     def _build_ui(self):
         # GUI refresh: per-tab accent (blue for Transfer) tints section headers,
@@ -288,11 +296,19 @@ class TransferTab(QWidget):
 
         self._awake_lbl = awake_indicator()   # M12.5 — shown only while transferring
 
+        # Revealed on a successful transfer so the user can jump to the output.
+        self._reveal_btn = QPushButton("📂  Reveal destination")
+        self._reveal_btn.setFixedHeight(36)
+        self._reveal_btn.setVisible(False)
+        make_interactive(self._reveal_btn, tooltip="Open the destination folder in Finder.")
+        self._reveal_btn.clicked.connect(self._reveal_destination)
+
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(self.cancel_btn)
         btn_row.addWidget(self._status_label)
         btn_row.addWidget(self._awake_lbl)
         btn_row.addStretch()
+        btn_row.addWidget(self._reveal_btn)
         btn_row.addWidget(self.manifest_btn)
         root.addLayout(btn_row)
 
@@ -518,6 +534,7 @@ class TransferTab(QWidget):
 
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        self._reveal_btn.setVisible(False)
         self._status_label.setText("Transferring…")
         self.log.set_progress(0, current_file="Starting…")
 
@@ -575,9 +592,18 @@ class TransferTab(QWidget):
         else:
             self.log.log(f"Transfer complete  {result.get('actual_dest', '')}", "success")
             show_toast(self, "Transfer complete.", "success")
+        # Offer a one-click jump to the output for local destinations.
+        dest = result.get("actual_dest") or self.dst_input.text()
+        self._last_dest = dest
+        self._reveal_btn.setVisible(bool(dest) and not is_gdrive_url(dest))
         self.src_input.add_to_recent(self.src_input.text())
         self.dst_input.add_to_recent(self.dst_input.text())
         self._write_txt_log(result)
+
+    def _reveal_destination(self):
+        dest = getattr(self, "_last_dest", "")
+        if dest:
+            reveal_in_finder(dest)
 
     def _on_error(self, msg):
         if self._cancelled:

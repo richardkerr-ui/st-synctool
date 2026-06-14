@@ -37,6 +37,24 @@ class TestTransferTabSmoke:
     def test_conflict_combo_has_at_least_three_options(self, tab):
         assert tab.conflict_combo.count() >= 3
 
+    def test_has_cancel_and_browse_shortcuts(self, tab):
+        from PyQt6.QtGui import QShortcut
+        keys = {s.key().toString() for s in tab.findChildren(QShortcut)}
+        assert "Esc" in keys and "Ctrl+O" in keys
+
+    def test_reveal_button_hidden_until_success(self, tab):
+        assert tab._reveal_btn.isHidden()
+
+    def test_reveal_button_shows_after_local_transfer(self, tab, tmp_path):
+        tab._on_finished({"errors": [], "actual_dest": str(tmp_path)})
+        assert not tab._reveal_btn.isHidden()
+        assert tab._last_dest == str(tmp_path)
+
+    def test_reveal_button_stays_hidden_for_drive_dest(self, tab):
+        url = "https://drive.google.com/drive/folders/abc"
+        tab._on_finished({"errors": [], "actual_dest": url})
+        assert tab._reveal_btn.isHidden()
+
     def test_preflight_values_brighten_when_paths_entered(self, tab, tmp_path):
         # Greyed-out summary regression: once both paths are set, the computed
         # values must use the active colour, not the muted #555 placeholder.
@@ -226,6 +244,25 @@ class TestOffloadTabSmoke:
         tab._on_progress("A001", "NAS", 60 * 1024 * 1024, 100 * 1024 * 1024)
         text = tab._offload_status_lbl.text()
         assert "/s" in text and "ETA" in text
+
+    # Open/reveal + shortcuts + dest recall
+    def test_has_cancel_and_browse_shortcuts(self, tab):
+        from PyQt6.QtGui import QShortcut
+        keys = {s.key().toString() for s in tab.findChildren(QShortcut)}
+        assert "Esc" in keys and "Ctrl+O" in keys
+
+    def test_recalls_last_offload_destinations(self, qtbot, monkeypatch):
+        import gui.offload_tab as ot
+        import core.projects as proj
+        monkeypatch.setattr(ot.OffloadTab, "_start_volume_watcher",
+                            lambda self: setattr(self, "_watcher", MagicMock(available=False)))
+        monkeypatch.setattr(proj, "list_dest_presets", lambda: [])
+        monkeypatch.setattr(proj, "get_app_setting",
+                            lambda k, d=None: [{"label": "RAID_1", "path": "/Volumes/RAID_1", "enabled": True}]
+                            if k == "last_offload_dests" else d)
+        t = ot.OffloadTab()
+        qtbot.addWidget(t)
+        assert any(r.to_dict().get("path") == "/Volumes/RAID_1" for r in t._dest_rows)
 
     # M12.5 awake indicator
     def test_awake_indicator_hidden_at_rest(self, tab):
