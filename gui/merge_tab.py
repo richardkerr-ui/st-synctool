@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.diff_table import DiffTable
+from gui.toast import show_toast
 from core.manifest import (
     generate_manifest_fast, load_manifest, save_manifest,
     MANIFEST_FILENAME, LOCAL_MANIFEST_DIR,
@@ -1018,18 +1019,31 @@ class MergeTab(QWidget):
         actions = self.diff_table.get_actions()
         actionable = {p: a for p, a in actions.items() if a not in (ACT_SKIP, "")}
         if not actionable:
-            QMessageBox.information(self, "Nothing To Do", "No actions selected.")
+            show_toast(self, "No actions selected — nothing to apply.", "info")
             return
 
         conflicts = sum(1 for r in self._diff_results if r.state.name == "BOTH_CHANGED")
-        confirm = QMessageBox.question(
-            self, "Confirm Apply",
+        # Destructive friction: call out deletions explicitly and default to
+        # Cancel so a stray Return never triggers a delete.
+        deletions = sum(1 for a in actionable.values()
+                        if a in (ACT_DELETE_LOCAL, ACT_DELETE_SERVER))
+        body = (
             f"Apply {len(actionable)} action(s)?\n"
             f"Preserve on overwrite: {'ON' if self.preserve_chk.isChecked() else 'OFF'}\n"
-            f"Re-scan before apply: {'ON' if self.rescan_chk.isChecked() else 'OFF'}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            f"Re-scan before apply: {'ON' if self.rescan_chk.isChecked() else 'OFF'}"
         )
-        if confirm != QMessageBox.StandardButton.Yes:
+        box = QMessageBox(self)
+        box.setWindowTitle("Confirm Apply")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        if deletions:
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(f"⚠ {deletions} file(s) will be permanently DELETED.\n\n" + body)
+        else:
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setText(body)
+        if box.exec() != QMessageBox.StandardButton.Yes:
             return
 
         self.apply_btn.setEnabled(False)
@@ -1087,8 +1101,8 @@ class MergeTab(QWidget):
         self._refresh_history_panel()
         self._refresh_project_combo()
         if f == 0:
-            QMessageBox.information(self, "Apply Complete",
-                                    f"{s} action(s) completed successfully.")
+            # Routine success → inline toast, not a modal to dismiss.
+            show_toast(self, f"Apply complete — {s} action(s) succeeded.", "success")
         else:
             QMessageBox.warning(self, "Apply Finished with Errors",
                                 f"{s} succeeded, {f} failed. See log for details.")

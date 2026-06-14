@@ -522,3 +522,19 @@ class TestDragAndDrop:
         le.dropEvent(ev)
         assert le.text() == str(tmp_path)
         assert ev.accepted
+
+
+# ---------------------------------------------------------------------------
+# Toast — inline confirmations (#7)
+# ---------------------------------------------------------------------------
+
+class TestToast:
+    def test_show_toast_renders_message(self, qtbot):
+        from PyQt6.QtWidgets import QWidget
+        from gui.toast import show_toast
+        parent = QWidget()
+        parent.resize(600, 400)
+        qtbot.addWidget(parent)
+        t = show_toast(parent, "Apply complete — 3 action(s) succeeded.", "success")
+        assert t.parent() is parent
+        assert "Apply complete" in t.text()

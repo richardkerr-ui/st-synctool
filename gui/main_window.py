@@ -883,11 +883,13 @@ class MainWindow(QMainWindow):
         from PyQt6.QtGui import QDesktopServices
         from PyQt6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(bundle.path.parent)))
-        QMessageBox.information(
-            self, "Report a Problem",
-            f"Saved {bundle.file_count} log file(s) and app info to:\n{bundle.path}\n\n"
-            "Attach this zip to an email describing the problem.",
-        )
+        # Finder already revealed the zip; a routine toast beats a modal here.
+        from gui.toast import show_toast
+        show_toast(
+            self,
+            f"Saved {bundle.file_count} log file(s) to {bundle.path.name} — "
+            "attach it to an email describing the problem.",
+            "success", msecs=5000)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
