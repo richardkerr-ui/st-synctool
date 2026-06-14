@@ -68,13 +68,16 @@ class DiffTable(QTableWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.setMinimumHeight(220)   # keep ~6 rows visible even with the conflict panel open
         self.setStyleSheet(
             "QTableWidget { background:#1e1e1e; color:#cccccc;"
-            "  gridline-color:#333; border:1px solid #333; border-radius:4px; }"
+            "  gridline-color:#2c2c2c; border:1px solid #333; border-radius:4px; }"
             "QHeaderView::section { background:#2a2a2a; color:#cccccc;"
-            "  padding:4px; border:none; font-weight:bold; }"
-            "QTableWidget::item { padding:4px; }"
-            "QTableWidget::item:alternate { background:#252525; }"
+            "  padding:6px; border:none; font-weight:bold; }"
+            "QTableWidget::item { padding:6px 4px; }"
+            "QTableWidget::item:alternate { background:#232323; }"
+            # Subtle, readable selection — NOT the palette's bright gold full-row.
+            "QTableWidget::item:selected { background:#33414c; color:#FAF7F0; }"
         )
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)

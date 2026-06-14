@@ -618,9 +618,11 @@ class MergeTab(QWidget):
         Hidden by default; shown when a conflict row is selected."""
         panel = QFrame(self)
         panel.setFrameShape(QFrame.Shape.StyledPanel)
+        panel.setMaximumHeight(210)   # compact, but enough for its content; diff table
+                                      # keeps its own 220px minimum so neither is squeezed
         panel.setStyleSheet(
-            f"QFrame {{ background:#1e1212; border:1px solid #5a2020;"
-            f"  border-radius:4px; padding:4px; }}"
+            f"QFrame {{ background:transparent; border:1px solid {theme.CORAL};"
+            f"  border-radius:8px; padding:4px; }}"
             f"QLabel {{ background:transparent; color:#cccccc; }}"
         )
         layout = QVBoxLayout(panel)

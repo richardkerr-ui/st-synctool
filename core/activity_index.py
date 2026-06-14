@@ -251,12 +251,15 @@ def find_local_log(filename: str, base_dir=STSYNC_DIR) -> Optional[Path]:
     if not filename:
         return None
     base = Path(base_dir)
-    for sub in _paths.FEEDBACK_SUBDIRS:
+    # New human-readable report dirs, plus legacy names so pre-restructure logs
+    # still open.
+    subs = list(_paths.FEEDBACK_SUBDIRS) + ["logs", "offload_logs"]
+    for sub in subs:
         cand = base / sub / filename
         if cand.is_file():
             return cand
-    # Fall back to a recursive search in case of nested layouts.
-    for sub in _paths.FEEDBACK_SUBDIRS:
+    # Fall back to a recursive search in case of date-grouped / nested layouts.
+    for sub in subs:
         d = base / sub
         if d.is_dir():
             for hit in d.rglob(filename):
