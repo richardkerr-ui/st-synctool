@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui import theme
+from gui.ui_helpers import make_interactive
 from gui.log_widget import LogWidget
 from core.offload import (
     OffloadSource, OffloadDest, OffloadConfig, CellResult, CellState,
@@ -722,6 +723,7 @@ class OffloadTab(QWidget):
                 missing.append("Pillow (pip install Pillow)")
             self._thumb_check.setEnabled(False)
             self._thumb_check.setToolTip("Requires: " + ", ".join(missing))
+        make_interactive(self._thumb_check)   # keep the context-specific tooltip set above
         layout.addWidget(self._thumb_check)
 
         max_lbl = QLabel("max")
@@ -743,13 +745,20 @@ class OffloadTab(QWidget):
 
         # 2. Stop on fail
         self._stop_on_fail = QCheckBox("Stop on first destination failure")
+        make_interactive(
+            self._stop_on_fail,
+            tooltip="Abort the whole offload as soon as any destination fails, "
+                    "rather than continuing with the remaining destinations.",
+        )
         layout.addWidget(self._stop_on_fail)
 
         # M10.3: optional ASC MHL v2.0 sidecar for post-house interoperability.
         self._export_mhl_chk = QCheckBox("Export ASC MHL (.mhl)")
-        self._export_mhl_chk.setToolTip(
-            "Write an ASC Media Hash List sidecar next to each manifest, "
-            "for verification in Silverstack, YoYotta and similar tools")
+        make_interactive(
+            self._export_mhl_chk,
+            tooltip="Write an ASC Media Hash List sidecar next to each manifest, "
+                    "for verification in Silverstack, YoYotta and similar tools.",
+        )
         layout.addWidget(self._export_mhl_chk)
 
         # Divider
@@ -780,6 +789,7 @@ class OffloadTab(QWidget):
         self._autodetect_check.setChecked(
             bool(projects.get_app_setting("volume_autodetect", True))
         )
+        make_interactive(self._autodetect_check)   # keep the tooltip set above
         self._autodetect_check.stateChanged.connect(self._on_autodetect_toggled)
         layout.addWidget(self._autodetect_check)
 
@@ -805,12 +815,22 @@ class OffloadTab(QWidget):
         self._start_btn = QPushButton("▶  Start Offload")
         self._start_btn.setObjectName("primaryBtn")
         self._start_btn.setMinimumHeight(40)
+        make_interactive(
+            self._start_btn,
+            tooltip="Pre-hash each source, copy to every destination via staging, "
+                    "verify, then commit. Sources are never written to.",
+        )
         self._start_btn.clicked.connect(self._start_offload)
         btn_row.addWidget(self._start_btn)
 
         self._cancel_btn = QPushButton("✕  Cancel")
         self._cancel_btn.setEnabled(False)
         self._cancel_btn.setMinimumHeight(36)
+        make_interactive(
+            self._cancel_btn,
+            tooltip="Stop the offload. Completed destinations are kept; staging "
+                    "for in-flight copies can be resumed later.",
+        )
         self._cancel_btn.clicked.connect(self._cancel_offload)
         btn_row.addWidget(self._cancel_btn)
 

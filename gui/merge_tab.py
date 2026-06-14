@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QLabel,
     QPushButton, QProgressBar, QFileDialog, QMessageBox, QCheckBox,
     QComboBox, QDialog, QListWidget, QListWidgetItem, QTextEdit,
     QDialogButtonBox, QGraphicsOpacityEffect, QFrame, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
+from gui.ui_helpers import make_interactive
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.diff_table import DiffTable
@@ -494,12 +495,22 @@ class MergeTab(QWidget):
         return row
 
     def _build_paths_group(self) -> QGroupBox:
-        """Base manifest, local folder, and server path inputs."""
-        group = QGroupBox("PATHS")
-        layout = QVBoxLayout(group)
+        """Base manifest, local folder, and server path inputs.
 
-        brow = QHBoxLayout()
-        brow.addWidget(QLabel("Base Manifest (.json):"))
+        A QGridLayout keeps every row aligned: column 0 (labels) and column 2
+        (trailing badge / button) share a fixed width, so all three path inputs
+        — and the Browse buttons inside them — line up at the same x positions.
+        """
+        group = QGroupBox("PATHS")
+        grid = QGridLayout(group)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        grid.setColumnStretch(1, 1)          # the path inputs absorb extra width
+        grid.setColumnMinimumWidth(0, 150)   # label column — uniform across rows
+        grid.setColumnMinimumWidth(2, 90)    # trailing column — stale badge / Check
+
+        # Row 0 — base manifest
+        grid.addWidget(QLabel("Base Manifest (.json):"), 0, 0)
         self.base_input = PathInputWidget("base_manifest", self)
         self.base_input.browse_btn.clicked.disconnect()
         self.base_input.browse_btn.clicked.connect(self._browse_manifest)
@@ -507,32 +518,31 @@ class MergeTab(QWidget):
             "Optional — auto-detects st_manifest.json in local folder"
         )
         self.base_input.pathChanged.connect(self._update_stale_badge)
-        brow.addWidget(self.base_input)
+        grid.addWidget(self.base_input, 0, 1)
         self.stale_label = QLabel("")
-        self.stale_label.setFixedWidth(90)
-        brow.addWidget(self.stale_label)
-        layout.addLayout(brow)
+        grid.addWidget(self.stale_label, 0, 2)
 
-        lrow = QHBoxLayout()
-        lrow.addWidget(QLabel("Local Folder (Yours):  "))
+        # Row 1 — local folder
+        grid.addWidget(QLabel("Local Folder (Yours):"), 1, 0)
         self.local_input = PathInputWidget("merge_local", self)
         self.local_input.pathChanged.connect(self._on_local_path_changed)
-        lrow.addWidget(self.local_input)
-        layout.addLayout(lrow)
+        grid.addWidget(self.local_input, 1, 1)
 
-        srow = QHBoxLayout()
-        srow.addWidget(QLabel("Server (Theirs):       "))
+        # Row 2 — server
+        grid.addWidget(QLabel("Server (Theirs):"), 2, 0)
         self.server_input = PathInputWidget("merge_server", self)
         self.server_input.input.setPlaceholderText(
             "/Volumes/NAS/project  or  https://drive.google.com/drive/folders/..."
         )
-        srow.addWidget(self.server_input)
+        grid.addWidget(self.server_input, 2, 1)
         health_btn = QPushButton("Check")
-        health_btn.setFixedWidth(60)
-        health_btn.setToolTip("Quick-compare server manifest against local")
+        make_interactive(
+            health_btn,
+            tooltip="Quick-compare the server manifest against your local copy "
+                    "without scanning — flags whether they are in sync.",
+        )
         health_btn.clicked.connect(self._check_server_health)
-        srow.addWidget(health_btn)
-        layout.addLayout(srow)
+        grid.addWidget(health_btn, 2, 2)
 
         return group
 
@@ -544,11 +554,22 @@ class MergeTab(QWidget):
             "Preserve existing files on overwrite (rename incoming with date-initials suffix)"
         )
         self.preserve_chk.setChecked(True)
+        make_interactive(
+            self.preserve_chk,
+            tooltip="When an incoming file would overwrite one of yours, keep "
+                    "yours and save the incoming copy with a date-initials "
+                    "suffix instead. Nothing is lost.",
+        )
         layout.addWidget(self.preserve_chk)
         self.rescan_chk = QCheckBox(
             "Re-scan before apply (catches drift since initial scan)"
         )
         self.rescan_chk.setChecked(True)
+        make_interactive(
+            self.rescan_chk,
+            tooltip="Re-read both folders right before applying, so changes made "
+                    "since your last scan are caught and never silently clobbered.",
+        )
         layout.addWidget(self.rescan_chk)
         return group
 
@@ -559,12 +580,22 @@ class MergeTab(QWidget):
         self.scan_btn = QPushButton("  Scan && Compare")
         self.scan_btn.setObjectName("primaryBtn")
         self.scan_btn.setFixedHeight(40)
+        make_interactive(
+            self.scan_btn,
+            tooltip="Compare your local folder against the server and list every "
+                    "difference. Nothing is changed until you apply actions.",
+        )
         self.scan_btn.clicked.connect(self._run_scan)
 
         self.apply_btn = QPushButton("  Apply Selected Actions")
         self.apply_btn.setFixedHeight(36)
         self.apply_btn.setStyleSheet(theme.success_button_style())
         self.apply_btn.setEnabled(False)
+        make_interactive(
+            self.apply_btn,
+            tooltip="Carry out the action chosen for each row (push, pull, skip). "
+                    "Enabled only after a scan.",
+        )
         self.apply_btn.clicked.connect(self._apply_actions)
 
         self._apply_opacity = QGraphicsOpacityEffect()
@@ -573,9 +604,10 @@ class MergeTab(QWidget):
 
         self.newer_wins_btn = QPushButton("Newer Wins")
         self.newer_wins_btn.setFixedHeight(36)
-        self.newer_wins_btn.setToolTip(
-            "For every conflict row, set the action to Push if local is newer, "
-            "Pull if server is newer, or Skip if equal / unknown."
+        make_interactive(
+            self.newer_wins_btn,
+            tooltip="For every conflict row, set the action to Push if local is "
+                    "newer, Pull if server is newer, or Skip if equal / unknown.",
         )
         self.newer_wins_btn.setStyleSheet(
             f"QPushButton {{ background:#3a2a00; color:{theme.ACCENT_GOLD};"

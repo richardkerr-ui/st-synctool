@@ -115,3 +115,44 @@ class TestUnresolvedCounterLabel:
         merge_tab._update_unresolved_count()
         assert merge_tab._unresolved_lbl.isVisible()
         assert "3" in merge_tab._unresolved_lbl.text()
+
+
+# ---------------------------------------------------------------------------
+# Diff-table state pill rendering (regression for the lost colour coding)
+# ---------------------------------------------------------------------------
+
+class TestStatePillStyling:
+    """The state pill paints a coloured rounded fill via an ID-selector
+    stylesheet. Two prior bugs blanked it: (1) a selector-less inline sheet was
+    outranked by the app-wide `QWidget`/`QLabel` rules, and (2) an unbalanced
+    `}}` made Qt fail to parse the sheet entirely. Both must stay fixed."""
+
+    def _pill(self, merge_tab, state):
+        from PyQt6.QtWidgets import QLabel
+        from core.comparison import DiffResult
+        merge_tab.diff_table.load_results([DiffResult(path="x.txt", state=state)])
+        return merge_tab.diff_table.cellWidget(0, 1).findChild(QLabel)
+
+    def test_pill_has_id_selector(self, merge_tab):
+        from core.comparison import DiffState
+        pill = self._pill(merge_tab, DiffState.SERVER_ONLY)
+        assert pill.objectName() == "mergeStatePill"
+        assert pill.styleSheet().startswith("QLabel#mergeStatePill {")
+
+    def test_pill_braces_balanced(self, merge_tab):
+        # The `}}` regression left an extra brace, so Qt dropped the whole sheet.
+        from core.comparison import DiffState
+        qss = self._pill(merge_tab, DiffState.SERVER_ONLY).styleSheet()
+        assert qss.count("{") == qss.count("}") == 1
+
+    def test_pill_carries_bucket_background(self, merge_tab):
+        import gui.theme as theme
+        from core.comparison import DiffState
+        bg, _ = theme.merge_pill("SERVER_ONLY")
+        assert bg in self._pill(merge_tab, DiffState.SERVER_ONLY).styleSheet()
+
+    def test_distinct_buckets_distinct_colours(self, merge_tab):
+        from core.comparison import DiffState
+        out = self._pill(merge_tab, DiffState.LOCAL_ONLY).styleSheet()
+        incoming = self._pill(merge_tab, DiffState.SERVER_ONLY).styleSheet()
+        assert out != incoming

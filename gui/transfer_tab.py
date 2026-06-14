@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 from pathlib import Path
 
+from gui.ui_helpers import make_interactive
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.toast import show_toast
@@ -184,18 +185,30 @@ class TransferTab(QWidget):
         opts_row1.addWidget(self.conflict_combo)
         opts_row1.addSpacing(20)
         self.extract_zip_chk = QCheckBox("Auto-extract multipart .zips after transfer")
+        make_interactive(
+            self.extract_zip_chk,
+            tooltip="After the transfer, automatically reassemble and unzip any "
+                    "multipart .zip sets found at the destination.",
+        )
         opts_row1.addWidget(self.extract_zip_chk)
         opts_row1.addSpacing(20)
         self.paranoid_chk = QCheckBox("Paranoid verification")
         self.paranoid_chk.setStyleSheet(f"color:{theme.TEXT_MUTED};")
+        make_interactive(
+            self.paranoid_chk,
+            tooltip="Re-hash every file after copying and compare against the "
+                    "source. Slower, but the strongest integrity guarantee.",
+        )
         opts_row1.addWidget(self.paranoid_chk)
 
         # M10.3: optional ASC MHL v2.0 sidecar for post-house interoperability.
         self.export_mhl_chk = QCheckBox("Export ASC MHL (.mhl)")
         self.export_mhl_chk.setStyleSheet(f"color:{theme.TEXT_MUTED};")
-        self.export_mhl_chk.setToolTip(
-            "Write an ASC Media Hash List sidecar next to the manifest, for "
-            "verification in Silverstack, YoYotta and similar tools")
+        make_interactive(
+            self.export_mhl_chk,
+            tooltip="Write an ASC Media Hash List sidecar next to the manifest, "
+                    "for verification in Silverstack, YoYotta and similar tools.",
+        )
         opts_row1.addWidget(self.export_mhl_chk)
         opts_row1.addStretch()
         opts_layout.addLayout(opts_row1)
@@ -217,6 +230,12 @@ class TransferTab(QWidget):
         self.mirror_chk = QCheckBox(
             "Mirror mode — deletes files at destination not present in source"
         )
+        make_interactive(
+            self.mirror_chk,
+            tooltip="Make the destination an exact mirror of the source: files "
+                    "at the destination that are not in the source are DELETED. "
+                    "Destructive — use with care.",
+        )
         dl.addWidget(self.mirror_chk)
         dl.addStretch()
         opts_layout.addWidget(danger)
@@ -229,11 +248,21 @@ class TransferTab(QWidget):
         self.start_btn = QPushButton("▶  Start Transfer")
         self.start_btn.setObjectName("primaryBtn")  # accent fill via tab stylesheet
         self.start_btn.setFixedHeight(40)
+        make_interactive(
+            self.start_btn,
+            tooltip="Copy from source to destination, verifying every file and "
+                    "writing a manifest when done.",
+        )
         self.start_btn.clicked.connect(self._start_transfer)
 
         self.cancel_btn = QPushButton("✕  Cancel")
         self.cancel_btn.setFixedHeight(36)
         self.cancel_btn.setEnabled(False)
+        make_interactive(
+            self.cancel_btn,
+            tooltip="Stop the transfer in progress. Files already copied and "
+                    "verified are kept.",
+        )
         self.cancel_btn.clicked.connect(self._cancel_transfer)
 
         self._status_label = QLabel("Ready")
@@ -241,6 +270,11 @@ class TransferTab(QWidget):
 
         self.manifest_btn = QPushButton("📋  Generate Manifest Only")
         self.manifest_btn.setFixedHeight(36)
+        make_interactive(
+            self.manifest_btn,
+            tooltip="Hash the source and write a manifest without copying any "
+                    "files — useful to fingerprint a folder in place.",
+        )
         self.manifest_btn.setStyleSheet(
             "QPushButton {"
             f"  background:transparent; color:{theme.TEXT_MUTED};"

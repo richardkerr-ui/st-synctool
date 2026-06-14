@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
+from gui.ui_helpers import make_interactive
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.toast import show_toast
@@ -132,10 +133,11 @@ class VerifyTab(QWidget):
         # of trusting Drive's metadata. Bandwidth-bound, so it is opt-in and only
         # meaningful for Drive folders.
         self.deep_chk = QCheckBox("Deep verify (downloads files) — Drive only")
-        self.deep_chk.setToolTip(
-            "Streams each Drive file through rclone to compute its SHA-256 locally,\n"
-            "instead of trusting Google's stored hash. No local copy is kept.\n"
-            "Bandwidth-bound: an estimate is shown when you start."
+        make_interactive(
+            self.deep_chk,
+            tooltip="Streams each Drive file through rclone to compute its SHA-256 "
+                    "locally,\ninstead of trusting Google's stored hash. No local "
+                    "copy is kept.\nBandwidth-bound: an estimate is shown when you start.",
         )
         self.deep_chk.setEnabled(False)
         ig.addWidget(self.deep_chk)
@@ -148,14 +150,20 @@ class VerifyTab(QWidget):
         self.verify_btn = QPushButton("🛡  Run Verification")
         self.verify_btn.setObjectName("primaryBtn")
         self.verify_btn.setFixedHeight(40)
+        make_interactive(
+            self.verify_btn,
+            tooltip="Re-hash the selected folder and compare every file against "
+                    "its manifest, reporting OK / MISSING / MISMATCH.",
+        )
         self.verify_btn.clicked.connect(self._run_verify)
         btn_row.addWidget(self.verify_btn)
 
         self.batch_btn = QPushButton("📋  Verify All Projects")
         self.batch_btn.setFixedHeight(36)
-        self.batch_btn.setToolTip(
-            "Verify every project in the registry against its latest manifest,\n"
-            "producing one consolidated OK / MISSING / MISMATCH report."
+        make_interactive(
+            self.batch_btn,
+            tooltip="Verify every project in the registry against its latest "
+                    "manifest,\nproducing one consolidated OK / MISSING / MISMATCH report.",
         )
         self.batch_btn.clicked.connect(self._run_batch_verify)
         btn_row.addWidget(self.batch_btn)
@@ -163,6 +171,10 @@ class VerifyTab(QWidget):
         self.cancel_btn = QPushButton("✕  Cancel")
         self.cancel_btn.setFixedHeight(36)
         self.cancel_btn.setEnabled(False)
+        make_interactive(
+            self.cancel_btn,
+            tooltip="Stop the verification in progress.",
+        )
         self.cancel_btn.clicked.connect(self._cancel_verify)
         btn_row.addWidget(self.cancel_btn)
 

@@ -58,8 +58,17 @@ class DiffTable(QTableWidget):
         self.verticalHeader().setVisible(False)
         header = self.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        # State and Action hold cell widgets (a coloured pill, a combo) whose
+        # size hints ResizeToContents under-measures, clipping "Server Only" to
+        # "Server On" and the combo arrow over "Pull from Server". Fixed widths
+        # sized for the longest label keep both fully visible.
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.setColumnWidth(1, 150)   # fits "⚠ Both Changed"
+        self.setColumnWidth(2, 200)   # fits "Delete on Server ▾"
+        # Rows host a pill label and a combo; the default section is too short
+        # and clips their descenders. Give them room to sit centred.
+        self.verticalHeader().setDefaultSectionSize(34)
         self.setMinimumHeight(220)   # keep ~6 rows visible even with the conflict panel open
         # Shared zebra + hover + muted-selection look (theme.table_stylesheet).
         self.setStyleSheet(theme.table_stylesheet())
@@ -108,10 +117,15 @@ class DiffTable(QTableWidget):
             pill_layout.setContentsMargins(4, 2, 4, 2)
             pill_layout.setSpacing(0)
             pill = QLabel(f"{glyph} {state_label}")
+            # Use an ID selector: the app-wide stylesheet styles `QWidget` /
+            # `QLabel` by type, which outranks a selector-less inline sheet and
+            # would paint over the pill's fill. An ID selector wins, so the
+            # bucket colour survives regardless of the global theme.
+            pill.setObjectName("mergeStatePill")
             pill.setStyleSheet(
-                f"background: {bg}; color: {fg};"
+                f"QLabel#mergeStatePill {{ background: {bg}; color: {fg};"
                 " border-radius: 4px; padding: 2px 7px;"
-                " font-size: 11px; font-weight: 500;"
+                " font-size: 11px; font-weight: 500; }"
             )
             pill_layout.addWidget(pill)
             pill_layout.addStretch()
@@ -133,6 +147,7 @@ class DiffTable(QTableWidget):
                 combo.setCurrentIndex(0)
 
             combo.setStyleSheet("QComboBox { padding:2px 6px; }")
+            combo.setCursor(Qt.CursorShape.PointingHandCursor)
             self.setCellWidget(row, 2, combo)
             self._action_combos[path_str] = combo
 
@@ -141,10 +156,8 @@ class DiffTable(QTableWidget):
                 lambda text, p=path_str: self.conflict_action_changed.emit(p, text)
             )
 
-        # ResizeToContents doesn't query setCellWidget() sizeHints automatically,
-        # so force a column resize after all widgets are in place.
-        self.resizeColumnToContents(1)
-        self.resizeColumnToContents(2)
+        # State/Action use fixed widths (set in _build_ui) sized for the
+        # longest labels, so no per-load resize is needed.
 
     def get_actions(self) -> dict:
         return {p: c.currentText() for p, c in self._action_combos.items()}
