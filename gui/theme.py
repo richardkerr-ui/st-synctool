@@ -57,6 +57,37 @@ def severity_color(severity: str) -> str:
     return SEVERITY_COLORS.get(severity, VERDICT_MUTED)
 
 
+# Table colours (from the redesign mockup): header #222628 on muted text,
+# rows on charcoal with a subtly lighter zebra stripe and a hover highlight.
+TABLE_BG        = "#1E2123"
+TABLE_ALT_BG    = "#24282A"
+TABLE_HOVER_BG  = "#2C3033"
+TABLE_HEADER_BG = "#222628"
+TABLE_GRID      = "#2A2E30"
+TABLE_TEXT      = "#D4D7D9"
+TABLE_SELECTED  = "#33414C"
+
+
+def table_stylesheet() -> str:
+    """Shared QTableWidget look: zebra striping + row hover, matched to the
+    redesign mockup. Selection stays a muted slate (never the bright accent)."""
+    return f"""
+    QTableWidget {{
+        background:{TABLE_BG}; color:{TABLE_TEXT};
+        gridline-color:{TABLE_GRID};
+        border:1px solid {BORDER}; border-radius:6px;
+    }}
+    QHeaderView::section {{
+        background:{TABLE_HEADER_BG}; color:{MUTED_TEXT};
+        padding:8px 12px; border:none; font-weight:700; font-size:11px;
+    }}
+    QTableWidget::item {{ padding:7px 6px; }}
+    QTableWidget::item:alternate {{ background:{TABLE_ALT_BG}; }}
+    QTableWidget::item:hover {{ background:{TABLE_HOVER_BG}; }}
+    QTableWidget::item:selected {{ background:{TABLE_SELECTED}; color:{CREAM}; }}
+    """
+
+
 def verdict_color(verdict: str) -> str:
     """Brand colour for a verdict token (e.g. "VERIFIED" → green)."""
     from core.verdict_style import verdict_severity

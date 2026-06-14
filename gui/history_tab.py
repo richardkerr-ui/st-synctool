@@ -89,6 +89,10 @@ class HistoryTab(QWidget):
             ["When", "Workstation", "Operation", "Details", "Verdict"])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setMouseTracking(True)   # so :hover repaints rows live
+        self.table.setStyleSheet(theme.table_stylesheet())
         self.table.horizontalHeader().setSectionResizeMode(
             3, QHeaderView.ResizeMode.Stretch)
         self.table.cellDoubleClicked.connect(self._open_row_log)
