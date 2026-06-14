@@ -1,5 +1,22 @@
 # Changelog
 
+## Merge diff correctness — June 14, 2026
+
+Two silent-failure bugs in the three-way diff, found during a review of `core/comparison.py`.
+
+### Cross-algorithm false conflicts
+- `_cs()` previously picked the first available checksum algorithm per entry independently (sha256 > xxhash3_64 > md5), so comparing a SHA-256 side against an md5-only Drive manifest compared hashes across different hash spaces. Identical files were reported as changed: `SERVER_CHANGED` when a base manifest was present, `BOTH_CHANGED` when not.
+- New `_same()` does a tri-state comparison on the **strongest shared** algorithm: same, different, or unprovable. When two sides share no algorithm it returns the new `DiffState.INDETERMINATE` ("Unknown") instead of inventing a confident change. A matching SHA-256 still wins over md5 drift.
+- `INDETERMINATE` is wired through `merge_state` (decision bucket, warn glyph), `diff_summary` (Skip default, conflict-style options, counted in the "needs review" rollup). The per-row pill reads "Unknown", not "Conflict".
+- Behaviour change: two entries that carry no checksum at all are now `INDETERMINATE` rather than `UNCHANGED` (equality is unprovable). Real manifests always carry SHA-256, so only malformed input reaches this.
+
+### Duplicate rename target (phantom deletion)
+- Two renames sharing one `to` were collapsed by a `{to: from}` dict that silently kept only the last; the dropped original surfaced as a phantom `DELETED_LOCAL`. `three_way_diff` now detects the collision and flags every involved path (`BOTH_CHANGED`) for review instead of dropping one.
+- `preserve_rename` now increments the suffix (`_2`, `_3`, ...) on a same-day, same-user collision instead of reusing the name and overwriting the previous backup. Bounded so a misbehaving existence check cannot loop forever; the callers in `push_file`/`pull_file` pass a real collision probe. This makes the long-standing README claim about numeric suffixes actually true.
+
+### Tests
+- New `TestCrossAlgorithmComparison` and `TestDuplicateRenameTarget` in `test_comparison.py`; three collision tests in `test_merge_ops.py`. Full suite: 1854 passed, 1 skipped.
+
 ## Post-ship hardening — June 10–11, 2026
 
 ### Manifest schema (schema 1.2)

@@ -199,6 +199,7 @@ For each file, the tool determines its state and proposes a default action:
 | Local Changed | You modified it, server has the old version | **Push to Server** |
 | Server Changed | Someone modified it on server, yours is old | **Pull from Server** |
 | Both Changed | Both sides modified independently | **Skip** *(conflict — your decision)* |
+| Unknown | The two sides share no checksum algorithm, so same-or-different cannot be proven (e.g. a Drive md5-only base against a local SHA-256 scan). The tool refuses to guess and flags it for review | **Skip** *(your decision)* |
 | Deleted Local | Used to exist, you deleted it | **Skip** *(no auto-delete on server)* |
 | Deleted Server | Used to exist, deleted on server | **Skip** *(no auto-delete locally)* |
 | Deleted Both | Gone everywhere | *(nothing to do)* |

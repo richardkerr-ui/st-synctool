@@ -11,6 +11,8 @@ Grounded in the current code, not invented:
 
 No hash-algorithm decision is needed. Offload prehash already computes sha256 (`offload.py:386`, `algorithm: "sha256"`), so it overlaps with merge/transfer manifests on sha256.
 
+> **Note (June 14, 2026):** the diff no longer depends on that overlap holding. `three_way_diff` compares on the strongest **shared** algorithm and, when two sides share none (e.g. a Drive md5-only manifest against a local SHA-256 scan), reports `DiffState.INDETERMINATE` ("Unknown") rather than a false change. SHA-256 overlap is still the desired common case; the indeterminate path is the honest fallback when it is absent.
+
 ---
 
 ## Part 1 — Offload must persist a JSON manifest
@@ -137,7 +139,9 @@ Rules:
 - `from` is the path in the prior/base state, `to` is the path on disk now.
 - `reason` is `"normalize"` (offload) or `"preserve"` (merge apply). The diff ignores `reason`; it is for logging and UI only. Adding it is non-breaking because `comparison.py:96` only reads `from` and `to`.
 
-Both subsystems write this same top-level `renames[]`. `comparison.py` needs no change. It already collapses any `to` path that appears as LOCAL_ONLY, SERVER_ONLY, DELETED_LOCAL, or DELETED_SERVER into RENAMED and suppresses the matching `from`.
+Both subsystems write this same top-level `renames[]`. `comparison.py` collapses any `to` path that appears as LOCAL_ONLY, SERVER_ONLY, DELETED_LOCAL, or DELETED_SERVER into RENAMED and suppresses the matching `from`.
+
+**Duplicate-target guard (June 14, 2026):** producers must keep each `to` unique within a single `renames[]` list. If two entries claim the same `to` (e.g. a merge same-day collision before `preserve_rename` started incrementing), `three_way_diff` no longer collapses either one. A `{to: from}` map would silently keep only the last entry and the dropped original would surface as a phantom `DELETED_LOCAL`. Instead the diff flags every path involved in the collision (both `from`s and the shared `to`) as `BOTH_CHANGED` for the user to resolve.
 
 ### What changes in offload
 
