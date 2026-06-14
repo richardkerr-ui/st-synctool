@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
-from gui.ui_helpers import make_interactive, awake_indicator
+from gui.ui_helpers import make_interactive, awake_indicator, start_dir_for
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.diff_table import DiffTable
@@ -511,7 +511,7 @@ class MergeTab(QWidget):
 
         # Row 0 — base manifest
         grid.addWidget(QLabel("Base Manifest (.json):"), 0, 0)
-        self.base_input = PathInputWidget("base_manifest", self)
+        self.base_input = PathInputWidget("base_manifest", self, clipboard_url=False)
         self.base_input.browse_btn.clicked.disconnect()
         self.base_input.browse_btn.clicked.connect(self._browse_manifest)
         self.base_input.input.setPlaceholderText(
@@ -879,8 +879,9 @@ class MergeTab(QWidget):
                 self.base_input.setText(dlg.selected_path())
                 self._update_stale_badge(dlg.selected_path())
                 return
+        start = str(proj_dir) if (proj_dir and proj_dir.exists()) else self.base_input.text()
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Base Manifest", "", "JSON Files (*.json)"
+            self, "Select Base Manifest", start_dir_for(start), "JSON Files (*.json)"
         )
         if path:
             self.base_input.setText(path)

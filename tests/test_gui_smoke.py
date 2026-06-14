@@ -8,7 +8,49 @@ No workers are started; external I/O is mocked at the module boundary.
 
 import sys
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock
+
+
+# ---------------------------------------------------------------------------
+# PathInputWidget — Browse start dir + clipboard Drive-URL paste
+# ---------------------------------------------------------------------------
+
+class TestPathInputWidget:
+    def test_start_dir_for_existing_dir_file_and_url(self, tmp_path):
+        from gui.ui_helpers import start_dir_for
+        f = tmp_path / "x.txt"; f.write_text("x")
+        assert start_dir_for(str(tmp_path)) == str(tmp_path)        # dir → itself
+        assert start_dir_for(str(f)) == str(tmp_path)               # file → parent
+        assert start_dir_for("https://drive.google.com/x") == str(Path.home())
+        assert start_dir_for("") == str(Path.home())
+
+    def test_clipboard_paste_appears_only_for_drive_url_when_empty(self, qtbot):
+        from PyQt6.QtWidgets import QApplication
+        from gui.path_input_widget import PathInputWidget
+        w = PathInputWidget("source"); qtbot.addWidget(w)
+        QApplication.clipboard().setText("https://drive.google.com/drive/folders/XYZ")
+        w._refresh_paste_hint()
+        assert not w._paste_btn.isHidden()
+        w._paste_clipboard_url()
+        assert "drive.google.com" in w.text()
+        assert w._paste_btn.isHidden()   # hides once filled
+
+    def test_clipboard_paste_hidden_for_non_url(self, qtbot):
+        from PyQt6.QtWidgets import QApplication
+        from gui.path_input_widget import PathInputWidget
+        w = PathInputWidget("source"); qtbot.addWidget(w)
+        QApplication.clipboard().setText("/Users/me/some/path")
+        w._refresh_paste_hint()
+        assert w._paste_btn.isHidden()
+
+    def test_clipboard_paste_disabled_for_manifest_field(self, qtbot):
+        from PyQt6.QtWidgets import QApplication
+        from gui.path_input_widget import PathInputWidget
+        w = PathInputWidget("base_manifest", clipboard_url=False); qtbot.addWidget(w)
+        QApplication.clipboard().setText("https://drive.google.com/drive/folders/XYZ")
+        w._refresh_paste_hint()
+        assert w._paste_btn.isHidden()
 
 
 # ---------------------------------------------------------------------------

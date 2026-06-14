@@ -32,6 +32,22 @@ def awake_indicator(parent=None):
     return lbl
 
 
+def start_dir_for(text) -> str:
+    """A sensible existing directory to open a file dialog at, given a field's
+    current value: an existing dir → itself, an existing file → its parent, and
+    a Drive URL / empty / missing path → home. Stops Browse from always opening
+    at the home folder when a path is already loaded."""
+    from pathlib import Path
+    s = (text or "").strip()
+    if s:
+        p = Path(s).expanduser()
+        if p.is_dir():
+            return str(p)
+        if p.parent.is_dir() and str(p.parent) not in (".", ""):
+            return str(p.parent)
+    return str(Path.home())
+
+
 def open_path(path) -> None:
     """Open a file or folder in its default app (folder → Finder window)."""
     from PyQt6.QtGui import QDesktopServices

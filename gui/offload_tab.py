@@ -21,7 +21,9 @@ from PyQt6.QtWidgets import (
 )
 
 from gui import theme
-from gui.ui_helpers import make_interactive, awake_indicator, open_path, reveal_in_finder
+from gui.ui_helpers import (
+    make_interactive, awake_indicator, open_path, reveal_in_finder, start_dir_for,
+)
 from gui.log_widget import LogWidget
 from core.amphetamine import start_session, end_session
 from core.throughput import ThroughputMeter, format_rate, format_eta
@@ -118,7 +120,7 @@ class SourceRowWidget(QWidget):
 
     def _browse(self):
         folder = QFileDialog.getExistingDirectory(
-            self, "Select source folder", str(Path.home())
+            self, "Select source folder", start_dir_for(self._path.text())
         )
         if folder:
             self._path.setText(folder)
@@ -183,7 +185,7 @@ class DestRowWidget(QWidget):
 
     def _browse(self):
         folder = QFileDialog.getExistingDirectory(
-            self, "Select destination folder", str(Path.home())
+            self, "Select destination folder", start_dir_for(self._path.text())
         )
         if folder:
             self._path.setText(folder)
