@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QComboBox, QPushButton, QFileDialog, QSizePolicy,
     QApplication,
 )
-from PyQt6.QtCore import pyqtSignal, QEvent
+from PyQt6.QtCore import pyqtSignal, QEvent, Qt
 from pathlib import Path
 
 from core.dnd import folder_from_dropped_paths
@@ -54,9 +54,14 @@ class PathInputWidget(QWidget):
         layout.addWidget(self._paste_btn)
         if self._clipboard_url:
             self.input.installEventFilter(self)
-            # Appear proactively the moment a Drive link is copied — not only
-            # when the field is focused.
+            # In-app copies fire dataChanged; cross-app copies (e.g. from a
+            # browser) do NOT on macOS — so also re-check whenever the app
+            # regains focus, which is exactly when a user switches back after
+            # copying a Drive link elsewhere.
             QApplication.clipboard().dataChanged.connect(self._refresh_paste_hint)
+            app = QApplication.instance()
+            if app is not None:
+                app.applicationStateChanged.connect(self._on_app_state)
             self._refresh_paste_hint()
 
         # Public handle to the browse button (so callers can rewire it)
@@ -107,6 +112,12 @@ class PathInputWidget(QWidget):
         # Switching to this tab with a Drive link already on the clipboard.
         self._refresh_paste_hint()
         super().showEvent(e)
+
+    def _on_app_state(self, state):
+        # App regained focus (e.g. user switched back from the browser after
+        # copying a link) — re-check the clipboard.
+        if state == Qt.ApplicationState.ApplicationActive:
+            self._refresh_paste_hint()
 
     def eventFilter(self, obj, event):
         if obj is self.input and event.type() == QEvent.Type.FocusIn:

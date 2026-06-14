@@ -37,6 +37,18 @@ class TestPathInputWidget:
         assert "drive.google.com" in w.text()
         assert w._paste_btn.isHidden()   # hides once filled
 
+    def test_clipboard_paste_appears_on_app_refocus(self, qtbot):
+        # Cross-app copies (browser → app) don't fire dataChanged on macOS, so
+        # the hint must also refresh when the app regains focus.
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QApplication
+        from gui.path_input_widget import PathInputWidget
+        w = PathInputWidget("source"); qtbot.addWidget(w)
+        QApplication.clipboard().setText("https://drive.google.com/drive/u/0/folders/ABC")
+        w._paste_btn.setVisible(False)   # simulate dataChanged having not fired
+        w._on_app_state(Qt.ApplicationState.ApplicationActive)
+        assert not w._paste_btn.isHidden()
+
     def test_clipboard_paste_hidden_for_non_url(self, qtbot):
         from PyQt6.QtWidgets import QApplication
         from gui.path_input_widget import PathInputWidget
