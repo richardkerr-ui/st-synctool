@@ -68,6 +68,26 @@ def app_icon_path() -> Optional[str]:
     return None
 
 
+def bootup_music_path() -> Optional[str]:
+    """Return the bundled 'Sim Nights' audio path, or None if it isn't present.
+
+    Resolves the same way as ``app_icon_path``: inside a frozen bundle via
+    ``sys._MEIPASS`` / Resources, and from the repo's ``assets/`` when running
+    from source. Drop ``assets/sim_nights.mp3`` in to enable it.
+    """
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "assets" / "sim_nights.mp3")
+    for d in bundle_bin_dirs():
+        candidates.append(d / "assets" / "sim_nights.mp3")
+    candidates.append(Path(__file__).resolve().parent.parent / "assets" / "sim_nights.mp3")
+    for c in candidates:
+        if c and c.is_file():
+            return str(c)
+    return None
+
+
 def prepend_bundle_to_path(env: Optional[dict] = None) -> None:
     """Put the frozen .app's bundled-binary dirs at the front of PATH.
 

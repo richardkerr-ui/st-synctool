@@ -817,3 +817,32 @@ class TestCompletionBanner:
         assert isinstance(v._banner, CompletionBanner)
         assert isinstance(m._banner, CompletionBanner)
         assert isinstance(o._completion_banner, CompletionBanner)
+
+
+# ---------------------------------------------------------------------------
+# Dr. Zhivago exam dialogs — gate for disabling bootup music. Construction-only
+# smoke (a missing import here previously crashed the app at click time).
+# ---------------------------------------------------------------------------
+
+class TestZhivagoExamDialogs:
+    def test_intro_and_quiz_dialogs_construct(self, qtbot):
+        from gui.zhivago_quiz import ZhivagoIntroDialog, ZhivagoQuizDialog
+        intro = ZhivagoIntroDialog(); qtbot.addWidget(intro)
+        quiz_dlg = ZhivagoQuizDialog(); qtbot.addWidget(quiz_dlg)
+        from core import zhivago_quiz as quiz
+        # One stacked page per question, starting on the first.
+        assert quiz_dlg._stack.count() == len(quiz.QUESTIONS)
+        assert quiz_dlg._stack.currentIndex() == 0
+        # Back disabled on Q1; Next labelled for paging, not submitting.
+        assert not quiz_dlg._back_btn.isEnabled()
+        assert quiz_dlg._next_btn.text() == "Next"
+
+    def test_paging_to_last_question_switches_to_submit(self, qtbot):
+        from gui.zhivago_quiz import ZhivagoQuizDialog
+        from core import zhivago_quiz as quiz
+        dlg = ZhivagoQuizDialog(); qtbot.addWidget(dlg)
+        for _ in range(len(quiz.QUESTIONS) - 1):
+            dlg._go_next()
+        assert dlg._stack.currentIndex() == len(quiz.QUESTIONS) - 1
+        assert dlg._next_btn.text() == "Submit exam"
+        assert dlg._back_btn.isEnabled()

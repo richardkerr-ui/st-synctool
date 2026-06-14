@@ -42,6 +42,8 @@ DEFAULTS: dict = {
     # M12.4: play a completion sound when an offload finishes (the DIT has
     # usually walked away from the cart). On by default.
     "completion_sound_enabled": True,
+    # Play "Sim Nights" by Kirk Casey on app startup. On by default.
+    "bootup_music_enabled": True,
 }
 
 # Per-key environment overrides (read-only; they win over the file).
@@ -165,3 +167,16 @@ def completion_sound_enabled(*, path=None) -> bool:
 
 def set_completion_sound_enabled(enabled: bool, *, path=None) -> dict:
     return set_setting("completion_sound_enabled", bool(enabled), path=path)
+
+
+# --------------------------------------------------------------------------- #
+# Bootup music toggle
+# --------------------------------------------------------------------------- #
+
+def bootup_music_enabled(*, path=None) -> bool:
+    """Whether to play 'Sim Nights' on startup. Defaults True."""
+    return bool(get_setting("bootup_music_enabled", True, path=path))
+
+
+def set_bootup_music_enabled(enabled: bool, *, path=None) -> dict:
+    return set_setting("bootup_music_enabled", bool(enabled), path=path)

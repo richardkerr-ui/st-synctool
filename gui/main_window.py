@@ -166,10 +166,20 @@ class MainWindow(QMainWindow):
         self._settings_btn.setToolTip("Configure the org-wide activity log")
         self._settings_btn.clicked.connect(self._open_settings)
 
+        # Bootup-music toggle ("Sim Nights"). Turning it off is gated behind the
+        # Dr. Zhivago exam; turning it back on is free. The glyph reflects state.
+        self._music_btn = QPushButton()
+        self._music_btn.setFixedHeight(26)
+        self._music_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._music_btn.setStyleSheet(chip_qss)
+        self._music_btn.clicked.connect(self._toggle_bootup_music)
+        self._refresh_music_btn()
+
         header.addWidget(title)
         header.addWidget(subtitle)
         header.addStretch()
         header.addWidget(self._account_label)
+        header.addWidget(self._music_btn)
         header.addWidget(self._settings_btn)
         header.addWidget(self._feedback_btn)
         header.addWidget(self._tour_btn)
@@ -861,6 +871,31 @@ class MainWindow(QMainWindow):
         self._tutorial.resize(self.centralWidget().size())
         self._tutorial.set_steps(self._build_tutorial_steps())
         self._tutorial.start()
+
+    def _refresh_music_btn(self):
+        """Sync the music chip's glyph and tooltip to the current setting."""
+        from core import settings as app_settings
+        on = app_settings.bootup_music_enabled()
+        self._music_btn.setText("♪  Music" if on else "♪  Music (off)")
+        self._music_btn.setToolTip(
+            'Bootup music "Sim Nights" is on. Click to turn it off.'
+            if on else 'Bootup music is off. Click to turn it back on.')
+
+    def _toggle_bootup_music(self):
+        """Toggle the bootup music. Turning it OFF requires passing the exam;
+        turning it back ON is free. Persists immediately."""
+        from core import settings as app_settings
+        from core.bootup_sound import stop_bootup_music, play_bootup_music
+        if app_settings.bootup_music_enabled():
+            from gui.zhivago_quiz import run_disable_exam
+            if not run_disable_exam(self):
+                return
+            app_settings.set_bootup_music_enabled(False)
+            stop_bootup_music()
+        else:
+            app_settings.set_bootup_music_enabled(True)
+            play_bootup_music()
+        self._refresh_music_btn()
 
     def _open_settings(self):
         """M11.2: open the Settings dialog (thin — all logic in core.settings)."""

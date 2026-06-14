@@ -63,6 +63,15 @@ def main():
 
     window = MainWindow(force_setup="--setup" in sys.argv)
     window.show()
+
+    # Vibes: "Sim Nights" by Kirk Casey on bootup (non-blocking; respects system
+    # volume; no-op if the toggle is off or the audio file isn't bundled).
+    from core.bootup_sound import play_bootup_music, stop_bootup_music
+    play_bootup_music()
+    # afplay is a detached child; kill it when the app quits so the song doesn't
+    # outlive the window.
+    app.aboutToQuit.connect(stop_bootup_music)
+
     sys.exit(app.exec())
 
 

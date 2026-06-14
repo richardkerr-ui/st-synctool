@@ -42,7 +42,9 @@ a = Analysis(
     ['main.py'],
     pathex=[str(Path('.').resolve())],
     binaries=binaries,
-    datas=[('assets/app_icon.png', 'assets')],
+    datas=([('assets/app_icon.png', 'assets')]
+           + ([('assets/sim_nights.mp3', 'assets')]
+              if Path('assets/sim_nights.mp3').is_file() else [])),
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
