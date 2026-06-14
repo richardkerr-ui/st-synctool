@@ -54,6 +54,10 @@ class PathInputWidget(QWidget):
         layout.addWidget(self._paste_btn)
         if self._clipboard_url:
             self.input.installEventFilter(self)
+            # Appear proactively the moment a Drive link is copied — not only
+            # when the field is focused.
+            QApplication.clipboard().dataChanged.connect(self._refresh_paste_hint)
+            self._refresh_paste_hint()
 
         # Public handle to the browse button (so callers can rewire it)
         self.browse_btn = QPushButton("Browse…")
@@ -99,6 +103,11 @@ class PathInputWidget(QWidget):
             self.set_path(folder)
 
     # ── Clipboard-aware Drive-URL paste ──────────────────────────────────────
+    def showEvent(self, e):
+        # Switching to this tab with a Drive link already on the clipboard.
+        self._refresh_paste_hint()
+        super().showEvent(e)
+
     def eventFilter(self, obj, event):
         if obj is self.input and event.type() == QEvent.Type.FocusIn:
             self._refresh_paste_hint()

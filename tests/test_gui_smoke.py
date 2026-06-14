@@ -25,12 +25,13 @@ class TestPathInputWidget:
         assert start_dir_for("https://drive.google.com/x") == str(Path.home())
         assert start_dir_for("") == str(Path.home())
 
-    def test_clipboard_paste_appears_only_for_drive_url_when_empty(self, qtbot):
+    def test_clipboard_paste_appears_when_drive_url_copied(self, qtbot):
         from PyQt6.QtWidgets import QApplication
         from gui.path_input_widget import PathInputWidget
         w = PathInputWidget("source"); qtbot.addWidget(w)
-        QApplication.clipboard().setText("https://drive.google.com/drive/folders/XYZ")
-        w._refresh_paste_hint()
+        QApplication.clipboard().setText("")
+        # Copying a Drive link should reveal the button proactively, no focus.
+        QApplication.clipboard().setText("https://drive.google.com/drive/folders/XYZ?usp=sharing")
         assert not w._paste_btn.isHidden()
         w._paste_clipboard_url()
         assert "drive.google.com" in w.text()
