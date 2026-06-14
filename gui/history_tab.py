@@ -15,8 +15,10 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor
 
 from core import history, activity_index
+from core.verdict_style import verdict_symbol
 from core import settings as app_settings
 from gui import theme
 
@@ -156,11 +158,21 @@ class HistoryTab(QWidget):
                      details, row.verdict]
             for c, text in enumerate(cells):
                 self.table.setItem(r, c, QTableWidgetItem(text))
+            self._style_verdict_cell(r, row.verdict)
         n = len(self._records)
         self.status_label.setText(
             f"{len(rows)} of {n} job(s)" if n else
             "No activity recorded yet (configure the remote base in Settings to "
             "see other machines).")
+
+    def _style_verdict_cell(self, row: int, verdict: str):
+        """Colour the verdict cell by severity and prefix an accessibility glyph
+        (colour is never the sole signal, for colour-blind users)."""
+        item = self.table.item(row, 4)
+        if item is None or not verdict:
+            return
+        item.setText(f"{verdict_symbol(verdict)} {verdict}")
+        item.setForeground(QColor(theme.verdict_color(verdict)))
 
     # ── per-row actions ───────────────────────────────────────────────────────
     def _open_row_log(self, row: int, _col: int):

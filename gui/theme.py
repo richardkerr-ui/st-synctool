@@ -33,6 +33,36 @@ STATE_COLORS = {
     "RENAMED":        "#c586c0",
 }
 
+# --------------------------------------------------------------------------- #
+# Verdict / state styling (GUI refresh 2026-06-13)
+# --------------------------------------------------------------------------- #
+# Brightened brand colours used for verdicts, states and result tiles. Severity
+# buckets come from core.verdict_style (pure logic); this maps them to colour.
+
+VERDICT_GREEN   = "#3DBB8E"   # ok      — verified / passed / cleared / OK tile
+VERDICT_GOLD    = GOLD        # warn    — needs attention / extra-files tile
+VERDICT_CORAL   = CORAL       # error   — failed / missing tile
+VERDICT_MUTED   = "#AEB1B3"   # neutral — completed, nothing to flag
+VERDICT_MAGENTA = "#C0468C"   # mismatch tile (distinct from missing)
+
+SEVERITY_COLORS = {
+    "ok":      VERDICT_GREEN,
+    "warn":    VERDICT_GOLD,
+    "error":   VERDICT_CORAL,
+    "neutral": VERDICT_MUTED,
+}
+
+
+def severity_color(severity: str) -> str:
+    return SEVERITY_COLORS.get(severity, VERDICT_MUTED)
+
+
+def verdict_color(verdict: str) -> str:
+    """Brand colour for a verdict token (e.g. "VERIFIED" → green)."""
+    from core.verdict_style import verdict_severity
+    return severity_color(verdict_severity(verdict))
+
+
 def app_stylesheet():
     """Generate the Qt stylesheet for the application."""
     return f"""

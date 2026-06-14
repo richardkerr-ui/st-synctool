@@ -340,13 +340,13 @@ class SummaryDialog(QDialog):
             all_done    = all(r.state in (CellState.DONE, CellState.SKIPPED) for r in src_results)
             any_failed  = any(r.state == CellState.FAILED for r in src_results)
             if all_done and not any_failed:
-                color = theme.ACCENT_GREEN
+                color = theme.VERDICT_GREEN
                 msg   = f"✓ {src_label} — Safe to eject"
             elif all_done:
-                color = theme.ACCENT_CORAL
+                color = theme.VERDICT_CORAL
                 msg   = f"⚠ {src_label} — Errors on some destinations — review before ejecting"
             else:
-                color = theme.MUTED_TEXT
+                color = theme.VERDICT_MUTED
                 msg   = f"• {src_label} — Not all destinations completed"
             eject_lbl = QLabel(msg)
             eject_lbl.setStyleSheet(f"color:{color};font-weight:bold;font-size:13px;")
@@ -356,7 +356,7 @@ class SummaryDialog(QDialog):
             # eject). Logic lives in core.clearance; this only renders it.
             from core.clearance import compute_clearance
             verdict = compute_clearance(src_label, results)
-            clr_color = theme.ACCENT_GREEN if verdict.cleared else theme.ACCENT_CORAL
+            clr_color = theme.VERDICT_GREEN if verdict.cleared else theme.VERDICT_GOLD
             clr_icon  = "✓" if verdict.cleared else "⚠"
             clr_lbl = QLabel(f"{clr_icon} {verdict.to_text()}")
             clr_lbl.setWordWrap(True)

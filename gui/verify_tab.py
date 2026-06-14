@@ -166,11 +166,12 @@ class VerifyTab(QWidget):
         sg = QHBoxLayout(summary_group)
         sg.setSpacing(10)
 
+        # Glyphs accompany colour so the tiles read for colour-blind users.
         card_defs = [
-            ("_card_ok",      "—", "#1D9E75", "OK"),
-            ("_card_extra",   "—", "#BA7517", "Extra files"),
-            ("_card_missing", "—", "#c07070", "Missing"),
-            ("_card_mismatch","—", "#c07070", "Mismatch"),
+            ("_card_ok",      "—", theme.VERDICT_GREEN,   "✓ OK"),
+            ("_card_extra",   "—", theme.VERDICT_GOLD,    "⚠ Extra files"),
+            ("_card_missing", "—", theme.VERDICT_CORAL,   "✗ Missing"),
+            ("_card_mismatch","—", theme.VERDICT_MAGENTA, "✗ Mismatch"),
         ]
         for attr, default_val, color, label_text in card_defs:
             card = QFrame()
@@ -180,6 +181,16 @@ class VerifyTab(QWidget):
             cl = QVBoxLayout(card)
             cl.setContentsMargins(12, 10, 12, 10)
             cl.setSpacing(3)
+            # Colour accent bar above the number (per the redesign mockup).
+            bar = QFrame()
+            bar.setFixedSize(30, 4)
+            bar.setStyleSheet(f"background:{color}; border-radius:2px;")
+            bar_row = QHBoxLayout()
+            bar_row.setContentsMargins(0, 0, 0, 4)
+            bar_row.addStretch()
+            bar_row.addWidget(bar)
+            bar_row.addStretch()
+            cl.addLayout(bar_row)
             num_lbl = QLabel(default_val)
             num_lbl.setStyleSheet(
                 f"font-size:22px; font-weight:500; color:{color}; background:transparent;"
