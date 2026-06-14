@@ -90,6 +90,11 @@ def record_merge(project_id: str, files_changed: int, conflicts: int,
 def find_by_local_path(local_path: str) -> Optional[dict]:
     """Return the first project whose local_path matches exactly."""
     for p in _load().values():
+        # projects.json mixes project entries with namespaced keys whose values
+        # are dicts or lists (offload_ledger, app_settings, ...). Skip anything
+        # that is not a project entry, mirroring list_projects().
+        if not isinstance(p, dict) or "project_id" not in p:
+            continue
         if p.get("local_path") == local_path:
             return p
     return None

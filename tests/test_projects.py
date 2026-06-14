@@ -214,3 +214,25 @@ class TestAppSettings:
         proj.save_app_setting("flag", True)
         proj.save_app_setting("flag", False)
         assert proj.get_app_setting("flag") is False
+
+
+# ── find_by_local_path — must skip non-project namespaced keys ────────────────
+
+class TestFindByLocalPath:
+    def test_finds_matching_project(self):
+        proj.upsert_project("p1", local_path="/vol/jobs/A", server_path="srv")
+        found = proj.find_by_local_path("/vol/jobs/A")
+        assert found is not None and found["project_id"] == "p1"
+
+    def test_returns_none_when_no_match(self):
+        proj.upsert_project("p1", local_path="/vol/jobs/A", server_path="srv")
+        assert proj.find_by_local_path("/vol/jobs/NOPE") is None
+
+    def test_ignores_list_valued_namespaced_keys(self):
+        # Regression: offload_ledger is a LIST under a top-level key. Iterating
+        # registry values and calling .get() on it crashed with
+        # "'list' object has no attribute 'get'". find_by_local_path must skip it.
+        proj.upsert_project("p1", local_path="/vol/jobs/A", server_path="srv")
+        proj.record_offload_fingerprint({"card": "A001", "size": 123})
+        assert proj.find_by_local_path("/vol/jobs/A")["project_id"] == "p1"
+        assert proj.find_by_local_path("/vol/jobs/NOPE") is None
