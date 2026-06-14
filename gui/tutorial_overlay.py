@@ -167,7 +167,12 @@ class _TutorialCard(QFrame):
         self._next_btn.setText("Done ✓" if is_last else "Next →")
         self._prev_btn.setVisible(step_index > 0)
 
-        # Recalculate height to fit wrapped text
+        # A word-wrapped QLabel's sizeHint under-reports its height in a layout,
+        # so longer bodies were clipped. Pin each text label to the exact wrapped
+        # height for the card's content width, then size the card to fit.
+        content_w = CARD_WIDTH - 2 * CARD_PADDING
+        self._title_label.setFixedHeight(self._title_label.heightForWidth(content_w))
+        self._body_label.setFixedHeight(self._body_label.heightForWidth(content_w))
         self.adjustSize()
 
     @property
