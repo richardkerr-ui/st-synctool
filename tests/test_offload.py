@@ -30,6 +30,7 @@ from core.offload import (
     apply_normalization_in_staging,
     run_offload,
 )
+from core.space import OffloadSpaceError
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +464,43 @@ def _default_config(**overrides) -> OffloadConfig:
     for k, v in overrides.items():
         setattr(cfg, k, v)
     return cfg
+
+
+class TestRunOffloadSpacePreflight:
+    """M12.1: a destination without room aborts before any byte is copied."""
+
+    def test_insufficient_space_raises_before_copy(self, tmp_path, monkeypatch):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+        # Force a payload larger than any real disk so the real free-space probe
+        # on tmp_path reports a shortfall, without needing to fill a disk.
+        monkeypatch.setattr("core.offload.total_source_bytes", lambda *a, **k: 10 ** 18)
+
+        with pytest.raises(OffloadSpaceError) as exc:
+            run_offload([src], [dst], _default_config(), MagicMock(), MagicMock())
+        assert "NAS" in str(exc.value)
+
+    def test_nothing_copied_when_space_check_fails(self, tmp_path, monkeypatch):
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+        monkeypatch.setattr("core.offload.total_source_bytes", lambda *a, **k: 10 ** 18)
+
+        with pytest.raises(OffloadSpaceError):
+            run_offload([src], [dst], _default_config(), MagicMock(), MagicMock())
+        # No staging dirs and no committed footage under the destination.
+        assert list(dst.path.iterdir()) == []
+
+    def test_ample_space_completes_normally(self, tmp_path):
+        # Sanity: the preflight does not block a real, tiny offload.
+        src = _make_source_dir(tmp_path, "A001", {"clip.mov": b"good data"})
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        results, _, _ = run_offload(
+            [src], [dst], _default_config(), MagicMock(), MagicMock())
+        assert results[0].state == CellState.DONE
 
 
 def _make_source_dir(tmp_path: Path, label: str, files: dict) -> OffloadSource:

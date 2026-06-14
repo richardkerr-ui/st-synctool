@@ -350,9 +350,41 @@ With the remote base now configurable, finish the integration that was blocked:
 
 ---
 
+## M12: Beta field-safety (approved by Richard 2026-06-14)
+
+Six field-reality gaps surfaced while reviewing readiness for the tester beta. These protect footage custody and match how a DIT actually works on a cart (offline normal, no babysitting, the scariest moment is formatting a card). All logic in `core/`, GUI stays thin. Item 7 from the original review (diagnostic bundle export) is already shipped as M7.3, so it is not repeated here.
+
+### M12.1 Destination free-space preflight (the blocker) ✅ DONE 2026-06-14
+
+Today a full destination surfaces mid-copy as a non-retryable disk-full failure, the worst possible moment for a DIT. Before any byte moves, sum the source size and compare it against the free space on every local/NAS destination. Block with a clear shortfall ("need 482 GB, this drive has 210 GB free") and never start a doomed copy. Drive URL destinations keep the existing server-side behaviour (no local free-space check, the 750 GB/day warning still applies). Pure check in `core/offload.py` (or a small `core/preflight_space.py`) using `shutil.disk_usage`; a safety headroom margin so we do not fill a disk to the last byte.
+**Done when:** a pure `check_destination_space(sources_total, dests)` returns a per-destination pass/shortfall verdict, unit tested (exact fit, shortfall, headroom margin, multiple dests with mixed verdicts, Drive URL skipped); offload preflight calls it and aborts with the shortfall message before COPYING; GUI smoke confirms the block dialog. README updated.
+**Findings:** New headless `core/space.py`. `check_destination_space(required_bytes, dests, free_fn=free_space)` returns a frozen `SpaceVerdict` per enabled dest (required/headroom/free bytes, ok, skipped, `shortfall_bytes`, operator-facing `message()`). Headroom margin so a disk is never filled to the last byte: `max(3% of payload, 200 MB floor)`, and zero for an empty payload so a no-op is never blocked. Server-side dests are skipped (ok) via `_is_non_local` which catches both Drive web URLs (`is_gdrive_url`) and rclone remote strings (`name:path`) — the original `is_gdrive_url`-only check missed `gdrive:` remotes. `total_source_bytes(sources, size_fn=folder_size)` does the cheap stat-only sum across enabled sources (no hashing), and `blocking_message` lists only the failing dests. `run_offload` runs the check after the collision warnings and **before the source loop** (so before pre-hash and any copy), logs each verdict, and raises `OffloadSpaceError` on any shortfall — the existing `OffloadWorker.error` path surfaces the message as a dialog, no new GUI logic. 15 unit tests in `test_space.py` (comfortable fit, shortfall amount, headroom blocks exact fit, just-enough passes, mixed verdicts, Drive URL/remote skipped, disabled dest ignored, unreadable dest fails not passes, source sum enabled-only, empty payload no headroom, blocking-message none/failures-only, small-payload floor) + 3 integration tests in `test_offload.py` (raises before copy, nothing copied on failure, ample space completes). `core/space.py` 100%. Suite 1758 → **1774 passed**, 1 skipped. **Remaining:** README "Known limitations" note + one manual Mac run confirming the block dialog wording (PyQt6 dialog not headlessly testable).
+
+### M12.2 Duplicate-card / already-offloaded guard
+The classic DIT footgun: re-offloading a card, or formatting a card whose offload silently no-op'd. Capture a cheap source fingerprint (volume label, file count, total bytes, top-level entry names, volume UUID where available) and, before COPYING, warn loudly if this source looks already offloaded to this destination (match against prior fingerprints recorded in the projects registry or a small ledger). Non-blocking warning the DIT can override, never a hard stop (cards get reused, names collide legitimately).
+**Done when:** a pure `fingerprint_source(...)` + `match_prior_offloads(fingerprint, history)` are unit tested (exact match, partial match, no match, reused-label-different-content); fingerprints recorded on every offload; offload preflight surfaces a warn-and-confirm when a match is found; GUI smoke confirms the warning path. README updated.
+
+### M12.3 Visible source-write-protection guarantee
+`preflight_source_readonly` already refuses to touch the source; this makes the promise visible. Surface a per-source "read-only, source untouched" indicator in the offload UI and ensure no code path writes to a source path. Mostly a GUI affordance over existing core behaviour plus a guard test that asserts the source tree is byte-identical before and after an offload run.
+**Done when:** an integration test asserts source-tree mtimes/hashes are unchanged across a full offload; GUI shows the guarantee per source; no new core logic beyond what already exists.
+
+### M12.4 Loud, unmissable completion + safe-to-eject banner
+Field reality: the DIT walked away. The auto-dismissing toast is not enough. Show a big persistent banner on completion, green "SAFE TO FORMAT" (gated by the existing M10.1 clearance verdict) or red "DO NOT EJECT", plus an optional completion sound. Reuses `core/clearance.py`; this is a GUI surface plus a small sound toggle in `core/settings`.
+**Done when:** completion banner reflects the clearance verdict (green only when cleared, red otherwise), sound toggle persists via `core.settings`, GUI smoke confirms banner + verdict wiring. Pairs with M10.1.
+
+### M12.5 "Keeping Mac awake" indicator + lid-close warning
+**Finding (2026-06-14):** `core/amphetamine.py` drives the Amphetamine app with `displaySleepAllowed:false`, which blocks idle sleep but NOT lid-close sleep. Closing the lid on a bare laptop forces firmware sleep and halts the copy; no Mac software can override that without true clamshell mode (external display + power + external input). So we cannot promise lid-close survival. Instead: show a visible "Keeping Mac awake (do not close the lid)" indicator while a job runs, and document the clamshell requirement.
+**Done when:** the indicator shows while a job runs and clears when it ends (driven by job state, not a guess); a one-line lid-close caution is visible near it; README/QUICKSTART note the clamshell requirement. No false promise of lid-close protection anywhere in the UI or docs.
+
+### M12.6 Live throughput and ETA
+A bare percentage does not let a DIT schedule the rest of the set. Surface bytes/sec and estimated time remaining during copy. The byte-progress plumbing already exists (byte-level progress); this computes a smoothed rate and ETA from it. Pure `core/throughput.py` (rolling-window rate, ETA from remaining bytes) fed by the existing progress callbacks.
+**Done when:** a pure rate/ETA helper is unit tested (steady rate, bursty input smoothing, near-zero and completion edge cases, ETA from remaining bytes); offload/transfer progress surfaces show rate + ETA; GUI smoke confirms the labels update.
+
+---
+
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 ✅ → M10.2 ✅ → M7.2 ✅ → M9.1 ✅ → M9.2 ✅ → M7.5 ✅ → M7.3 ✅ → M7.4 ✅ → M9.3 ✅ → M10.3 ✅ → M11.1 ✅ → M11.2 ✅ → M11.3 ✅ → M7.1 🔶 (unsigned build done + validated; sign/notarize blocked on Apple account) → recruit beta testers. (M8 AI assist on hold — not scheduled.)
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 ✅ → M10.2 ✅ → M7.2 ✅ → M9.1 ✅ → M9.2 ✅ → M7.5 ✅ → M7.3 ✅ → M7.4 ✅ → M9.3 ✅ → M10.3 ✅ → M11.1 ✅ → M11.2 ✅ → M11.3 ✅ → **M12.1 → M12.2 → M12.3 → M12.4 → M12.5 → M12.6 (beta field-safety, approved 2026-06-14, in progress)** → M7.1 🔶 (unsigned build done + validated; sign/notarize blocked on Apple account) → recruit beta testers. (M8 AI assist on hold — not scheduled.)
 
 **Reorder note (2026-06-12):** M7.1 (signed DMG) moved to the end of the list because it is blocked on an Apple Developer account ($99/yr, Richard to set up) and was stalling the autonomous loop. Everything ahead of it is workable without signing. Dependency caveat: **beta-tester recruitment still cannot happen until M7.1 lands** (testers need the signed DMG), so M7.1 sits immediately before "recruit beta testers" despite being last in work order. M7.2 CI is now the next item — it retroactively validates every "needs a manual Mac run" GUI item via a macOS runner.
 

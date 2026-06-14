@@ -23,6 +23,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from core.checksum import compute_all
+from core.space import (
+    OffloadSpaceError, blocking_message, check_destination_space,
+    total_source_bytes,
+)
 from core.thumbnail import (
     ffmpeg_available, pillow_available, redline_available,
     build_contact_sheet, classify_files, find_rdc_clips,
@@ -1032,6 +1036,19 @@ def run_offload(
             f"at every destination.",
             "warning",
         )
+
+    # M12.1: destination free-space preflight. Sum the source size up front
+    # (cheap stat, no hashing) and refuse to start a copy that cannot fit, so a
+    # full disk is caught here rather than mid-copy as a non-retryable failure.
+    required = total_source_bytes(active_sources)
+    space_verdicts = check_destination_space(required, active_dests)
+    for v in space_verdicts:
+        log_cb(f"[Offload] Space check — {v.message()}",
+               "info" if v.ok else "error")
+    block = blocking_message(space_verdicts)
+    if block:
+        log_cb("[Offload] Aborting before any copy — insufficient space.", "error")
+        raise OffloadSpaceError(block)
 
     # Initialise result grid
     cell_results: dict[tuple, CellResult] = {
