@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
 from gui.ui_helpers import make_interactive
+from gui.completion_banner import CompletionBanner
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.toast import show_toast
@@ -111,6 +112,9 @@ class VerifyTab(QWidget):
         root = QVBoxLayout(content)
         root.setSpacing(14)
         root.setContentsMargins(20, 16, 20, 12)
+
+        self._banner = CompletionBanner()
+        root.addWidget(self._banner)
 
         # ── Verify settings ──────────────────────────────────────
         input_group = QGroupBox("VERIFY SETTINGS")
@@ -262,6 +266,7 @@ class VerifyTab(QWidget):
             self.manifest_input.setText(path)
 
     def _run_verify(self):
+        self._banner.dismiss()
         folder_str   = self.folder_input.text()
         manifest_str = self.manifest_input.text()
 
@@ -335,6 +340,7 @@ class VerifyTab(QWidget):
 
     def _run_batch_verify(self):
         # M5.2: verify every registered project in one run (consolidated report).
+        self._banner.dismiss()
         self.log.clear_log()
         self.log.log("Starting batch verification of all registered projects...", "info")
         self.progress_bar.setValue(0)
@@ -391,6 +397,13 @@ class VerifyTab(QWidget):
         )
         report_path.write_text(header + report)
         self.log.log(f"  Report saved: {report_path}", "info")
+        if n_fail == 0 and n_err == 0:
+            self._banner.show_result(
+                f"✓  ALL PROJECTS VERIFIED — {n_ok} of {len(summaries)} OK.", ok=True)
+        else:
+            self._banner.show_result(
+                f"✕  VERIFICATION FAILED — {n_fail} failed, {n_err} errored "
+                f"of {len(summaries)} project(s). Review the report.", ok=False)
         QMessageBox.information(self, "Batch Verification Complete", report)
 
     def _update_deep_enabled(self, text):
@@ -438,8 +451,13 @@ class VerifyTab(QWidget):
         self.status_label.setText(f"{ok}/{total} files OK")
         if clean:
             show_toast(self, f"Verification passed — {ok}/{total} files OK.", "success")
+            self._banner.show_result(
+                f"✓  VERIFIED — all {total} files match the manifest.", ok=True)
         else:
             show_toast(self, f"Verification found {missing} missing, {mismatch} mismatched.", "warn")
+            self._banner.show_result(
+                f"✕  VERIFICATION FAILED — {mismatch} mismatched, {missing} missing. "
+                "Do not trust this copy.", ok=False)
         self._write_verify_report(results)
 
     def _on_verify_error(self, msg):

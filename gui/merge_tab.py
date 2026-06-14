@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
 from gui.ui_helpers import make_interactive, awake_indicator, start_dir_for
+from gui.completion_banner import CompletionBanner
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.diff_table import DiffTable
@@ -463,6 +464,8 @@ class MergeTab(QWidget):
         root = QVBoxLayout(content)
         root.setSpacing(13)
         root.setContentsMargins(20, 16, 20, 12)
+        self._banner = CompletionBanner()
+        root.addWidget(self._banner)
         root.addLayout(self._build_project_row())
         root.addWidget(self._build_paths_group())
         root.addWidget(self._build_options_group())
@@ -992,6 +995,7 @@ class MergeTab(QWidget):
 
         start_session()
         self._awake_lbl.setVisible(True)   # M12.5
+        self._banner.dismiss()
         self._scan_thread.start()
 
     def _on_scan_complete(self, base, yours, server):
@@ -1119,6 +1123,7 @@ class MergeTab(QWidget):
 
         start_session()
         self._awake_lbl.setVisible(True)   # M12.5
+        self._banner.dismiss()
         self._apply_thread.start()
 
     def _on_apply_done(self, results):
@@ -1144,9 +1149,15 @@ class MergeTab(QWidget):
         if f == 0:
             # Routine success → inline toast, not a modal to dismiss.
             show_toast(self, f"Apply complete — {s} action(s) succeeded.", "success")
+            self._banner.show_result(
+                f"✓  MERGE COMPLETE — {s} change{'s' if s != 1 else ''} applied"
+                f"{f' · {sk} skipped' if sk else ''}.", ok=True)
         else:
             QMessageBox.warning(self, "Apply Finished with Errors",
                                 f"{s} succeeded, {f} failed. See log for details.")
+            self._banner.show_result(
+                f"⚠  MERGE FINISHED WITH {f} FAILURE(S) — {s} applied, "
+                f"{f} failed. Review the log.", ok=False)
 
     def _on_apply_error(self, msg: str):
         end_session()
@@ -1157,6 +1168,7 @@ class MergeTab(QWidget):
         self.progress_bar.setVisible(False)
         self.status_label.setText("Apply failed — scan again to retry")
         self.log.log(f"Apply error: {msg}", "error")
+        self._banner.show_result("✕  MERGE FAILED — see the log.", ok=False)
         QMessageBox.critical(self, "Apply Error", msg)
 
     # ── Conflict detail panel ─────────────────────────────────────────────────

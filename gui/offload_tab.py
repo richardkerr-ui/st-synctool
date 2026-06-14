@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui import theme
+from gui.completion_banner import CompletionBanner
 from gui.ui_helpers import (
     make_interactive, awake_indicator, open_path, reveal_in_finder, start_dir_for,
 )
@@ -711,21 +712,8 @@ class OffloadTab(QWidget):
 
         # M12.4: big persistent safe-to-format / do-not-eject banner shown on
         # completion (the DIT has usually walked away from the cart).
-        self._completion_banner = QFrame()
-        self._completion_banner.setObjectName("CompletionBanner")
-        self._completion_banner.setVisible(False)
-        _bl = QHBoxLayout(self._completion_banner)
-        _bl.setContentsMargins(12, 10, 8, 10)
-        self._banner_msg = QLabel("")
-        self._banner_msg.setWordWrap(True)
-        self._banner_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _bl.addWidget(self._banner_msg, stretch=1)
-        self._banner_close = QPushButton("✕")
-        self._banner_close.setFixedSize(24, 24)
-        self._banner_close.setToolTip("Dismiss — clears when you start the next offload too")
-        make_interactive(self._banner_close)
-        self._banner_close.clicked.connect(lambda: self._completion_banner.setVisible(False))
-        _bl.addWidget(self._banner_close)
+        self._completion_banner = CompletionBanner()
+        self._banner_msg = self._completion_banner.msg   # back-compat handle
         root.addWidget(self._completion_banner)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1477,17 +1465,9 @@ class OffloadTab(QWidget):
         )
         if all_cleared:
             text = "✓  SAFE TO FORMAT — every card verified on at least 2 destinations"
-            bg, fg = theme.VERDICT_GREEN, "#0c1a0f"
         else:
             text = "✕  DO NOT EJECT — not all cards are cleared. Review before formatting."
-            bg, fg = theme.VERDICT_CORAL, "#1a0c0c"
-        self._banner_msg.setText(text)
-        self._completion_banner.setStyleSheet(
-            f"QFrame#CompletionBanner {{ background:{bg}; border-radius:6px; }}"
-            f" QLabel {{ background:transparent; color:{fg}; font-size:15px; font-weight:bold; }}"
-            f" QPushButton {{ background:transparent; color:{fg}; border:none; font-weight:bold; }}"
-        )
-        self._completion_banner.setVisible(True)
+        self._completion_banner.show_result(text, all_cleared)
         try:
             if settings.completion_sound_enabled():
                 from PyQt6.QtWidgets import QApplication

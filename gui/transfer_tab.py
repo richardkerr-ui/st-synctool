@@ -8,6 +8,7 @@ from PyQt6.QtGui import QFont
 from pathlib import Path
 
 from gui.ui_helpers import make_interactive, awake_indicator, reveal_in_finder
+from gui.completion_banner import CompletionBanner
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.toast import show_toast
@@ -99,6 +100,10 @@ class TransferTab(QWidget):
         root = QVBoxLayout(content)
         root.setSpacing(14)
         root.setContentsMargins(20, 16, 20, 12)
+
+        # Persistent completion banner (the bottom toast fades too fast).
+        self._banner = CompletionBanner()
+        root.addWidget(self._banner)
 
         # ── Source & Destination ─────────────────────────────────────────────
         io_group = QGroupBox("SOURCE && DESTINATION")
@@ -535,6 +540,7 @@ class TransferTab(QWidget):
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self._reveal_btn.setVisible(False)
+        self._banner.dismiss()
         self._status_label.setText("Transferring…")
         self.log.set_progress(0, current_file="Starting…")
 
@@ -589,9 +595,14 @@ class TransferTab(QWidget):
         if errors:
             self.log.log(f"Transfer complete with {len(errors)} error(s).", "warning")
             show_toast(self, f"Transfer finished with {len(errors)} error(s) — see log.", "warn")
+            self._banner.show_result(
+                f"⚠  TRANSFER FINISHED WITH {len(errors)} ERROR(S) — review the log "
+                "before trusting the copy.", ok=False)
         else:
             self.log.log(f"Transfer complete  {result.get('actual_dest', '')}", "success")
             show_toast(self, "Transfer complete.", "success")
+            self._banner.show_result(
+                "✓  TRANSFER COMPLETE — all files copied and verified.", ok=True)
         # Offer a one-click jump to the output for local destinations.
         dest = result.get("actual_dest") or self.dst_input.text()
         self._last_dest = dest
@@ -611,6 +622,7 @@ class TransferTab(QWidget):
         end_session()
         self._reset_controls()
         self.log.log(f"FATAL: {msg}", "error")
+        self._banner.show_result("✕  TRANSFER FAILED — see the log.", ok=False)
         QMessageBox.critical(self, "Transfer Failed", msg)
 
     def _reset_controls(self):

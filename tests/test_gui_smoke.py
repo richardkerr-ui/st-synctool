@@ -755,3 +755,43 @@ class TestToast:
         t = show_toast(parent, "Apply complete — 3 action(s) succeeded.", "success")
         assert t.parent() is parent
         assert "Apply complete" in t.text()
+
+
+# ---------------------------------------------------------------------------
+# CompletionBanner (shared across Transfer / Merge / Offload / Verify)
+# ---------------------------------------------------------------------------
+
+class TestCompletionBanner:
+    def test_show_result_ok_and_problem_and_dismiss(self, qtbot):
+        from gui.completion_banner import CompletionBanner
+        from gui import theme
+        b = CompletionBanner(); qtbot.addWidget(b)
+        assert b.isHidden()
+        b.show_result("done", ok=True)
+        assert not b.isHidden()
+        assert theme.VERDICT_GREEN in b.styleSheet()
+        assert b.msg.text() == "done"
+        b.show_result("bad", ok=False)
+        assert theme.VERDICT_CORAL in b.styleSheet()
+        b.dismiss()
+        assert b.isHidden()
+
+    def test_every_job_tab_has_a_completion_banner(self, qtbot, monkeypatch):
+        from gui.completion_banner import CompletionBanner
+        from gui.transfer_tab import TransferTab
+        from gui.verify_tab import VerifyTab
+        import gui.merge_tab as mt
+        import gui.offload_tab as ot
+        import core.projects as proj
+        monkeypatch.setattr(mt.project_registry, "list_projects", lambda: [])
+        monkeypatch.setattr(proj, "list_dest_presets", lambda: [])
+        monkeypatch.setattr(ot.OffloadTab, "_start_volume_watcher",
+                            lambda self: setattr(self, "_watcher", MagicMock(available=False)))
+        t = TransferTab(); qtbot.addWidget(t)
+        v = VerifyTab(); qtbot.addWidget(v)
+        m = mt.MergeTab(); qtbot.addWidget(m)
+        o = ot.OffloadTab(); qtbot.addWidget(o)
+        assert isinstance(t._banner, CompletionBanner)
+        assert isinstance(v._banner, CompletionBanner)
+        assert isinstance(m._banner, CompletionBanner)
+        assert isinstance(o._completion_banner, CompletionBanner)
