@@ -241,9 +241,30 @@ class TestOffloadTabSmoke:
         @dataclass
         class D:
             label: str
-        assert tab._confirm_no_duplicate_card([S("A001", src)], [D("NAS")]) is True
+        assert tab._confirm_no_duplicate_card([S("A001", src)], [D("NAS")]) == "proceed"
+
+    def test_already_done_dests_detects_prior_offload(self, tab, monkeypatch):
+        from dataclasses import dataclass
+        import core.offload_ledger as led
+        import core.projects as proj
+
+        fp = led.SourceFingerprint("A001", "RED", 3, 100, ("DCIM",))
+        monkeypatch.setattr(led, "fingerprint_source", lambda s: fp)
+        monkeypatch.setattr(proj, "list_offload_fingerprints",
+                            lambda: [fp.to_record(["NAS"], "2026-06-14T10:00:00+00:00")])
+
+        @dataclass
+        class S:
+            label: str
+            path: object
+        @dataclass
+        class D:
+            label: str
+        done = tab._already_done_dests([S("A001", None)], [D("NAS"), D("LTO")])
+        assert done == {"A001": ["NAS"]}   # NAS already done, LTO is new
 
     def test_duplicate_guard_aborts_when_user_declines(self, tab, monkeypatch):
+        # Two sources → per-source confirm path uses QMessageBox.warning.
         from dataclasses import dataclass
         import core.offload_ledger as led
         import core.projects as proj
@@ -255,7 +276,7 @@ class TestOffloadTabSmoke:
                             lambda: [fp.to_record(["NAS"], "2026-06-14T10:00:00+00:00")])
         seen = {}
         def _warn(parent, title, text, *a, **k):
-            seen["title"] = title; seen["text"] = text
+            seen["title"] = title
             return QMessageBox.StandardButton.No
         monkeypatch.setattr(QMessageBox, "warning", staticmethod(_warn))
 
@@ -266,7 +287,8 @@ class TestOffloadTabSmoke:
         @dataclass
         class D:
             label: str
-        assert tab._confirm_no_duplicate_card([S("A001", None)], [D("NAS")]) is False
+        out = tab._confirm_no_duplicate_card([S("A001", None), S("B002", None)], [D("NAS")])
+        assert out == "abort"
         assert "duplicate" in seen["title"].lower()
 
     # M12.4 completion banner

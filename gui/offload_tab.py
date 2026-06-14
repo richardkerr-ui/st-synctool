@@ -1151,40 +1151,111 @@ class OffloadTab(QWidget):
             return False
         return None
 
-    def _confirm_no_duplicate_card(self, active_src, active_dst) -> bool:
-        """M12.2: if any source looks already offloaded to a chosen destination,
-        warn and let the operator confirm. Returns True to proceed, False to
-        abort. Fingerprinting/matching logic lives in core.offload_ledger; any
-        failure here is swallowed so the guard never blocks a legitimate offload.
+    def _already_done_dests(self, active_src, active_dst) -> dict:
+        """M12.2: {source_label: [already-offloaded destination labels]} for the
+        chosen destinations, matched against the ledger by card fingerprint.
+        Best-effort — any failure yields {} (guard simply won't fire)."""
+        out: dict = {}
+        try:
+            from core import projects
+            from core.offload_ledger import fingerprint_source, match_prior_offloads
+            history = projects.list_offload_fingerprints()
+            if not history:
+                return out
+            dst_labels = [d.label for d in active_dst]
+            for s in active_src:
+                fp = fingerprint_source(s)
+                if fp.file_count == 0:
+                    continue
+                done = [dl for dl in dst_labels
+                        if match_prior_offloads(fp, history, dest_label=dl)]
+                if done:
+                    out[s.label] = done
+        except Exception:
+            return {}
+        return out
+
+    def _confirm_no_duplicate_card(self, active_src, active_dst):
+        """M12.2 duplicate-card guard. Returns:
+          "proceed"   — go ahead with all selected destinations,
+          "abort"     — cancel the offload,
+          "skip_done" — already-done destination rows were unchecked for this run
+                        (caller must re-collect destinations).
+        With cross-run clearance, skipping an already-done destination still
+        counts it toward SAFE TO FORMAT, so adding a later copy needs no recopy.
         """
         try:
             from core import projects
             from core.offload_ledger import (
                 fingerprint_source, match_prior_offloads, warning_text,
             )
-            history = projects.list_offload_fingerprints()
-            if not history:
-                return True
+
+            def _matches_for(fp, done):
+                history = projects.list_offload_fingerprints()
+                out = []
+                for dl in done:
+                    out += match_prior_offloads(fp, history, dest_label=dl)
+                return out
+
+            done_map = self._already_done_dests(active_src, active_dst)
+            if not done_map:
+                return "proceed"
+
             dst_labels = [d.label for d in active_dst]
-            for s in active_src:
+
+            # Single source: offer "copy to new only" when there's a new dest.
+            if len(active_src) == 1 and active_src[0].label in done_map:
+                s = active_src[0]
+                done = done_map[s.label]
+                new_dests = [dl for dl in dst_labels if dl not in done]
                 fp = fingerprint_source(s)
-                if fp.file_count == 0:
+                matches = _matches_for(fp, done)
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Icon.Warning)
+                box.setWindowTitle("Possible duplicate card")
+                box.setText(warning_text(fp, matches))
+                if new_dests:
+                    box.setInformativeText(
+                        f"Already offloaded to: {', '.join(done)}.\n"
+                        f"New this run: {', '.join(new_dests)}."
+                    )
+                    new_btn = box.addButton("Copy to new only",
+                                            QMessageBox.ButtonRole.AcceptRole)
+                else:
+                    new_btn = None
+                again_btn = box.addButton("Offload anyway",
+                                          QMessageBox.ButtonRole.DestructiveRole)
+                box.addButton(QMessageBox.StandardButton.Cancel)
+                box.exec()
+                clicked = box.clickedButton()
+                if clicked is again_btn:
+                    return "proceed"
+                if new_btn is not None and clicked is new_btn:
+                    done_set = set(done)
+                    for row in self._dest_rows:
+                        d = row.to_offload_dest()
+                        if d and d.label in done_set:
+                            row._enable.setChecked(False)
+                    return "skip_done"
+                return "abort"
+
+            # Multiple sources: per-source confirm (a global skip is ambiguous).
+            for s in active_src:
+                done = done_map.get(s.label)
+                if not done:
                     continue
-                matches = []
-                for dl in dst_labels:
-                    matches += match_prior_offloads(fp, history, dest_label=dl)
-                if not matches:
-                    continue
+                fp = fingerprint_source(s)
+                matches = _matches_for(fp, done)
                 resp = QMessageBox.warning(
                     self, "Possible duplicate card", warning_text(fp, matches),
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No,
                 )
                 if resp != QMessageBox.StandardButton.Yes:
-                    return False
+                    return "abort"
         except Exception:
-            return True   # never let the guard get in the way of an offload
-        return True
+            return "proceed"   # never let the guard get in the way of an offload
+        return "proceed"
 
     def _start_offload(self):
         sources, dests = self._collect_inputs()
@@ -1232,8 +1303,18 @@ class OffloadTab(QWidget):
         # M12.2: warn before re-offloading a card that looks already done. Cheap
         # fingerprint per source, matched against this destination's prior
         # offloads. Non-blocking — the DIT can confirm and continue.
-        if not self._confirm_no_duplicate_card(active_src, active_dst):
+        dup = self._confirm_no_duplicate_card(active_src, active_dst)
+        if dup == "abort":
             return
+        if dup == "skip_done":
+            # Already-done destination rows were unchecked — re-collect.
+            _, dests = self._collect_inputs()
+            active_dst = [d for d in dests if d.enabled]
+            if not active_dst:
+                QMessageBox.information(
+                    self, "Offload",
+                    "This card is already on every selected destination — nothing to copy.")
+                return
 
         # Remember this run's destinations so the next launch prefills them.
         try:
