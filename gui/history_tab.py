@@ -178,6 +178,7 @@ class HistoryTab(QWidget):
                      row.project_label, details, row.verdict]
             for c, text in enumerate(cells):
                 self.table.setItem(r, c, QTableWidgetItem(text))
+            self._style_operation_cell(r, row.operation_label)
             self._style_verdict_cell(r, row.verdict)
         n = len(self._records)
         # Fresh install (no records at all) → show the guiding empty state
@@ -189,6 +190,14 @@ class HistoryTab(QWidget):
             f"{len(rows)} of {n} job(s)" if n else
             "No activity recorded yet (configure the remote base in Settings to "
             "see other machines).")
+
+    def _style_operation_cell(self, row: int, operation: str):
+        """Tint the Operation cell with its tab accent so the table reads at a
+        glance (Transfer blue · Merge purple · Offload coral · Verify green)."""
+        item = self.table.item(row, 2)
+        if item is None or not operation:
+            return
+        item.setForeground(QColor(theme.tab_accent(operation)))
 
     def _style_verdict_cell(self, row: int, verdict: str):
         """Colour the verdict cell by severity and prefix an accessibility glyph

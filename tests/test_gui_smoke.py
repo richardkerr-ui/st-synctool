@@ -387,6 +387,14 @@ class TestHistoryTabSmoke:
         tab._refresh_org()  # must not raise or start a thread
         assert tab.refresh_btn.isEnabled()
 
+    def test_operation_cell_tinted_by_tab_accent(self, tab):
+        from gui import theme
+        # Row 0 is the offload record → Operation cell carries the Offload accent.
+        item = tab.table.item(0, 2)
+        assert item.text() == "Offload"
+        assert item.foreground().color().name().lower() == \
+            theme.tab_accent("Offload").lower()
+
     def test_populated_hides_empty_state(self, tab):
         # With records present the grid shows and the empty-state is hidden.
         assert tab.table.isVisibleTo(tab)
