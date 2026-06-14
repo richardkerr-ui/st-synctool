@@ -60,6 +60,23 @@ class HistoryRow:
             segs.append(self.verdict)
         return " · ".join(s for s in segs if s)
 
+    def details_text(self) -> str:
+        """Render only the middle segments for the History table's Details
+        column — source → dests · N files · size. When/Workstation/Operation/
+        Verdict each have their own column, so they're omitted here to avoid
+        repeating every field in one cell.
+        """
+        segs = []
+        if self.source or self.dests:
+            arrow = " → ".join(p for p in (self.source, ", ".join(self.dests)) if p)
+            if arrow:
+                segs.append(arrow)
+        if self.file_count:
+            segs.append(f"{self.file_count} files")
+        if self.bytes_label:
+            segs.append(self.bytes_label)
+        return " · ".join(segs)
+
 
 def _date_label(timestamp: str) -> str:
     """ISO timestamp to a short "Jun 12" label; falls back to the raw string."""

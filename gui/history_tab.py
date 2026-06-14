@@ -93,8 +93,12 @@ class HistoryTab(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setMouseTracking(True)   # so :hover repaints rows live
         self.table.setStyleSheet(theme.table_stylesheet())
-        self.table.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.Stretch)
+        # Details (col 3) takes the slack; the rest size to their content so the
+        # Verdict glyph + word (e.g. "⚠ NOT_CLEARED") never truncates.
+        hh = self.table.horizontalHeader()
+        for col in (0, 1, 2, 4):
+            hh.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table.cellDoubleClicked.connect(self._open_row_log)
         root.addWidget(self.table)
 
@@ -169,7 +173,7 @@ class HistoryTab(QWidget):
         self._rows = rows
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            details = row.to_text()
+            details = row.details_text()
             cells = [row.date_label, row.workstation, row.operation_label,
                      details, row.verdict]
             for c, text in enumerate(cells):

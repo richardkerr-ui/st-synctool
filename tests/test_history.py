@@ -39,6 +39,23 @@ def test_to_text_full_row():
     assert "GiB" in text  # 1.2 GiB humanized
 
 
+def test_details_text_excludes_columned_fields():
+    # Details column shows only the middle segments — no date/workstation/
+    # operation/verdict (each has its own column).
+    text = history.format_row(_rec()).details_text()
+    assert text.startswith("A001 → NAS, Shuttle · 312 files · ")
+    assert "Jun 12" not in text
+    assert "Cart 3" not in text
+    assert "Offload" not in text
+    assert "VERIFIED" not in text
+
+
+def test_details_text_sparse_is_empty():
+    row = history.format_row(_rec(source="", dests=[], file_count=0,
+                                  bytes=0, verdict=""))
+    assert row.details_text() == ""
+
+
 def test_bytes_label_binary():
     row = history.format_row(_rec(bytes=1073741824))
     assert row.bytes_label == "1.0 GiB"
