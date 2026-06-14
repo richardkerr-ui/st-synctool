@@ -94,6 +94,41 @@ def _date_label(timestamp: str) -> str:
     return f"{dt:%b} {dt.day}"
 
 
+def relative_date_label(timestamp: str, now: Optional[datetime] = None) -> str:
+    """Human "when" for the History table — "just now", "12m ago", "3h ago",
+    "Yesterday 14:30", "4d ago", else the absolute "Jun 12". DITs scan recency
+    constantly, so recent jobs read faster as relative times.
+    """
+    try:
+        dt = datetime.fromisoformat(timestamp)
+    except (ValueError, TypeError):
+        return timestamp or ""
+    now = now or datetime.now()
+    secs = (now - dt).total_seconds()
+    if secs < 0:
+        return _date_label(timestamp)          # future stamp — show the date
+    if secs < 60:
+        return "just now"
+    if secs < 3600:
+        return f"{int(secs // 60)}m ago"
+    if secs < 86400:
+        return f"{int(secs // 3600)}h ago"
+    if secs < 172800:
+        return f"Yesterday {dt:%H:%M}"
+    if secs < 7 * 86400:
+        return f"{int(secs // 86400)}d ago"
+    return _date_label(timestamp)
+
+
+def full_timestamp_label(timestamp: str) -> str:
+    """Full timestamp for the When cell's tooltip, e.g. "Fri 12 Jun 2026, 14:30"."""
+    try:
+        dt = datetime.fromisoformat(timestamp)
+    except (ValueError, TypeError):
+        return timestamp or ""
+    return f"{dt:%a %d %b %Y, %H:%M}"
+
+
 def format_row(record: dict) -> HistoryRow:
     """Turn a merged activity record dict into a :class:`HistoryRow`."""
     op = (record.get("operation") or "").strip()

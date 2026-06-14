@@ -387,6 +387,25 @@ class TestHistoryTabSmoke:
         tab._refresh_org()  # must not raise or start a thread
         assert tab.refresh_btn.isEnabled()
 
+    def test_default_sort_is_newest_first(self, tab):
+        # Offload (Jun 12) is newer than Verify (Jun 11) → row 0.
+        assert tab.table.item(0, 2).text() == "Offload"
+
+    def test_sort_by_workstation_reorders(self, tab):
+        from PyQt6.QtCore import Qt
+        tab.table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
+        assert tab.table.item(0, 1).text() == "Cart 1"  # alphabetical first
+
+    def test_log_filename_travels_with_row_after_sort(self, tab):
+        import gui.history_tab as ht
+        from PyQt6.QtCore import Qt
+        # Sort so visual order differs from insertion order; the custody-log
+        # filename must still be reachable from the row's When item.
+        tab.table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
+        # Cart 1 (the offload) is row 0 now; its log filename is "c.txt".
+        assert tab.table.item(0, 1).text() == "Cart 1"
+        assert tab.table.item(0, 0).data(ht._LOG_ROLE) == "c.txt"
+
     def test_operation_cell_tinted_by_tab_accent(self, tab):
         from gui import theme
         # Row 0 is the offload record → Operation cell carries the Offload accent.

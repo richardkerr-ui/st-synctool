@@ -25,6 +25,20 @@ from gui import theme
 _ANY = "— all —"
 _FILTER_LABELS = {"operation": "Operation", "workstation": "Workstation",
                   "user": "User", "project": "Project"}
+_LOG_ROLE = Qt.ItemDataRole.UserRole       # stores a row's custody-log filename
+
+
+class _SortItem(QTableWidgetItem):
+    """Table item that sorts by an explicit key (e.g. the When column sorts by
+    ISO timestamp, not by its "3h ago" display text)."""
+    def __init__(self, text: str, sort_key=None):
+        super().__init__(text)
+        self._key = text if sort_key is None else sort_key
+
+    def __lt__(self, other):
+        if isinstance(other, _SortItem):
+            return self._key < other._key
+        return super().__lt__(other)
 
 
 class _RefreshWorker(QThread):
@@ -92,6 +106,7 @@ class HistoryTab(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setMouseTracking(True)   # so :hover repaints rows live
+        self.table.setSortingEnabled(True)  # click a header to sort
         self.table.setStyleSheet(theme.table_stylesheet())
         # Details (col 4) takes the slack; the rest size to their content so the
         # Verdict glyph + word (e.g. "⚠ NOT_CLEARED") never truncates.
@@ -99,6 +114,7 @@ class HistoryTab(QWidget):
         for col in (0, 1, 2, 3, 5):
             hh.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.sortByColumn(0, Qt.SortOrder.DescendingOrder)  # newest first
         self.table.cellDoubleClicked.connect(self._open_row_log)
         root.addWidget(self.table)
 
@@ -171,15 +187,26 @@ class HistoryTab(QWidget):
     def _apply_filters(self):
         rows = history.rows_for(self._records, **self._active_filters())
         self._rows = rows
+        # Populate with sorting off, then restore it — inserting into a live
+        # sorted table reshuffles rows mid-loop and corrupts the mapping.
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            details = row.details_text()
-            cells = [row.date_label, row.workstation, row.operation_label,
-                     row.project_label, details, row.verdict]
-            for c, text in enumerate(cells):
-                self.table.setItem(r, c, QTableWidgetItem(text))
+            when = _SortItem(history.relative_date_label(row.timestamp),
+                             sort_key=row.timestamp)
+            when.setToolTip(history.full_timestamp_label(row.timestamp))
+            # Store the log filename on the row so double-click still works after
+            # the user re-sorts (visual row != insertion order any more).
+            when.setData(_LOG_ROLE, row.log_filename)
+            self.table.setItem(r, 0, when)
+            self.table.setItem(r, 1, _SortItem(row.workstation))
+            self.table.setItem(r, 2, _SortItem(row.operation_label))
+            self.table.setItem(r, 3, _SortItem(row.project_label))
+            self.table.setItem(r, 4, _SortItem(row.details_text()))
+            self.table.setItem(r, 5, _SortItem(row.verdict))
             self._style_operation_cell(r, row.operation_label)
             self._style_verdict_cell(r, row.verdict)
+        self.table.setSortingEnabled(True)
         n = len(self._records)
         # Fresh install (no records at all) → show the guiding empty state
         # instead of a bare grid. Filtered-to-zero keeps the grid + status line.
@@ -213,9 +240,10 @@ class HistoryTab(QWidget):
         """M9.3: open the selected job's custody log if it exists locally."""
         from PyQt6.QtGui import QDesktopServices
         from PyQt6.QtCore import QUrl
-        if row < 0 or row >= len(self._rows):
+        when_item = self.table.item(row, 0)
+        if when_item is None:
             return
-        name = self._rows[row].log_filename
+        name = when_item.data(_LOG_ROLE)
         path = activity_index.find_local_log(name) if name else None
         if path:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))

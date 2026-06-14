@@ -9,6 +9,7 @@ from pathlib import Path
 
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
+from gui.toast import show_toast
 from utils.file_utils import folder_size, free_space, format_bytes
 from utils.gdrive_utils import is_gdrive_url
 from core.transfer import (
@@ -524,8 +525,10 @@ class TransferTab(QWidget):
         errors = result.get("errors", [])
         if errors:
             self.log.log(f"Transfer complete with {len(errors)} error(s).", "warning")
+            show_toast(self, f"Transfer finished with {len(errors)} error(s) — see log.", "warn")
         else:
             self.log.log(f"Transfer complete  {result.get('actual_dest', '')}", "success")
+            show_toast(self, "Transfer complete.", "success")
         self.src_input.add_to_recent(self.src_input.text())
         self.dst_input.add_to_recent(self.dst_input.text())
         self._write_txt_log(result)

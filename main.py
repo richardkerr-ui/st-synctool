@@ -39,6 +39,14 @@ def main():
     app.setOrganizationName("Signal Theory")
     app.setStyle("Fusion")
 
+    # App / dock / window icon (brand mark). Bundled .icns covers the frozen
+    # .app; this also sets it when running from source.
+    from PyQt6.QtGui import QIcon
+    from utils.resources import app_icon_path
+    _icon = app_icon_path()
+    if _icon:
+        app.setWindowIcon(QIcon(_icon))
+
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window,          _qcolor(theme.CHARCOAL))
     palette.setColor(QPalette.ColorRole.WindowText,      _qcolor(theme.CREAM))

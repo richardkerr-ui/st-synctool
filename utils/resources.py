@@ -47,6 +47,27 @@ def find_binary(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
+def app_icon_path() -> Optional[str]:
+    """Return the app-icon PNG path (for QIcon at runtime), or None.
+
+    Prefers a user-supplied ``assets/app_icon.png`` so the brand export can be
+    dropped in without code changes. Resolves inside a frozen bundle via
+    ``sys._MEIPASS`` / Resources, and from the repo's ``assets/`` when running
+    from source.
+    """
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "assets" / "app_icon.png")
+    for d in bundle_bin_dirs():
+        candidates.append(d / "assets" / "app_icon.png")
+    candidates.append(Path(__file__).resolve().parent.parent / "assets" / "app_icon.png")
+    for c in candidates:
+        if c and c.is_file():
+            return str(c)
+    return None
+
+
 def prepend_bundle_to_path(env: Optional[dict] = None) -> None:
     """Put the frozen .app's bundled-binary dirs at the front of PATH.
 

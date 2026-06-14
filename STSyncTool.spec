@@ -42,7 +42,7 @@ a = Analysis(
     ['main.py'],
     pathex=[str(Path('.').resolve())],
     binaries=binaries,
-    datas=[],
+    datas=[('assets/app_icon.png', 'assets')],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -88,7 +88,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='ST SyncTool.app',
-    icon=None,            # add assets/icon.icns here once branding exists.
+    icon='assets/app_icon.icns',   # brand mark (regenerate via scripts/gen_app_icon.py)
     bundle_identifier='com.signaltheory.stsynctool',
     info_plist={
         'NSPrincipalClass': 'NSApplication',

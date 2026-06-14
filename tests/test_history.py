@@ -56,6 +56,28 @@ def test_details_text_sparse_is_empty():
     assert row.details_text() == ""
 
 
+def test_relative_date_label_buckets():
+    from datetime import datetime
+    now = datetime(2026, 6, 13, 12, 0, 0)
+    rel = history.relative_date_label
+    assert rel("2026-06-13T11:59:30", now) == "just now"
+    assert rel("2026-06-13T11:40:00", now) == "20m ago"
+    assert rel("2026-06-13T09:00:00", now) == "3h ago"
+    assert rel("2026-06-12T10:00:00", now).startswith("Yesterday ")
+    assert rel("2026-06-10T12:00:00", now) == "3d ago"
+    # Older than a week falls back to the absolute date.
+    assert rel("2026-05-01T12:00:00", now) == "May 1"
+
+
+def test_relative_date_label_bad_timestamp():
+    assert history.relative_date_label("not-a-date") == "not-a-date"
+    assert history.relative_date_label("") == ""
+
+
+def test_full_timestamp_label():
+    assert history.full_timestamp_label("2026-06-12T14:30:00") == "Fri 12 Jun 2026, 14:30"
+
+
 def test_project_label_uses_project():
     row = history.format_row(_rec(project="ProjX"))
     assert row.project_label == "ProjX"

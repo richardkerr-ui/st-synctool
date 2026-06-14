@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
+from gui.toast import show_toast
 from core.manifest import load_manifest
 from gui import theme
 from core import rclone_bridge
@@ -409,12 +410,17 @@ class VerifyTab(QWidget):
         self._card_missing.setText(str(missing))
         self._card_mismatch.setText(str(mismatch))
 
-        level = "success" if (missing == 0 and mismatch == 0) else "warning"
+        clean = (missing == 0 and mismatch == 0)
+        level = "success" if clean else "warning"
         self.log.log(
             f"Verification complete — {ok} OK | {mismatch} mismatch{'es' if mismatch != 1 else ''} | {missing} missing",
             level,
         )
         self.status_label.setText(f"{ok}/{total} files OK")
+        if clean:
+            show_toast(self, f"Verification passed — {ok}/{total} files OK.", "success")
+        else:
+            show_toast(self, f"Verification found {missing} missing, {mismatch} mismatched.", "warn")
         self._write_verify_report(results)
 
     def _on_verify_error(self, msg):

@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QStatusBar, QLabel, QPushButton
 )
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer, Qt, QSettings
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 780)
         self._force_setup = force_setup
         self._build_ui()
+        self._restore_window_state()
 
         # Run startup checks off the main thread so the window paints immediately.
         self._startup_worker = _StartupCheckWorker(get_active_remote())
@@ -895,3 +896,24 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if self._tutorial and self._tutorial.isVisible():
             self._tutorial.resize(self.centralWidget().size())
+
+    # ── window-state persistence (size + active tab) ──────────────────────────
+    def _restore_window_state(self):
+        s = QSettings()
+        geo = s.value("window/geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+        idx = s.value("window/tab_index")
+        if idx is not None:
+            try:
+                i = int(idx)
+            except (TypeError, ValueError):
+                return
+            if 0 <= i < self.tabs.count():
+                self.tabs.setCurrentIndex(i)
+
+    def closeEvent(self, event):
+        s = QSettings()
+        s.setValue("window/geometry", self.saveGeometry())
+        s.setValue("window/tab_index", self.tabs.currentIndex())
+        super().closeEvent(event)
