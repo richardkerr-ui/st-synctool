@@ -84,21 +84,21 @@ class HistoryTab(QWidget):
         self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:11px;")
         root.addWidget(self.status_label)
 
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
-            ["When", "Workstation", "Operation", "Details", "Verdict"])
+            ["When", "Workstation", "Operation", "Project", "Details", "Verdict"])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setMouseTracking(True)   # so :hover repaints rows live
         self.table.setStyleSheet(theme.table_stylesheet())
-        # Details (col 3) takes the slack; the rest size to their content so the
+        # Details (col 4) takes the slack; the rest size to their content so the
         # Verdict glyph + word (e.g. "⚠ NOT_CLEARED") never truncates.
         hh = self.table.horizontalHeader()
-        for col in (0, 1, 2, 4):
+        for col in (0, 1, 2, 3, 5):
             hh.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.table.cellDoubleClicked.connect(self._open_row_log)
         root.addWidget(self.table)
 
@@ -175,7 +175,7 @@ class HistoryTab(QWidget):
         for r, row in enumerate(rows):
             details = row.details_text()
             cells = [row.date_label, row.workstation, row.operation_label,
-                     details, row.verdict]
+                     row.project_label, details, row.verdict]
             for c, text in enumerate(cells):
                 self.table.setItem(r, c, QTableWidgetItem(text))
             self._style_verdict_cell(r, row.verdict)
@@ -193,7 +193,7 @@ class HistoryTab(QWidget):
     def _style_verdict_cell(self, row: int, verdict: str):
         """Colour the verdict cell by severity and prefix an accessibility glyph
         (colour is never the sole signal, for colour-blind users)."""
-        item = self.table.item(row, 4)
+        item = self.table.item(row, 5)
         if item is None or not verdict:
             return
         item.setText(f"{verdict_symbol(verdict)} {verdict}")

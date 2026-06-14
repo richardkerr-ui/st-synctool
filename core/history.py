@@ -30,6 +30,7 @@ class HistoryRow:
     workstation: str
     operation_label: str
     source: str
+    project: str = ""
     dests: list = field(default_factory=list)
     file_count: int = 0
     bytes: int = 0
@@ -40,6 +41,12 @@ class HistoryRow:
     @property
     def bytes_label(self) -> str:
         return humanize.naturalsize(self.bytes, binary=True) if self.bytes else ""
+
+    @property
+    def project_label(self) -> str:
+        """Project for the History table's Project column. Falls back to the
+        source folder name when no project id was recorded."""
+        return self.project or self.source
 
     def to_text(self) -> str:
         """Render a single-line summary, e.g.
@@ -95,6 +102,7 @@ def format_row(record: dict) -> HistoryRow:
         workstation=record.get("workstation", ""),
         operation_label=op[:1].upper() + op[1:] if op else "",
         source=record.get("source", ""),
+        project=record.get("project", ""),
         dests=list(record.get("dests") or []),
         file_count=int(record.get("file_count") or 0),
         bytes=int(record.get("bytes") or 0),

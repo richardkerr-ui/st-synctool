@@ -56,6 +56,16 @@ def test_details_text_sparse_is_empty():
     assert row.details_text() == ""
 
 
+def test_project_label_uses_project():
+    row = history.format_row(_rec(project="ProjX"))
+    assert row.project_label == "ProjX"
+
+
+def test_project_label_falls_back_to_source():
+    row = history.format_row(_rec(project="", source="A001"))
+    assert row.project_label == "A001"
+
+
 def test_bytes_label_binary():
     row = history.format_row(_rec(bytes=1073741824))
     assert row.bytes_label == "1.0 GiB"
