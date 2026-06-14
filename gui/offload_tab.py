@@ -819,7 +819,10 @@ class OffloadTab(QWidget):
         btn_row.addWidget(self._offload_status_lbl)
         layout.addLayout(btn_row)
 
-        self._log = LogWidget("Offload log")
+        self._log = LogWidget(
+            "Offload log",
+            placeholder="Add sources and destinations, then Start Offload — "
+                        "per-card progress and clearance will appear here.")
         self._log.setMinimumHeight(160)
         layout.addWidget(self._log)
         return container

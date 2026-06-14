@@ -20,10 +20,12 @@ class LogWidget(QWidget):
         "error":   "✖",
     }
 
-    def __init__(self, title: str = "", with_progress: bool = False, parent=None):
+    def __init__(self, title: str = "", with_progress: bool = False,
+                 placeholder: str = "", parent=None):
         super().__init__(parent)
         self._title = title
         self._with_progress = with_progress
+        self._placeholder = placeholder
         self._build_ui()
 
     def _build_ui(self):
@@ -131,6 +133,9 @@ class LogWidget(QWidget):
         # Log text body
         self._text = QTextEdit()
         self._text.setReadOnly(True)
+        if self._placeholder:
+            # Empty-state guidance shown until the first line is logged.
+            self._text.setPlaceholderText(self._placeholder)
         self._text.setFont(QFont("Courier New", 10))
         self._text.setStyleSheet(
             "QTextEdit {"

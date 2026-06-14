@@ -387,6 +387,19 @@ class TestHistoryTabSmoke:
         tab._refresh_org()  # must not raise or start a thread
         assert tab.refresh_btn.isEnabled()
 
+    def test_populated_hides_empty_state(self, tab):
+        # With records present the grid shows and the empty-state is hidden.
+        assert tab.table.isVisibleTo(tab)
+        assert not tab._empty_label.isVisibleTo(tab)
+
+    def test_fresh_install_shows_empty_state(self, qtbot, monkeypatch):
+        import gui.history_tab as ht
+        monkeypatch.setattr(ht.activity_index, "load_org_records", lambda **k: [])
+        t = ht.HistoryTab()
+        qtbot.addWidget(t)
+        assert t._empty_label.isVisibleTo(t)
+        assert not t.table.isVisibleTo(t)
+
     def test_double_click_opens_local_log(self, tab, monkeypatch, tmp_path):
         import gui.history_tab as ht
         from PyQt6.QtGui import QDesktopServices

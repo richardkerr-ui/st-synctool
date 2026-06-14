@@ -98,6 +98,18 @@ class HistoryTab(QWidget):
         self.table.cellDoubleClicked.connect(self._open_row_log)
         root.addWidget(self.table)
 
+        # Empty state — shown instead of a blank grid on a fresh install.
+        self._empty_label = QLabel(
+            "No activity yet.\n\nRun an offload, transfer or verification and "
+            "it'll appear here. Use “Refresh org activity” to pull other "
+            "machines’ jobs once a remote base is set in Settings.")
+        self._empty_label.setWordWrap(True)
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setStyleSheet(
+            f"color:{theme.TEXT_MUTED};font-size:13px;padding:40px;")
+        self._empty_label.setVisible(False)
+        root.addWidget(self._empty_label, stretch=1)
+
         hint = QLabel("Double-click a row to open its custody log (jobs run on this machine).")
         hint.setStyleSheet(f"color:{theme.TEXT_MUTED};font-size:11px;")
         root.addWidget(hint)
@@ -164,6 +176,11 @@ class HistoryTab(QWidget):
                 self.table.setItem(r, c, QTableWidgetItem(text))
             self._style_verdict_cell(r, row.verdict)
         n = len(self._records)
+        # Fresh install (no records at all) → show the guiding empty state
+        # instead of a bare grid. Filtered-to-zero keeps the grid + status line.
+        is_fresh = n == 0
+        self._empty_label.setVisible(is_fresh)
+        self.table.setVisible(not is_fresh)
         self.status_label.setText(
             f"{len(rows)} of {n} job(s)" if n else
             "No activity recorded yet (configure the remote base in Settings to "

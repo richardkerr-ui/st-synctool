@@ -225,7 +225,10 @@ class VerifyTab(QWidget):
         root.addWidget(self.progress_bar)
 
         # ── Single log panel ─────────────────────────────────────
-        self.log = LogWidget("Results log", parent=self)
+        self.log = LogWidget(
+            "Results log", parent=self,
+            placeholder="Pick a folder (and manifest for Drive), then Run "
+                        "Verification — per-file results will appear here.")
         root.addWidget(self.log, stretch=1)
 
         scroll.setWidget(content)

@@ -732,7 +732,10 @@ class MergeTab(QWidget):
 
     def _build_log_panel(self, root: QVBoxLayout) -> None:
         """Merge log widget and the open-logs-folder link row."""
-        self.log = LogWidget("Merge log", parent=self)
+        self.log = LogWidget(
+            "Merge log", parent=self,
+            placeholder="Scan & Compare to see what changed; applying actions "
+                        "will be logged here.")
         self.log.setMaximumHeight(160)
         root.addWidget(self.log)
 

@@ -259,7 +259,10 @@ class TransferTab(QWidget):
         root.addLayout(btn_row)
 
         # ── Log panel (includes inline progress bar) ─────────────────────────
-        self.log = LogWidget("Transfer log", with_progress=True, parent=self)
+        self.log = LogWidget(
+            "Transfer log", with_progress=True, parent=self,
+            placeholder="Set a source and destination, then Start Transfer — "
+                        "progress and results will stream here.")
         self.log.setMinimumHeight(180)
         root.addWidget(self.log)
 
