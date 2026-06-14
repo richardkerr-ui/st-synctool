@@ -709,10 +709,21 @@ class OffloadTab(QWidget):
 
         # M12.4: big persistent safe-to-format / do-not-eject banner shown on
         # completion (the DIT has usually walked away from the cart).
-        self._completion_banner = QLabel("")
+        self._completion_banner = QFrame()
+        self._completion_banner.setObjectName("CompletionBanner")
         self._completion_banner.setVisible(False)
-        self._completion_banner.setWordWrap(True)
-        self._completion_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _bl = QHBoxLayout(self._completion_banner)
+        _bl.setContentsMargins(12, 10, 8, 10)
+        self._banner_msg = QLabel("")
+        self._banner_msg.setWordWrap(True)
+        self._banner_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _bl.addWidget(self._banner_msg, stretch=1)
+        self._banner_close = QPushButton("✕")
+        self._banner_close.setFixedSize(24, 24)
+        self._banner_close.setToolTip("Dismiss — clears when you start the next offload too")
+        make_interactive(self._banner_close)
+        self._banner_close.clicked.connect(lambda: self._completion_banner.setVisible(False))
+        _bl.addWidget(self._banner_close)
         root.addWidget(self._completion_banner)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1430,10 +1441,11 @@ class OffloadTab(QWidget):
         else:
             text = "✕  DO NOT EJECT — not all cards are cleared. Review before formatting."
             bg, fg = theme.VERDICT_CORAL, "#1a0c0c"
-        self._completion_banner.setText(text)
+        self._banner_msg.setText(text)
         self._completion_banner.setStyleSheet(
-            f"background:{bg}; color:{fg}; border-radius:6px;"
-            " padding:12px; font-size:15px; font-weight:bold;"
+            f"QFrame#CompletionBanner {{ background:{bg}; border-radius:6px; }}"
+            f" QLabel {{ background:transparent; color:{fg}; font-size:15px; font-weight:bold; }}"
+            f" QPushButton {{ background:transparent; color:{fg}; border:none; font-weight:bold; }}"
         )
         self._completion_banner.setVisible(True)
         try:

@@ -283,7 +283,7 @@ class TestOffloadTabSmoke:
         results = [self._cell("A001", "NAS"), self._cell("A001", "LTO")]  # 2 clean dests
         tab._show_completion_banner(results)
         assert not tab._completion_banner.isHidden()
-        assert "SAFE TO FORMAT" in tab._completion_banner.text()
+        assert "SAFE TO FORMAT" in tab._banner_msg.text()
 
     def test_completion_banner_warns_when_not_cleared(self, tab, monkeypatch):
         from core import settings
@@ -291,7 +291,7 @@ class TestOffloadTabSmoke:
         results = [self._cell("A001", "NAS")]  # only 1 dest → not cleared
         tab._show_completion_banner(results)
         assert not tab._completion_banner.isHidden()
-        assert "DO NOT EJECT" in tab._completion_banner.text()
+        assert "DO NOT EJECT" in tab._banner_msg.text()
 
     # M12.6 throughput + ETA on the status line
     def test_progress_updates_rate_and_eta(self, tab):
