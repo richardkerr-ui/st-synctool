@@ -47,13 +47,13 @@ def test_symbols_match_severity():
     """Glyphs accompany colour so the verdict reads without relying on hue."""
     assert verdict_symbol("VERIFIED") == "✓"
     assert verdict_symbol("NOT_CLEARED") == "⚠"
-    assert verdict_symbol("FAIL") == "✗"
+    assert verdict_symbol("FAIL") == "✕"
     assert verdict_symbol("COMPLETE") == "·"
 
 
 def test_severity_symbol_direct():
     assert severity_symbol("ok") == "✓"
     assert severity_symbol("warn") == "⚠"
-    assert severity_symbol("error") == "✗"
+    assert severity_symbol("error") == "✕"
     assert severity_symbol("neutral") == "·"
     assert severity_symbol("garbage") == "·"

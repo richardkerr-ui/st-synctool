@@ -41,9 +41,9 @@ _STATE_STYLE: dict[CellState, tuple[str, str]] = {
     CellState.VERIFYING:  (theme.ACCENT_INFO,  "Verifying…"),
     CellState.COMMITTING: (theme.ACCENT_INFO,  "Committing…"),
     CellState.THUMBNAILS: (theme.ACCENT_INFO,  "Thumbnails…"),
-    CellState.DONE:       (theme.ACCENT_GREEN, "Done"),
-    CellState.FAILED:     (theme.ACCENT_CORAL, "Failed"),
-    CellState.SKIPPED:    (theme.MUTED_TEXT,   "Skipped"),
+    CellState.DONE:       (theme.VERDICT_GREEN, "✓ Done"),
+    CellState.FAILED:     (theme.VERDICT_CORAL, "✕ Failed"),
+    CellState.SKIPPED:    (theme.VERDICT_MUTED, "· Skipped"),
 }
 
 

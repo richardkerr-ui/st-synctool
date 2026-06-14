@@ -43,7 +43,7 @@ _SEVERITY = {
 _SYMBOL = {
     "ok":      "✓",
     "warn":    "⚠",
-    "error":   "✗",
+    "error":   "✕",
     "neutral": "·",
 }
 

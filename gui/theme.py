@@ -57,6 +57,23 @@ def severity_color(severity: str) -> str:
     return SEVERITY_COLORS.get(severity, VERDICT_MUTED)
 
 
+# Merge diff pills — (background, foreground) per semantic bucket, matched to the
+# redesign mockup's three-colour key (p-gold / p-coral / p-muted). Glyphs come
+# from core.merge_state so colour is never the sole signal.
+MERGE_PILL = {
+    "out":      ("#4A3D12", "#F6CF5A"),   # gold  — your changes going out (↑)
+    "incoming": ("#33373A", "#9A9DA0"),   # gray  — routine incoming (↓)
+    "decision": ("#5A2A26", "#F0A59B"),   # coral — conflicts & held deletions (⚠)
+    "neutral":  ("#2A2E30", "#777B7E"),   # muted — nothing to do (·)
+}
+
+
+def merge_pill(state: str):
+    """Return (bg, fg) for a diff state's pill, via its semantic bucket."""
+    from core.merge_state import state_bucket
+    return MERGE_PILL.get(state_bucket(state), MERGE_PILL["neutral"])
+
+
 # Table colours (from the redesign mockup): header #222628 on muted text,
 # rows on charcoal with a subtly lighter zebra stripe and a hover highlight.
 TABLE_BG        = "#1E2123"

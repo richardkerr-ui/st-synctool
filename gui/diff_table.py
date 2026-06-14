@@ -11,6 +11,7 @@ from core.merge_ops import (
 )
 from core.comparison import conflict_suggested_action
 from core.diff_summary import ACTION_OPTIONS_BY_STATE
+from core.merge_state import state_glyph
 
 
 class DiffTable(QTableWidget):
@@ -24,19 +25,9 @@ class DiffTable(QTableWidget):
 
     _STATE_COLORS = theme.STATE_COLORS
 
-    # Dark-adapted pill colors for the Changes table
-    _PILL_COLORS: dict[str, tuple[str, str]] = {
-        "LOCAL_CHANGED":  ("#0d2a45", "#5a9fd4"),
-        "SERVER_CHANGED": ("#132a05", "#5a9a30"),
-        "BOTH_CHANGED":   ("#2a0d0d", "#c07070"),
-        "LOCAL_ONLY":     ("#2a2a2a", "#888888"),
-        "SERVER_ONLY":    ("#2a2a2a", "#888888"),
-        "DELETED_LOCAL":  ("#2a2a2a", "#555555"),
-        "DELETED_SERVER": ("#2a2a2a", "#555555"),
-        "DELETED_BOTH":   ("#2a2a2a", "#555555"),
-        "RENAMED":        ("#2a1a40", "#9070c0"),
-        "UNCHANGED":      ("#2a2a2a", "#555555"),
-    }
+    # Pill colours now come from the approved 3-bucket scheme in
+    # theme.merge_pill (keyed via core.merge_state.state_bucket); the old
+    # per-state _PILL_COLORS table was replaced during the GUI refresh.
 
     # Emitted when the selected row changes.
     # Carries the DiffResult for the newly selected row, or None when the
@@ -107,13 +98,16 @@ class DiffTable(QTableWidget):
             state_label = state_name.replace("_", " ").title()
             if state_name == "RENAMED" and r.renamed_from:
                 state_label = "Renamed"
-            bg, fg = self._PILL_COLORS.get(state_name, ("#2a2a2a", "#888888"))
+            # Approved 3-bucket colour scheme + an accessibility glyph so the
+            # state reads without relying on hue (colour-blind users).
+            bg, fg = theme.merge_pill(state_name)
+            glyph = state_glyph(state_name)
             pill_container = QWidget()
             pill_container.setStyleSheet("background: transparent;")
             pill_layout = QHBoxLayout(pill_container)
             pill_layout.setContentsMargins(4, 2, 4, 2)
             pill_layout.setSpacing(0)
-            pill = QLabel(state_label)
+            pill = QLabel(f"{glyph} {state_label}")
             pill.setStyleSheet(
                 f"background: {bg}; color: {fg};"
                 " border-radius: 4px; padding: 2px 7px;"

@@ -180,8 +180,8 @@ class VerifyTab(QWidget):
         card_defs = [
             ("_card_ok",      "—", theme.VERDICT_GREEN,   "✓ OK"),
             ("_card_extra",   "—", theme.VERDICT_GOLD,    "⚠ Extra files"),
-            ("_card_missing", "—", theme.VERDICT_CORAL,   "✗ Missing"),
-            ("_card_mismatch","—", theme.VERDICT_MAGENTA, "✗ Mismatch"),
+            ("_card_missing", "—", theme.VERDICT_CORAL,   "✕ Missing"),
+            ("_card_mismatch","—", theme.VERDICT_MAGENTA, "≠ Mismatch"),
         ]
         for attr, default_val, color, label_text in card_defs:
             card = QFrame()
