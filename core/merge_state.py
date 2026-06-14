@@ -20,6 +20,7 @@ _BUCKET = {
     "SERVER_ONLY":    "incoming",
     "SERVER_CHANGED": "incoming",
     "BOTH_CHANGED":   "decision",
+    "INDETERMINATE":  "decision",
     "DELETED_LOCAL":  "decision",
     "DELETED_SERVER": "decision",
     "DELETED_BOTH":   "neutral",

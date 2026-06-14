@@ -260,16 +260,16 @@ class TestChecksumFallback:
         results = {r.path: r.state for r in three_way_diff(base, yours, server)}
         assert results["f.mov"] == DiffState.LOCAL_CHANGED
 
-    def test_missing_checksums_are_equal_to_each_other(self):
-        # An entry with no checksums: _cs returns None.
-        # None == None in Python, so three None values → UNCHANGED.
-        # This documents the current behaviour — callers should ensure entries
-        # always carry at least one checksum algorithm.
+    def test_missing_checksums_are_indeterminate(self):
+        # An entry with no checksums shares no algorithm with anything, so
+        # equality is unprovable. The diff refuses to guess "unchanged" and
+        # surfaces it as INDETERMINATE for review. Real manifests always carry
+        # SHA-256 (checksum.compute_all), so only malformed input reaches here.
         base   = {"files": {"f.mov": {"size": 1}}}
         yours  = {"files": {"f.mov": {"size": 1}}}
         server = {"files": {"f.mov": {"size": 1}}}
         results = {r.path: r.state for r in three_way_diff(base, yours, server)}
-        assert results["f.mov"] == DiffState.UNCHANGED
+        assert results["f.mov"] == DiffState.INDETERMINATE
 
 
 # ---------------------------------------------------------------------------
@@ -458,3 +458,94 @@ class TestConflictSuggestedAction:
     def test_integer_modtimes_server_newer(self):
         result = self._conflict(1_700_000_000, 1_700_000_100)
         assert conflict_suggested_action(result) == "Pull from Server"
+
+
+# ---------------------------------------------------------------------------
+# Cross-algorithm comparison — the fix for the false-conflict bug.
+# When two sides share no checksum algorithm, equality is unprovable and the
+# diff returns INDETERMINATE instead of inventing a confident change.
+# ---------------------------------------------------------------------------
+
+class TestCrossAlgorithmComparison:
+    @staticmethod
+    def _sha(cs):
+        return {"checksums": {"sha256": cs}, "size": 100}
+
+    @staticmethod
+    def _md5(cs):
+        return {"checksums": {"md5": cs}, "size": 100}
+
+    def test_base_present_server_only_md5_is_indeterminate(self):
+        # Identical file on all sides; server manifest happens to carry md5 only
+        # (the Drive case). No shared algo with the sha256 sides → INDETERMINATE,
+        # not the old false SERVER_CHANGED.
+        base   = {"files": {"project.prproj": self._sha("abc123")}}
+        yours  = {"files": {"project.prproj": self._sha("abc123")}}
+        server = {"files": {"project.prproj": self._md5("def456")}}
+        results = {r.path: r.state for r in three_way_diff(base, yours, server)}
+        assert results["project.prproj"] == DiffState.INDETERMINATE
+
+    def test_no_base_cross_algo_is_indeterminate(self):
+        # No base manifest, local sha256, server md5 → INDETERMINATE, not the old
+        # false BOTH_CHANGED.
+        base   = {"files": {}}
+        yours  = {"files": {"project.prproj": self._sha("abc123")}}
+        server = {"files": {"project.prproj": self._md5("def456")}}
+        results = {r.path: r.state for r in three_way_diff(base, yours, server)}
+        assert results["project.prproj"] == DiffState.INDETERMINATE
+
+    def test_matching_sha256_wins_over_md5_drift(self):
+        # Shared sha256 is authoritative: a differing md5 is stale metadata, not
+        # a real change. Preserves long-standing sha-preferred behaviour.
+        def dual(sha, md5):
+            return {"checksums": {"sha256": sha, "md5": md5}, "size": 1}
+        base   = {"files": {"f.mov": dual("A", "X")}}
+        yours  = {"files": {"f.mov": dual("A", "Y")}}
+        server = {"files": {"f.mov": dual("A", "Z")}}
+        results = {r.path: r.state for r in three_way_diff(base, yours, server)}
+        assert results["f.mov"] == DiffState.UNCHANGED
+
+    def test_shared_md5_still_detects_a_real_change(self):
+        # When md5 is the only shared algorithm, it is used: a genuine change is
+        # still caught, not swallowed as indeterminate.
+        base   = {"files": {"f.mov": self._md5("A")}}
+        yours  = {"files": {"f.mov": self._md5("B")}}
+        server = {"files": {"f.mov": self._md5("A")}}
+        results = {r.path: r.state for r in three_way_diff(base, yours, server)}
+        assert results["f.mov"] == DiffState.LOCAL_CHANGED
+
+
+# ---------------------------------------------------------------------------
+# Duplicate rename target — the fix for the silent phantom-deletion bug.
+# Two renames sharing a 'to' are no longer collapsed (which dropped one and
+# made its original look deleted); every involved path is flagged for review.
+# ---------------------------------------------------------------------------
+
+class TestDuplicateRenameTarget:
+    def test_colliding_rename_targets_are_flagged_not_dropped(self):
+        base = {
+            "files": {"old_a.mov": _entry("A"), "old_b.mov": _entry("B")},
+            "renames": [
+                {"from": "old_a.mov", "to": "new.mov"},
+                {"from": "old_b.mov", "to": "new.mov"},
+            ],
+        }
+        yours  = {"files": {"new.mov": _entry("C")}}
+        server = {"files": {"old_a.mov": _entry("A"), "old_b.mov": _entry("B")}}
+        results = {r.path: r.state for r in three_way_diff(base, yours, server)}
+        # Every path touched by the colliding rename is surfaced for review;
+        # nothing silently vanishes into a phantom DELETED_LOCAL.
+        assert results["new.mov"] == DiffState.BOTH_CHANGED
+        assert results["old_a.mov"] == DiffState.BOTH_CHANGED
+        assert results["old_b.mov"] == DiffState.BOTH_CHANGED
+
+    def test_unique_rename_target_still_collapses(self):
+        # A non-colliding rename must still collapse to RENAMED as before.
+        base = {
+            "files": {"orig.mov": _entry("A")},
+            "renames": [{"from": "orig.mov", "to": "orig_2026-01-01-rk.mov"}],
+        }
+        yours  = {"files": {}}
+        server = {"files": {"orig_2026-01-01-rk.mov": _entry("A")}}
+        results = {r.path: r.state for r in three_way_diff(base, yours, server)}
+        assert results["orig_2026-01-01-rk.mov"] == DiffState.RENAMED

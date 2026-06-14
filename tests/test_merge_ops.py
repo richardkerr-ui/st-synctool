@@ -3,8 +3,8 @@ Tests for core/merge_ops.py — preserve_rename naming, overwrite_suffix initial
 derivation, collision suffix, and _local_copy_verify pass/fail semantics.
 
 These are targeted at the silent failure modes: wrong initials on an unexpected
-username format, collision suffix not incrementing, and verify returning OK on a
-mismatched file.
+username format, collision suffix incrementing on same-day clashes, and verify
+returning OK on a mismatched file.
 """
 
 import shutil
@@ -111,6 +111,33 @@ class TestPreserveRename:
         r1 = self._rename("clip.mov", username="alice.smith")
         r2 = self._rename("clip.mov", username="bob.jones")
         assert r1 != r2
+
+    def test_no_exists_fn_keeps_single_deterministic_name(self):
+        # Backward-compatible default: without a collision probe, the name is the
+        # plain date+initials form (no numeric suffix).
+        with patch("core.merge_ops.getpass.getuser", return_value="richard.kerr"):
+            r = preserve_rename("clip.mov")
+        assert r.startswith("clip_") and r.endswith(".mov")
+        assert "_2.mov" not in r
+
+    def test_collision_increments_suffix(self):
+        # Same-day, same-user collision: the first preserved name already exists,
+        # so the second must increment to _2 rather than silently reusing it.
+        with patch("core.merge_ops.getpass.getuser", return_value="richard.kerr"):
+            first = preserve_rename("clip.mov")              # what already exists
+            taken = {first}
+            second = preserve_rename("clip.mov", exists_fn=lambda r: r in taken)
+        assert second != first
+        assert second.endswith("_2.mov")
+
+    def test_collision_increments_past_multiple_taken_names(self):
+        with patch("core.merge_ops.getpass.getuser", return_value="richard.kerr"):
+            first = preserve_rename("clip.mov")
+            second = preserve_rename("clip.mov", exists_fn=lambda r: r == first)
+            taken = {first, second}
+            third = preserve_rename("clip.mov", exists_fn=lambda r: r in taken)
+        assert third.endswith("_3.mov")
+        assert len({first, second, third}) == 3
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,9 @@ ACTION_OPTIONS_BY_STATE = {
     "LOCAL_CHANGED":  [ACT_PUSH, ACT_PULL,          ACT_SKIP],
     "SERVER_CHANGED": [ACT_PULL, ACT_PUSH,          ACT_SKIP],
     "BOTH_CHANGED":   [ACT_SKIP, ACT_PUSH,          ACT_PULL],
+    # Indeterminate (no shared checksum): we cannot prove same-or-different, so
+    # default to Skip and offer the same manual choices as a conflict.
+    "INDETERMINATE":  [ACT_SKIP, ACT_PUSH,          ACT_PULL],
     "DELETED_LOCAL":  [ACT_SKIP, ACT_DELETE_SERVER, ACT_PULL],
     "DELETED_SERVER": [ACT_SKIP, ACT_DELETE_LOCAL,  ACT_PUSH],
     "DELETED_BOTH":   [ACT_SKIP],
@@ -110,7 +113,11 @@ def summarize_diff(results, actions=None) -> DiffSummary:
 
         action = actions.get(r.path) or default_action(r)
 
-        if state_name == "BOTH_CHANGED":
+        # INDETERMINATE rows need a human decision just like a conflict, so they
+        # are counted into the "needs review" rollup rather than vanishing into
+        # the skipped bucket. The per-row pill still reads "Unknown", not
+        # "Conflict", so the distinction survives where the user actually looks.
+        if state_name in ("BOTH_CHANGED", "INDETERMINATE"):
             conflicts_total += 1
             if action == ACT_SKIP:
                 conflicts_unresolved += 1

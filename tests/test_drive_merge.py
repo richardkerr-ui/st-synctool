@@ -101,9 +101,13 @@ class TestPushFileDrive:
         local.mkdir()
         (local / "clip.mov").write_bytes(b"new footage")
 
-        # Simulate file already present on Drive
+        # Simulate the original already present on Drive, but the renamed
+        # candidate free (so the collision probe terminates after one rename).
+        def _exists(path, **kw):
+            return path.endswith("clip.mov")
+
         with _patch_rclone_convert(), \
-             patch("core.merge_ops.rclone_bridge.path_exists", return_value=True), \
+             patch("core.merge_ops.rclone_bridge.path_exists", side_effect=_exists), \
              patch("core.merge_ops.rclone_bridge.copyto", return_value=True) as mock_copyto, \
              patch("core.merge_ops.getpass.getuser", return_value="richard.kerr"):
 

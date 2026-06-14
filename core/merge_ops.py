@@ -33,10 +33,31 @@ def overwrite_suffix() -> str:
     return f"{today}-{initials}"
 
 
-def preserve_rename(rel_path: str) -> str:
-    """project.prproj -> project_2026-06-08-rk.prproj (keeps directory prefix)."""
+def preserve_rename(rel_path: str, exists_fn: Optional[Callable[[str], bool]] = None) -> str:
+    """project.prproj -> project_2026-06-08-rk.prproj (keeps directory prefix).
+
+    When ``exists_fn`` is given it is called with each candidate rel-path and the
+    suffix is incremented (``_2``, ``_3``, ...) until a free name is found. This
+    is the fix for the same-day collision: two files preserved on the same date
+    by the same user would otherwise both resolve to the same name, and the
+    second would silently overwrite the first. Without ``exists_fn`` the behaviour
+    is unchanged (a single deterministic name)."""
     p = Path(rel_path)
-    return str(p.with_name(f"{p.stem}_{overwrite_suffix()}{p.suffix}"))
+    suffix = overwrite_suffix()
+    candidate = p.with_name(f"{p.stem}_{suffix}{p.suffix}")
+    if exists_fn is None:
+        return str(candidate)
+    # Probe _2, _3, ... for a free name. Bounded so a misbehaving exists_fn that
+    # always reports "exists" can never loop forever; past the cap we fall back
+    # to a high-resolution timestamp, which is unique in practice.
+    for n in range(2, 1002):
+        if not exists_fn(str(candidate)):
+            return str(candidate)
+        candidate = p.with_name(f"{p.stem}_{suffix}_{n}{p.suffix}")
+    if not exists_fn(str(candidate)):
+        return str(candidate)
+    stamp = datetime.now().strftime("%H%M%S%f")
+    return str(p.with_name(f"{p.stem}_{suffix}_{stamp}{p.suffix}"))
 
 
 def _server_is_url(server_root: str) -> bool:
@@ -81,7 +102,8 @@ def push_file(rel_path, local_root: Path, server_root: str,
 
     dest_rel = rel_path
     if preserve_on_overwrite and _dest_exists_remote(server_root, rel_path):
-        dest_rel = preserve_rename(rel_path)
+        dest_rel = preserve_rename(
+            rel_path, exists_fn=lambda r: _dest_exists_remote(server_root, r))
         if log_cb: log_cb(f"  Preserve mode: uploading as {Path(dest_rel).name}", "info")
 
     if _server_is_url(server_root):
@@ -111,7 +133,8 @@ def pull_file(rel_path, local_root: Path, server_root: str,
     Returns a verify dict (truthy) on success or False on failure."""
     dest_rel = rel_path
     if preserve_on_overwrite and _dest_exists_local(local_root, rel_path):
-        dest_rel = preserve_rename(rel_path)
+        dest_rel = preserve_rename(
+            rel_path, exists_fn=lambda r: _dest_exists_local(local_root, r))
         if log_cb: log_cb(f"  Preserve mode: downloading as {Path(dest_rel).name}", "info")
 
     dst = local_root / dest_rel
