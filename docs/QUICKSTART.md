@@ -1,6 +1,6 @@
 # ST SyncTool Quick Start
 
-A one-page guide to the everyday flows: transfer files, offload a card, merge a project, verify an archive and review activity. No terminal or developer knowledge needed.
+A one-page guide to the everyday flows. ST SyncTool keeps our work in sync between **Google Drive and the Synology NAS** — pull agency assets off Drive (auto-recombining multipart zips), reconcile jobs you took home on WFH days, verify archives, and review who did what across the team. It also offloads camera cards. No terminal or developer knowledge needed.
 
 When you launch the app you see five tabs across the top: **Transfer**, **Merge**, **Offload**, **Verify** and **History**. Top-right are **Settings**, **Report a Problem** and **? Tour**, with the running version beside them.
 
@@ -12,7 +12,7 @@ When you launch the app you see five tabs across the top: **Transfer**, **Merge*
 
 ## 1. Transfer files
 
-Use the **Transfer** tab for a straightforward copy from one location to another: local to local, local to Drive, Drive to local or Drive to Drive. This is the tab the app opens on.
+Use the **Transfer** tab for a one-way copy between locations: local to local, local to Drive, Drive to local or Drive to Drive. The everyday use is **pulling agency assets off Google Drive onto the NAS** — including multipart `.zip` deliveries, which it recombines and extracts for you so you never reassemble a folder tree by hand. This is the tab the app opens on.
 
 ![Transfer tab](screenshots/01_transfer.png)
 
@@ -49,7 +49,7 @@ A chain-of-custody log and a manifest are written to `~/Documents/STSyncTool/` f
 
 ## 3. Merge a project
 
-Use the **Merge** tab to reconcile your local copy of a project with the server (NAS or Drive) copy, resolving any conflicts deliberately.
+Use the **Merge** tab to reconcile your local copy of a project with the server (NAS or Drive) copy, resolving any conflicts deliberately. This is the tab for **bringing home-and-back WFH work into line with the NAS** — it shows exactly what changed on each side and applies only the real differences, so nothing gets silently overwritten.
 
 ![Merge tab](screenshots/03_merge.png)
 
@@ -80,7 +80,7 @@ A verify report is saved to `~/Documents/STSyncTool/Verify Reports/` after each 
 
 ## 5. Review activity (History)
 
-Use the **History** tab to see every offload, transfer, merge and verify — across every machine in the team — in one filterable list.
+Use the **History** tab to see every offload, transfer, merge and verify — across every machine in the team — in one filterable list. It's how you recover **who originally owned a project** after a manager bulk-moves folders between partitions to free space: the activity record survives the move.
 
 ![History tab](screenshots/05_history.png)
 
