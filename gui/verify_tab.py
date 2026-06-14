@@ -88,11 +88,13 @@ class VerifyTab(QWidget):
         self._build_ui()
 
     def _build_ui(self):
+        self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Verify")))
         root = QVBoxLayout(self)
-        root.setSpacing(10)
+        root.setSpacing(14)
+        root.setContentsMargins(20, 16, 20, 12)
 
         # ── Verify settings ──────────────────────────────────────
-        input_group = QGroupBox("Verify Settings")
+        input_group = QGroupBox("VERIFY SETTINGS")
         ig = QVBoxLayout(input_group)
 
         frow = QHBoxLayout()
@@ -133,8 +135,8 @@ class VerifyTab(QWidget):
         # ── Action row ───────────────────────────────────────────
         btn_row = QHBoxLayout()
         self.verify_btn = QPushButton("🛡  Run Verification")
-        self.verify_btn.setFixedHeight(36)
-        self.verify_btn.setStyleSheet(theme.primary_button_style())
+        self.verify_btn.setObjectName("primaryBtn")
+        self.verify_btn.setFixedHeight(40)
         self.verify_btn.clicked.connect(self._run_verify)
         btn_row.addWidget(self.verify_btn)
 
@@ -160,7 +162,7 @@ class VerifyTab(QWidget):
         root.addLayout(btn_row)
 
         # ── Summary cards ────────────────────────────────────────
-        summary_group = QGroupBox("Summary")
+        summary_group = QGroupBox("RESULTS")
         sg = QHBoxLayout(summary_group)
         sg.setSpacing(10)
 

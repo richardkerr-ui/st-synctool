@@ -448,8 +448,10 @@ class MergeTab(QWidget):
     def _build_ui(self):
         """Orchestrates the MergeTab layout. Each section is built by a focused
         sub-builder that sets the relevant self.* attributes."""
+        self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Merge")))
         root = QVBoxLayout(self)
-        root.setSpacing(10)
+        root.setSpacing(13)
+        root.setContentsMargins(20, 16, 20, 12)
         root.addLayout(self._build_project_row())
         root.addWidget(self._build_paths_group())
         root.addWidget(self._build_options_group())
@@ -481,7 +483,7 @@ class MergeTab(QWidget):
 
     def _build_paths_group(self) -> QGroupBox:
         """Base manifest, local folder, and server path inputs."""
-        group = QGroupBox("Paths")
+        group = QGroupBox("PATHS")
         layout = QVBoxLayout(group)
 
         brow = QHBoxLayout()
@@ -524,7 +526,7 @@ class MergeTab(QWidget):
 
     def _build_options_group(self) -> QGroupBox:
         """Preserve-on-overwrite and re-scan checkboxes."""
-        group = QGroupBox("Options")
+        group = QGroupBox("OPTIONS")
         layout = QVBoxLayout(group)
         self.preserve_chk = QCheckBox(
             "Preserve existing files on overwrite (rename incoming with date-initials suffix)"
@@ -543,8 +545,8 @@ class MergeTab(QWidget):
         btn_row = QHBoxLayout()
 
         self.scan_btn = QPushButton("  Scan && Compare")
-        self.scan_btn.setFixedHeight(36)
-        self.scan_btn.setStyleSheet(theme.primary_button_style())
+        self.scan_btn.setObjectName("primaryBtn")
+        self.scan_btn.setFixedHeight(40)
         self.scan_btn.clicked.connect(self._run_scan)
 
         self.apply_btn = QPushButton("  Apply Selected Actions")
@@ -596,7 +598,7 @@ class MergeTab(QWidget):
 
     def _build_diff_group(self) -> QGroupBox:
         """Changes group box containing the summary header and the diff table."""
-        group = QGroupBox("Changes")
+        group = QGroupBox("CHANGES")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(4, 4, 4, 4)
         # M2 summary header: "3 conflicts need review · 44 files will sync

@@ -48,7 +48,10 @@ class HistoryTab(QWidget):
 
     # ── UI ──────────────────────────────────────────────────────────────────
     def _build_ui(self):
+        self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("History")))
         root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 12)
+        root.setSpacing(12)
 
         filt = QHBoxLayout()
         self._filter_combos = {}

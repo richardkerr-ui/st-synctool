@@ -596,9 +596,10 @@ class OffloadTab(QWidget):
     # ── UI construction ────────────────────────────────────────────────────
 
     def _build_ui(self):
+        self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Offload")))
         root = QVBoxLayout(self)
-        root.setSpacing(10)
-        root.setContentsMargins(12, 12, 12, 8)
+        root.setSpacing(13)
+        root.setContentsMargins(20, 16, 20, 12)
 
         # Banner container — banners are inserted here dynamically
         self._banner_container = QWidget()
@@ -621,7 +622,7 @@ class OffloadTab(QWidget):
         root.addWidget(self._build_log_and_actions())
 
     def _build_source_panel(self) -> QGroupBox:
-        group = QGroupBox("Sources (read-only)")
+        group = QGroupBox("SOURCES (READ-ONLY)")
         layout = QVBoxLayout(group)
 
         scroll = QScrollArea()
@@ -637,7 +638,6 @@ class OffloadTab(QWidget):
         layout.addWidget(scroll)
 
         add_btn = QPushButton("+ Add Source")
-        add_btn.setStyleSheet(theme.primary_button_style())
         add_btn.clicked.connect(self._add_source)
         layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
@@ -645,7 +645,7 @@ class OffloadTab(QWidget):
         return group
 
     def _build_dest_panel(self) -> QGroupBox:
-        group = QGroupBox("Destinations")
+        group = QGroupBox("DESTINATIONS")
         layout = QVBoxLayout(group)
 
         # Preset bar (Load / Save — Delete removed, Save overwrites)
@@ -677,7 +677,6 @@ class OffloadTab(QWidget):
         layout.addWidget(scroll)
 
         add_btn = QPushButton("+ Add Destination")
-        add_btn.setStyleSheet(theme.primary_button_style())
         add_btn.clicked.connect(self._add_dest)
         layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
@@ -774,7 +773,7 @@ class OffloadTab(QWidget):
         return bar
 
     def _build_matrix_group(self) -> QGroupBox:
-        group = QGroupBox("Transfer Status")
+        group = QGroupBox("TRANSFER STATUS")
         layout = QVBoxLayout(group)
         self._matrix = StatusMatrixWidget()
         self._matrix.setMinimumHeight(90)
@@ -791,8 +790,8 @@ class OffloadTab(QWidget):
         # Action row above log panel
         btn_row = QHBoxLayout()
         self._start_btn = QPushButton("▶  Start Offload")
-        self._start_btn.setStyleSheet(theme.primary_button_style())
-        self._start_btn.setMinimumHeight(36)
+        self._start_btn.setObjectName("primaryBtn")
+        self._start_btn.setMinimumHeight(40)
         self._start_btn.clicked.connect(self._start_offload)
         btn_row.addWidget(self._start_btn)
 
