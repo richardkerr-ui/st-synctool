@@ -11,6 +11,7 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
+from gui.drop_line_edit import DropLineEdit
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QCheckBox, QLineEdit, QSpinBox, QScrollArea,
@@ -74,7 +75,7 @@ class SourceRowWidget(QWidget):
         self._label.setFixedWidth(110)
         layout.addWidget(self._label)
 
-        self._path = QLineEdit()
+        self._path = DropLineEdit()
         self._path.setPlaceholderText("Source path…")
         self._path.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self._path)
@@ -143,7 +144,7 @@ class DestRowWidget(QWidget):
         self._label.setFixedWidth(110)
         layout.addWidget(self._label)
 
-        self._path = QLineEdit()
+        self._path = DropLineEdit()
         self._path.setPlaceholderText("Destination path…")
         self._path.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self._path)

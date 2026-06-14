@@ -4,6 +4,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 from pathlib import Path
 
+from core.dnd import folder_from_dropped_paths
+from gui import theme
+
 
 class PathInputWidget(QWidget):
     pathChanged = pyqtSignal(str)
@@ -12,6 +15,8 @@ class PathInputWidget(QWidget):
         super().__init__(parent)
         self._kind = kind
         self._build_ui()
+        # DITs drag a card folder onto the field rather than clicking Browse.
+        self.setAcceptDrops(True)
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
@@ -37,6 +42,32 @@ class PathInputWidget(QWidget):
         self.browse_btn.setFixedWidth(100)
         self.browse_btn.clicked.connect(self._browse)
         layout.addWidget(self.browse_btn)
+
+    # ── Drag-and-drop: accept a dropped folder (or file → its parent) ────────
+    @staticmethod
+    def _drop_paths(mime):
+        return [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls() and self._drop_paths(e.mimeData()):
+            self._combo.setStyleSheet(f"QComboBox {{ border:1px solid {theme.GOLD}; }}")
+            e.acceptProposedAction()
+        else:
+            super().dragEnterEvent(e)
+
+    def dragLeaveEvent(self, e):
+        self._combo.setStyleSheet("")
+        super().dragLeaveEvent(e)
+
+    def dropEvent(self, e):
+        self._combo.setStyleSheet("")
+        folder = folder_from_dropped_paths(self._drop_paths(e.mimeData()))
+        if folder:
+            self.set_path(folder)
+            self.add_to_recent(folder)
+            e.acceptProposedAction()
+        else:
+            super().dropEvent(e)
 
     def _browse(self):
         folder = QFileDialog.getExistingDirectory(

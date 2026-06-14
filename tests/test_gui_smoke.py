@@ -474,3 +474,51 @@ class TestOffloadResumePrompt:
         src = OffloadSource(label="A001", path=tmp_path / "card")
         dst = OffloadDest(label="NAS", path=tmp_path / "nas")
         assert tab._ask_resume([src], [dst]) is False
+
+
+# ---------------------------------------------------------------------------
+# Drag-and-drop onto path fields (#6)
+# ---------------------------------------------------------------------------
+
+class _FakeDrop:
+    """Stand-in for QDropEvent — exposes the bits the handlers use."""
+    def __init__(self, mime):
+        self._m = mime
+        self.accepted = False
+
+    def mimeData(self):
+        return self._m
+
+    def acceptProposedAction(self):
+        self.accepted = True
+
+
+def _folder_mime(path):
+    from PyQt6.QtCore import QMimeData, QUrl
+    m = QMimeData()
+    m.setUrls([QUrl.fromLocalFile(str(path))])
+    return m
+
+
+class TestDragAndDrop:
+    def test_path_input_accepts_folder_drop(self, qtbot, tmp_path):
+        from gui.path_input_widget import PathInputWidget
+        d = tmp_path / "A001"
+        d.mkdir()
+        w = PathInputWidget("source")
+        qtbot.addWidget(w)
+        ev = _FakeDrop(_folder_mime(d))
+        w.dropEvent(ev)
+        assert w.text() == str(d)
+        assert ev.accepted
+
+    def test_drop_line_edit_file_drop_uses_parent(self, qtbot, tmp_path):
+        from gui.drop_line_edit import DropLineEdit
+        f = tmp_path / "clip.mov"
+        f.write_text("x")
+        le = DropLineEdit()
+        qtbot.addWidget(le)
+        ev = _FakeDrop(_folder_mime(f))
+        le.dropEvent(ev)
+        assert le.text() == str(tmp_path)
+        assert ev.accepted
