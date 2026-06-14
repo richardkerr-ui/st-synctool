@@ -157,7 +157,7 @@ class TransferTab(QWidget):
             il.setContentsMargins(0, 0, 0, 0)
             il.setSpacing(2)
             lbl = QLabel(label_text)
-            lbl.setStyleSheet(f"font-size:11px; color:#555; background:transparent;")
+            lbl.setStyleSheet(f"font-size:11px; color:{theme.MUTED_TEXT}; background:transparent;")
             val = QLabel("—")
             val.setStyleSheet(f"font-size:13px; font-weight:500; color:#555; background:transparent;")
             il.addWidget(lbl)
@@ -363,6 +363,14 @@ class TransferTab(QWidget):
             self._pf_hint.setText("Enter paths to see transfer summary")
             self._pf_hint.setStyleSheet("font-size:12px; color:#555; background:transparent;")
             return
+
+        # Paths entered — brighten the values from the muted placeholder colour so
+        # the computed summary reads as active, not greyed out.
+        for attr in ("_pf_src_val", "_pf_dst_val", "_pf_time_val"):
+            getattr(self, attr).setStyleSheet(
+                f"font-size:13px; font-weight:600; color:{theme.TEXT_PRIMARY};"
+                " background:transparent;"
+            )
 
         try:
             src_is_url = is_gdrive_url(src)

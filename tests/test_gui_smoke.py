@@ -37,6 +37,16 @@ class TestTransferTabSmoke:
     def test_conflict_combo_has_at_least_three_options(self, tab):
         assert tab.conflict_combo.count() >= 3
 
+    def test_preflight_values_brighten_when_paths_entered(self, tab, tmp_path):
+        # Greyed-out summary regression: once both paths are set, the computed
+        # values must use the active colour, not the muted #555 placeholder.
+        tab.src_input.setText(str(tmp_path))
+        tab.dst_input.setText(str(tmp_path))
+        tab._update_preflight()
+        assert "#555" not in tab._pf_src_val.styleSheet()
+        from gui import theme
+        assert theme.TEXT_PRIMARY in tab._pf_src_val.styleSheet()
+
 
 # ---------------------------------------------------------------------------
 # MergeTab
