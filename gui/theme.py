@@ -94,6 +94,19 @@ def verdict_color(verdict: str) -> str:
     return severity_color(verdict_severity(verdict))
 
 
+def header_chip_style() -> str:
+    """Header action 'chip' (Settings / Report a Problem / Tour), matched to the
+    redesign mockup — brighter than the old #888 so they read as clickable."""
+    return f"""
+    QPushButton {{
+        background:{CHARCOAL_LIGHT}; color:#9A9DA0;
+        border:1px solid {BORDER}; border-radius:5px;
+        font-size:11px; font-weight:600; padding:0 10px;
+    }}
+    QPushButton:hover {{ background:{CHARCOAL_HOVER}; color:{CREAM}; }}
+    """
+
+
 def app_stylesheet():
     """Generate the Qt stylesheet for the application."""
     return f"""

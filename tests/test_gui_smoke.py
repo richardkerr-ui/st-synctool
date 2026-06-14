@@ -326,7 +326,8 @@ class TestMainWindowSmoke:
     # M11.2: Settings
     def test_settings_button_present(self, window):
         assert hasattr(window, "_settings_btn")
-        assert window._settings_btn.text() == "Settings"
+        # Header chips carry a leading glyph for discoverability (⚙ Settings).
+        assert "Settings" in window._settings_btn.text()
 
     def test_settings_dialog_loads_and_saves(self, qtbot, tmp_path, monkeypatch):
         from gui.settings_dialog import SettingsDialog

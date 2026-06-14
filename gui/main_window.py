@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QStatusBar, QLabel, QPushButton
 )
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, Qt
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -135,45 +135,31 @@ class MainWindow(QMainWindow):
             f"color:{theme.ACCENT_GREEN};font-size:11px;margin-right:8px;"
         )
 
+        # Header action chips — shared style (theme.header_chip_style), brighter
+        # than before with a leading glyph so they read as discoverable controls.
+        chip_qss = theme.header_chip_style()
+
         # "Take the Tour" button — always visible so users can re-run it
-        self._tour_btn = QPushButton("? Tour")
-        self._tour_btn.setFixedHeight(24)
-        self._tour_btn.setStyleSheet("""
-            QPushButton {
-                background:#2a2a2a; color:#888;
-                border:1px solid #3a3a3a; border-radius:4px;
-                font-size:11px; padding:0 8px;
-            }
-            QPushButton:hover { background:#3a3a3a; color:#ccc; }
-        """)
+        self._tour_btn = QPushButton("?  Tour")
+        self._tour_btn.setFixedHeight(26)
+        self._tour_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tour_btn.setStyleSheet(chip_qss)
         self._tour_btn.setToolTip("Replay the onboarding tour")
         self._tour_btn.clicked.connect(self._launch_tutorial)
 
         # M7.3: "Report a Problem" — zips recent logs + version/OS info to email.
-        self._feedback_btn = QPushButton("Report a Problem")
-        self._feedback_btn.setFixedHeight(24)
-        self._feedback_btn.setStyleSheet("""
-            QPushButton {
-                background:#2a2a2a; color:#888;
-                border:1px solid #3a3a3a; border-radius:4px;
-                font-size:11px; padding:0 8px;
-            }
-            QPushButton:hover { background:#3a3a3a; color:#ccc; }
-        """)
+        self._feedback_btn = QPushButton("✎  Report a Problem")
+        self._feedback_btn.setFixedHeight(26)
+        self._feedback_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._feedback_btn.setStyleSheet(chip_qss)
         self._feedback_btn.setToolTip("Bundle recent logs and app info into a zip to email")
         self._feedback_btn.clicked.connect(self._report_problem)
 
         # M11.2: Settings (org activity remote base + log-shipping toggle).
-        self._settings_btn = QPushButton("Settings")
-        self._settings_btn.setFixedHeight(24)
-        self._settings_btn.setStyleSheet("""
-            QPushButton {
-                background:#2a2a2a; color:#888;
-                border:1px solid #3a3a3a; border-radius:4px;
-                font-size:11px; padding:0 8px;
-            }
-            QPushButton:hover { background:#3a3a3a; color:#ccc; }
-        """)
+        self._settings_btn = QPushButton("⚙  Settings")
+        self._settings_btn.setFixedHeight(26)
+        self._settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._settings_btn.setStyleSheet(chip_qss)
         self._settings_btn.setToolTip("Configure the org-wide activity log")
         self._settings_btn.clicked.connect(self._open_settings)
 
