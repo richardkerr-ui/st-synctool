@@ -15,6 +15,8 @@ Pure logic, no PyQt6, fully unit-testable. Persistence and the current date
 are injectable so the daily reset can be tested across day boundaries.
 """
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
 from datetime import datetime
