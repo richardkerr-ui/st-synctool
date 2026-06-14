@@ -24,3 +24,6 @@ st_synctool_dependency_graph.html
 # coverage data
 .coverage
 .coverage.*
+
+# Brand icon master (large; committed icon is assets/app_icon.png)
+assets/app_icon_master.png
