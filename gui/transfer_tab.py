@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QProgressBar, QCheckBox, QComboBox,
-    QMessageBox, QSizePolicy, QFrame,
+    QMessageBox, QSizePolicy, QFrame, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
@@ -77,7 +77,16 @@ class TransferTab(QWidget):
         # GUI refresh: per-tab accent (blue for Transfer) tints section headers,
         # checkboxes and the primary button via one cascading stylesheet.
         self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Transfer")))
-        root = QVBoxLayout(self)
+        # Scroll the whole tab so a short window scrolls instead of squishing the
+        # options + log; a tall window lets the log expand.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setSpacing(14)
         root.setContentsMargins(20, 16, 20, 12)
 
@@ -253,6 +262,9 @@ class TransferTab(QWidget):
         self.log = LogWidget("Transfer log", with_progress=True, parent=self)
         self.log.setMinimumHeight(180)
         root.addWidget(self.log)
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
         # Convenience aliases so progress-related methods need no changes
         self.progress_bar       = self.log.progress_bar

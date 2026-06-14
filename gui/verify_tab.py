@@ -2,6 +2,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QProgressBar, QFileDialog, QMessageBox, QFrame, QCheckBox,
+    QScrollArea,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
@@ -89,7 +90,16 @@ class VerifyTab(QWidget):
 
     def _build_ui(self):
         self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Verify")))
-        root = QVBoxLayout(self)
+        # Scroll the whole tab so a short window scrolls instead of squishing the
+        # results tiles + log; a tall window lets the log expand.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setSpacing(14)
         root.setContentsMargins(20, 16, 20, 12)
 
@@ -217,6 +227,9 @@ class VerifyTab(QWidget):
         # ── Single log panel ─────────────────────────────────────
         self.log = LogWidget("Results log", parent=self)
         root.addWidget(self.log, stretch=1)
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
     def _browse_manifest(self):
         path, _ = QFileDialog.getOpenFileName(

@@ -597,7 +597,16 @@ class OffloadTab(QWidget):
 
     def _build_ui(self):
         self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Offload")))
-        root = QVBoxLayout(self)
+        # Scroll the whole tab so a short window scrolls instead of squishing the
+        # source/dest panels, matrix and log; a tall window lets them expand.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setSpacing(13)
         root.setContentsMargins(20, 16, 20, 12)
 
@@ -620,6 +629,9 @@ class OffloadTab(QWidget):
         root.addWidget(self._build_options_bar())
         root.addWidget(self._build_matrix_group())
         root.addWidget(self._build_log_and_actions())
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
     def _build_source_panel(self) -> QGroupBox:
         group = QGroupBox("SOURCES (READ-ONLY)")
