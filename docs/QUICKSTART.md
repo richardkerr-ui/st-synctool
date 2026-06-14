@@ -43,6 +43,8 @@ Use the **Offload** tab to copy a camera card to one or more destinations with f
 
 A chain-of-custody log and a manifest are written to `~/Documents/STSyncTool/` for every offload.
 
+> **Keep the Mac awake.** While a job runs, a gold **"Keeping Mac awake — don't close the lid"** indicator appears. The app stops the Mac sleeping when idle, but it cannot override a closed lid: on a laptop, closing the lid force-sleeps the machine and pauses the copy unless you are in clamshell mode (external display, power adapter and an external keyboard/mouse connected). Leave the lid open, or use clamshell, until the job finishes.
+
 ---
 
 ## 3. Merge a project

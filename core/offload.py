@@ -1323,6 +1323,27 @@ def run_offload(
                 verdict="VERIFIED" if cleared else "NOT_CLEARED", log_filename=log_name,
             ), log_cb=log_cb)
 
+    # M12.2: record a duplicate-card fingerprint per source, covering only the
+    # destinations that actually committed. Advisory — never breaks the offload.
+    try:
+        from core import projects
+        from core.offload_ledger import fingerprint_from_manifest
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for src in active_sources:
+            smfst = source_manifests.get(src.label)
+            if not smfst:
+                continue
+            done_dests = [
+                d.label for d in active_dests
+                if cell_results[(src.label, d.label)].state == CellState.DONE
+            ]
+            if not done_dests:
+                continue
+            fp = fingerprint_from_manifest(src, smfst)
+            projects.record_offload_fingerprint(fp.to_record(done_dests, now_iso))
+    except Exception as exc:
+        log_cb(f"[Offload] Could not record duplicate-card fingerprint: {exc}", "warning")
+
     return flat, source_manifests, log_path
 
 

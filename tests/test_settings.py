@@ -155,3 +155,15 @@ def test_explicit_drive_url_in_settings_resolves(tmp_path):
     settings.set_activity_remote_base(
         "https://drive.google.com/drive/folders/ABC123?usp=drive_link", path=cfg)
     assert settings.activity_remote_base(path=cfg) == "gdrive,root_folder_id=ABC123:"
+
+
+# M12.4 completion sound toggle
+def test_completion_sound_defaults_true(cfg):
+    assert settings.completion_sound_enabled(path=cfg) is True
+
+
+def test_completion_sound_round_trip(cfg):
+    settings.set_completion_sound_enabled(False, path=cfg)
+    assert settings.completion_sound_enabled(path=cfg) is False
+    settings.set_completion_sound_enabled(True, path=cfg)
+    assert settings.completion_sound_enabled(path=cfg) is True

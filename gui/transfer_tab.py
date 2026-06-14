@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 from pathlib import Path
 
-from gui.ui_helpers import make_interactive
+from gui.ui_helpers import make_interactive, awake_indicator
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.toast import show_toast
@@ -286,9 +286,12 @@ class TransferTab(QWidget):
         )
         self.manifest_btn.clicked.connect(self._generate_manifest_only)
 
+        self._awake_lbl = awake_indicator()   # M12.5 — shown only while transferring
+
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(self.cancel_btn)
         btn_row.addWidget(self._status_label)
+        btn_row.addWidget(self._awake_lbl)
         btn_row.addStretch()
         btn_row.addWidget(self.manifest_btn)
         root.addLayout(btn_row)
@@ -511,6 +514,7 @@ class TransferTab(QWidget):
         self.log.set_progress(0, current_file="Starting…")
 
         start_session()
+        self._awake_lbl.setVisible(True)   # M12.5
         self._thread.start()
 
     def _cancel_transfer(self):
@@ -579,6 +583,7 @@ class TransferTab(QWidget):
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self._status_label.setText("Ready")
+        self._awake_lbl.setVisible(False)   # M12.5
         self.log.hide_progress()
 
     def _generate_manifest_only(self):

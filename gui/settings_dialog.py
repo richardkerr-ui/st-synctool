@@ -7,11 +7,12 @@ log and toggle log shipping. No logic lives here beyond reading/writing
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QCheckBox, QPushButton, QDialogButtonBox,
+    QCheckBox, QPushButton, QDialogButtonBox, QFrame,
 )
 
 from core import settings as app_settings
 from gui import theme
+from gui.ui_helpers import make_interactive
 
 
 class SettingsDialog(QDialog):
@@ -44,7 +45,24 @@ class SettingsDialog(QDialog):
         root.addLayout(form)
 
         self.shipping_chk = QCheckBox("Ship logs to the shared folder (recommended)")
+        make_interactive(self.shipping_chk)
         root.addWidget(self.shipping_chk)
+
+        # M12.4: completion sound toggle.
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet(f"color:{theme.BORDER};")
+        root.addWidget(divider)
+        sound_header = QLabel("Offload completion")
+        sound_header.setStyleSheet(f"color:{theme.CREAM};font-size:14px;font-weight:bold;")
+        root.addWidget(sound_header)
+        self.sound_chk = QCheckBox("Play a sound when an offload finishes")
+        make_interactive(
+            self.sound_chk,
+            tooltip="Sound a chime on completion so you notice the result even "
+                    "when you have stepped away from the cart.",
+        )
+        root.addWidget(self.sound_chk)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -62,8 +80,10 @@ class SettingsDialog(QDialog):
             self.remote_base_input.setPlaceholderText(
                 "Leave blank to use the shared Signal Theory folder")
         self.shipping_chk.setChecked(app_settings.log_shipping_enabled())
+        self.sound_chk.setChecked(app_settings.completion_sound_enabled())
 
     def _save(self):
         app_settings.set_activity_remote_base(self.remote_base_input.text())
         app_settings.set_log_shipping_enabled(self.shipping_chk.isChecked())
+        app_settings.set_completion_sound_enabled(self.sound_chk.isChecked())
         self.accept()

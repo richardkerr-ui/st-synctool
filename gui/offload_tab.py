@@ -21,8 +21,11 @@ from PyQt6.QtWidgets import (
 )
 
 from gui import theme
-from gui.ui_helpers import make_interactive
+from gui.ui_helpers import make_interactive, awake_indicator
 from gui.log_widget import LogWidget
+from core.amphetamine import start_session, end_session
+from core.throughput import ThroughputMeter, format_rate, format_eta
+from utils.file_utils import format_bytes
 from core.offload import (
     OffloadSource, OffloadDest, OffloadConfig, CellResult, CellState,
     run_offload, scan_naming_patterns, detect_cross_source_duplicates,
@@ -85,6 +88,19 @@ class SourceRowWidget(QWidget):
         browse_btn.setFixedWidth(80)
         browse_btn.clicked.connect(self._browse)
         layout.addWidget(browse_btn)
+
+        # M12.3: make the read-only guarantee visible per source. The offload
+        # engine only ever reads from a source (preflight_source_readonly +
+        # copy-out-then-verify); this badge tells the DIT the card is untouched.
+        self._readonly_badge = QLabel("🔒 read-only")
+        self._readonly_badge.setToolTip(
+            "ST SyncTool never writes to a source. Files are copied out and "
+            "verified against the original hashes — the card is left untouched."
+        )
+        self._readonly_badge.setStyleSheet(
+            f"color:{theme.VERDICT_GREEN}; font-size:11px;"
+        )
+        layout.addWidget(self._readonly_badge)
 
         # Subfolder kept as a hidden attribute so to_offload_source() still works
         self._subfolder = QLineEdit()
@@ -586,6 +602,9 @@ class OffloadTab(QWidget):
         self._worker: Optional[OffloadWorker] = None
         # (src_label, dst_label) -> monotonic start time for the COPYING phase
         self._copy_start: dict[tuple, float] = {}
+        # M12.6: windowed throughput for the cell currently copying.
+        self._throughput = ThroughputMeter()
+        self._throughput_key: Optional[tuple] = None
         # mount_path -> VolumeBanner, for volumes currently showing a banner
         self._banners: dict[str, VolumeBanner] = {}
         # mount_paths the user dismissed this session (cleared on unmount)
@@ -619,6 +638,14 @@ class OffloadTab(QWidget):
         self._banner_layout.setSpacing(4)
         self._banner_container.setVisible(False)
         root.addWidget(self._banner_container)
+
+        # M12.4: big persistent safe-to-format / do-not-eject banner shown on
+        # completion (the DIT has usually walked away from the cart).
+        self._completion_banner = QLabel("")
+        self._completion_banner.setVisible(False)
+        self._completion_banner.setWordWrap(True)
+        self._completion_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(self._completion_banner)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -833,6 +860,10 @@ class OffloadTab(QWidget):
         )
         self._cancel_btn.clicked.connect(self._cancel_offload)
         btn_row.addWidget(self._cancel_btn)
+
+        # M12.5: shown only while an offload runs (driven by job state below).
+        self._awake_lbl = awake_indicator()
+        btn_row.addWidget(self._awake_lbl)
 
         self._offload_status_lbl = QLabel("Ready")
         self._offload_status_lbl.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px;")
@@ -1051,6 +1082,41 @@ class OffloadTab(QWidget):
             return False
         return None
 
+    def _confirm_no_duplicate_card(self, active_src, active_dst) -> bool:
+        """M12.2: if any source looks already offloaded to a chosen destination,
+        warn and let the operator confirm. Returns True to proceed, False to
+        abort. Fingerprinting/matching logic lives in core.offload_ledger; any
+        failure here is swallowed so the guard never blocks a legitimate offload.
+        """
+        try:
+            from core import projects
+            from core.offload_ledger import (
+                fingerprint_source, match_prior_offloads, warning_text,
+            )
+            history = projects.list_offload_fingerprints()
+            if not history:
+                return True
+            dst_labels = [d.label for d in active_dst]
+            for s in active_src:
+                fp = fingerprint_source(s)
+                if fp.file_count == 0:
+                    continue
+                matches = []
+                for dl in dst_labels:
+                    matches += match_prior_offloads(fp, history, dest_label=dl)
+                if not matches:
+                    continue
+                resp = QMessageBox.warning(
+                    self, "Possible duplicate card", warning_text(fp, matches),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if resp != QMessageBox.StandardButton.Yes:
+                    return False
+        except Exception:
+            return True   # never let the guard get in the way of an offload
+        return True
+
     def _start_offload(self):
         sources, dests = self._collect_inputs()
 
@@ -1094,6 +1160,15 @@ class OffloadTab(QWidget):
             if resp != QMessageBox.StandardButton.Yes:
                 return
 
+        # M12.2: warn before re-offloading a card that looks already done. Cheap
+        # fingerprint per source, matched against this destination's prior
+        # offloads. Non-blocking — the DIT can confirm and continue.
+        if not self._confirm_no_duplicate_card(active_src, active_dst):
+            return
+
+        # A fresh run clears any previous completion banner.
+        self._completion_banner.setVisible(False)
+
         # Build matrix
         src_labels = [s.label for s in active_src]
         dst_labels = [d.label for d in active_dst]
@@ -1134,6 +1209,10 @@ class OffloadTab(QWidget):
         self._start_btn.setEnabled(False)
         self._cancel_btn.setEnabled(True)
         self._offload_status_lbl.setText("Running…")
+        # M12.5: keep the Mac awake during the copy and show the honest indicator
+        # (idle-sleep only — closing the lid still halts; the label says so).
+        start_session()
+        self._awake_lbl.setVisible(True)
         self._log.clear()
         self._log.log("Starting offload…", "info")
         self._thread.start()
@@ -1219,27 +1298,25 @@ class OffloadTab(QWidget):
         import time as _time
         pct = int(bytes_done / bytes_total * 100) if bytes_total else 0
 
-        def _fmt(n: int) -> str:
-            if n >= 1 << 30:
-                return f"{n / (1 << 30):.1f} GB"
-            if n >= 1 << 20:
-                return f"{n / (1 << 20):.0f} MB"
-            return f"{n / (1 << 10):.0f} KB"
+        # M12.6: windowed (smoothed) rate + ETA via core.throughput. Reset the
+        # meter whenever the copying cell changes so each cell reads on its own.
+        key = (src_label, dst_label)
+        if key != self._throughput_key:
+            self._throughput_key = key
+            self._throughput.reset()
+        self._throughput.update(bytes_done, _time.monotonic())
+        rate = self._throughput.rate_bps()
+        eta = self._throughput.eta_seconds(bytes_total)
 
-        elapsed = _time.monotonic() - self._copy_start.get((src_label, dst_label), _time.monotonic())
-        rate = bytes_done / elapsed if elapsed > 0.5 else 0
-        if rate > 0 and bytes_total > bytes_done:
-            secs_left = (bytes_total - bytes_done) / rate
-            if secs_left >= 60:
-                eta = f"{int(secs_left // 60)}m {int(secs_left % 60)}s"
-            else:
-                eta = f"{int(secs_left)}s"
-            eta_str = f" ~{eta}"
-        else:
-            eta_str = ""
-
-        cell_text = f"{pct}% ({_fmt(bytes_done)}/{_fmt(bytes_total)}{eta_str})"
+        eta_str = f" ~{format_eta(eta)}" if rate > 0 and bytes_total > bytes_done else ""
+        cell_text = f"{pct}% ({format_bytes(bytes_done)}/{format_bytes(bytes_total)}{eta_str})"
         self._matrix.update_cell_progress(src_label, dst_label, cell_text)
+
+        # The status line carries the headline figure the DIT plans around.
+        if rate > 0:
+            self._offload_status_lbl.setText(
+                f"{src_label} → {dst_label} · {format_rate(rate)} · ETA {format_eta(eta)}"
+            )
 
     def _on_finished(self, results: list, manifests: dict, log_path: str):
         done   = sum(1 for r in results if r.state == CellState.DONE)
@@ -1255,8 +1332,39 @@ class OffloadTab(QWidget):
         )
         for sp in sheets:
             self._log.log(f"Contact sheet: {sp}", "success")
+        self._show_completion_banner(results)
         dlg = SummaryDialog(results, log_path, self)
         dlg.exec()
+
+    def _show_completion_banner(self, results: list) -> None:
+        """M12.4: green SAFE TO FORMAT only when every source is cleared by the
+        M10.1 verdict (verified on >=2 destinations); red DO NOT EJECT otherwise.
+        Plays a completion sound when enabled in settings."""
+        from core.clearance import compute_clearance
+        from core import settings
+
+        src_labels = list(dict.fromkeys(r.source_label for r in results))
+        all_cleared = bool(src_labels) and all(
+            compute_clearance(s, results).cleared for s in src_labels
+        )
+        if all_cleared:
+            text = "✓  SAFE TO FORMAT — every card verified on at least 2 destinations"
+            bg, fg = theme.VERDICT_GREEN, "#0c1a0f"
+        else:
+            text = "✕  DO NOT EJECT — not all cards are cleared. Review before formatting."
+            bg, fg = theme.VERDICT_CORAL, "#1a0c0c"
+        self._completion_banner.setText(text)
+        self._completion_banner.setStyleSheet(
+            f"background:{bg}; color:{fg}; border-radius:6px;"
+            " padding:12px; font-size:15px; font-weight:bold;"
+        )
+        self._completion_banner.setVisible(True)
+        try:
+            if settings.completion_sound_enabled():
+                from PyQt6.QtWidgets import QApplication
+                QApplication.beep()
+        except Exception:
+            pass
 
     def _on_error(self, msg: str):
         self._log.log(f"Offload engine error: {msg}", "error")
@@ -1266,6 +1374,9 @@ class OffloadTab(QWidget):
         self._start_btn.setEnabled(True)
         self._cancel_btn.setEnabled(False)
         self._offload_status_lbl.setText("Ready")
+        # M12.5: job over — release the awake session and hide the indicator.
+        end_session()
+        self._awake_lbl.setVisible(False)
         self._thread = None
         self._worker = None
 

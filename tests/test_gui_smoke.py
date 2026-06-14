@@ -140,6 +140,94 @@ class TestOffloadTabSmoke:
     def test_one_dest_row_created_at_init(self, tab):
         assert len(tab._dest_rows) == 1
 
+    # M12.2 duplicate-card guard
+    def test_duplicate_guard_proceeds_with_empty_ledger(self, tab, tmp_path, monkeypatch):
+        from dataclasses import dataclass
+        import core.offload_ledger as led
+
+        @dataclass
+        class S:
+            label: str
+            path: object
+        src = tmp_path / "A001"; (src / "DCIM").mkdir(parents=True)
+        (src / "DCIM" / "c.mov").write_bytes(b"data")
+        monkeypatch.setattr(led, "fingerprint_source", lambda s: led.SourceFingerprint("A001", "v", 1, 4, ("DCIM",)))
+        import core.projects as proj
+        monkeypatch.setattr(proj, "list_offload_fingerprints", lambda: [])
+
+        @dataclass
+        class D:
+            label: str
+        assert tab._confirm_no_duplicate_card([S("A001", src)], [D("NAS")]) is True
+
+    def test_duplicate_guard_aborts_when_user_declines(self, tab, monkeypatch):
+        from dataclasses import dataclass
+        import core.offload_ledger as led
+        import core.projects as proj
+        from PyQt6.QtWidgets import QMessageBox
+
+        fp = led.SourceFingerprint("A001", "RED", 3, 100, ("DCIM",))
+        monkeypatch.setattr(led, "fingerprint_source", lambda s: fp)
+        monkeypatch.setattr(proj, "list_offload_fingerprints",
+                            lambda: [fp.to_record(["NAS"], "2026-06-14T10:00:00+00:00")])
+        seen = {}
+        def _warn(parent, title, text, *a, **k):
+            seen["title"] = title; seen["text"] = text
+            return QMessageBox.StandardButton.No
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(_warn))
+
+        @dataclass
+        class S:
+            label: str
+            path: object
+        @dataclass
+        class D:
+            label: str
+        assert tab._confirm_no_duplicate_card([S("A001", None)], [D("NAS")]) is False
+        assert "duplicate" in seen["title"].lower()
+
+    # M12.4 completion banner
+    def _cell(self, src, dst, done=True):
+        from core.offload import CellResult, CellState
+        r = CellResult(source_label=src, dest_label=dst)
+        r.state = CellState.DONE if done else CellState.FAILED
+        r.verified = True if done else False
+        return r
+
+    def test_completion_banner_safe_when_cleared(self, tab, monkeypatch):
+        from core import settings
+        monkeypatch.setattr(settings, "completion_sound_enabled", lambda: False)
+        results = [self._cell("A001", "NAS"), self._cell("A001", "LTO")]  # 2 clean dests
+        tab._show_completion_banner(results)
+        assert not tab._completion_banner.isHidden()
+        assert "SAFE TO FORMAT" in tab._completion_banner.text()
+
+    def test_completion_banner_warns_when_not_cleared(self, tab, monkeypatch):
+        from core import settings
+        monkeypatch.setattr(settings, "completion_sound_enabled", lambda: False)
+        results = [self._cell("A001", "NAS")]  # only 1 dest → not cleared
+        tab._show_completion_banner(results)
+        assert not tab._completion_banner.isHidden()
+        assert "DO NOT EJECT" in tab._completion_banner.text()
+
+    # M12.6 throughput + ETA on the status line
+    def test_progress_updates_rate_and_eta(self, tab):
+        tab._on_progress("A001", "NAS", 10 * 1024 * 1024, 100 * 1024 * 1024)
+        tab._on_progress("A001", "NAS", 60 * 1024 * 1024, 100 * 1024 * 1024)
+        text = tab._offload_status_lbl.text()
+        assert "/s" in text and "ETA" in text
+
+    # M12.5 awake indicator
+    def test_awake_indicator_hidden_at_rest(self, tab):
+        assert tab._awake_lbl.isHidden()
+
+    def test_awake_indicator_is_honest_about_the_lid(self, tab):
+        # Must not promise lid-close protection; must mention the lid caution.
+        text = tab._awake_lbl.text().lower()
+        tip = tab._awake_lbl.toolTip().lower()
+        assert "lid" in text
+        assert "clamshell" in tip   # documents the real requirement
+
 
 # ---------------------------------------------------------------------------
 # VerifyTab

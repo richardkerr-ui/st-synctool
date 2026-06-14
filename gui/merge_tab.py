@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
-from gui.ui_helpers import make_interactive
+from gui.ui_helpers import make_interactive, awake_indicator
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.diff_table import DiffTable
@@ -627,11 +627,14 @@ class MergeTab(QWidget):
         )
         self._unresolved_lbl.setVisible(False)
 
+        self._awake_lbl = awake_indicator()   # M12.5 — shown only while a job runs
+
         btn_row.addWidget(self.scan_btn)
         btn_row.addWidget(self.apply_btn)
         btn_row.addWidget(self.newer_wins_btn)
         btn_row.addWidget(self._unresolved_lbl)
         btn_row.addWidget(self.status_label)
+        btn_row.addWidget(self._awake_lbl)
         btn_row.addStretch()
         root.addLayout(btn_row)
 
@@ -987,10 +990,12 @@ class MergeTab(QWidget):
         self._scan_worker.error.connect(self._scan_thread.quit)
 
         start_session()
+        self._awake_lbl.setVisible(True)   # M12.5
         self._scan_thread.start()
 
     def _on_scan_complete(self, base, yours, server):
         end_session()
+        self._awake_lbl.setVisible(False)   # M12.5
         self._base_manifest   = base
         self._yours_manifest  = yours
         self._server_manifest = server
@@ -1039,6 +1044,7 @@ class MergeTab(QWidget):
 
     def _on_scan_error(self, msg):
         end_session()
+        self._awake_lbl.setVisible(False)   # M12.5
         self.scan_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.status_label.setText("Scan failed")
@@ -1111,10 +1117,12 @@ class MergeTab(QWidget):
         self._apply_worker.error.connect(self._apply_thread.quit)
 
         start_session()
+        self._awake_lbl.setVisible(True)   # M12.5
         self._apply_thread.start()
 
     def _on_apply_done(self, results):
         end_session()
+        self._awake_lbl.setVisible(False)   # M12.5
         self.scan_btn.setEnabled(True)
         self.progress_bar.setValue(100)
         self.progress_bar.setVisible(False)
@@ -1141,6 +1149,7 @@ class MergeTab(QWidget):
 
     def _on_apply_error(self, msg: str):
         end_session()
+        self._awake_lbl.setVisible(False)   # M12.5
         self.scan_btn.setEnabled(True)
         self.apply_btn.setEnabled(False)
         self._apply_opacity.setOpacity(0.4)
@@ -1265,6 +1274,7 @@ class MergeTab(QWidget):
 
     def _on_rescan_conflict(self, paths):
         end_session()
+        self._awake_lbl.setVisible(False)   # M12.5
         self.apply_btn.setEnabled(False)
         self._apply_opacity.setOpacity(0.4)
         self.scan_btn.setEnabled(True)

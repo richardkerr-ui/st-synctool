@@ -7,6 +7,30 @@ the affordance identical on Transfer, Merge, Offload and Verify.
 
 from PyQt6.QtCore import Qt
 
+# M12.5: the honest awake-indicator text. Amphetamine blocks idle sleep but NOT
+# lid-close sleep — closing the lid on a bare laptop force-sleeps at firmware
+# level and halts the copy. So we promise "awake" and caution about the lid,
+# never claim lid-close protection.
+AWAKE_INDICATOR_TEXT = "🔆 Keeping Mac awake — don't close the lid"
+AWAKE_INDICATOR_TOOLTIP = (
+    "While a job runs, ST SyncTool stops the Mac sleeping when idle.\n"
+    "It cannot stop sleep when the lid is closed: on a laptop that needs "
+    "clamshell mode (external display + power + keyboard/mouse).\n"
+    "Closing the lid otherwise will pause the copy."
+)
+
+
+def awake_indicator(parent=None):
+    """A standard, hidden 'keeping awake' indicator label, identical on every
+    tab. Show it while a job runs and hide it when the job ends."""
+    from PyQt6.QtWidgets import QLabel
+    from gui import theme
+    lbl = QLabel(AWAKE_INDICATOR_TEXT, parent)
+    lbl.setToolTip(AWAKE_INDICATOR_TOOLTIP)
+    lbl.setStyleSheet(f"color:{theme.ACCENT_GOLD}; font-size:12px;")
+    lbl.setVisible(False)
+    return lbl
+
 
 def make_interactive(*widgets, tooltip: str = None):
     """Give clickable controls (buttons, checkboxes) a pointing-hand cursor on

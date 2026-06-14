@@ -168,3 +168,26 @@ def save_app_setting(key: str, value) -> None:
     data = _load()
     data.setdefault("app_settings", {})[key] = value
     _save(data)
+
+
+# ---------------------------------------------------------------------------
+# M12.2 offload fingerprint ledger — records each completed offload so the
+# next one can warn about a duplicate card. Stored under "offload_ledger".
+# ---------------------------------------------------------------------------
+
+_LEDGER_MAX = 500   # cap so the registry never grows without bound
+
+
+def list_offload_fingerprints() -> list:
+    """Return all recorded offload fingerprints (newest last)."""
+    return _load().get("offload_ledger", [])
+
+
+def record_offload_fingerprint(record: dict) -> None:
+    """Append one offload fingerprint record, trimming to the most recent."""
+    data = _load()
+    ledger = data.setdefault("offload_ledger", [])
+    ledger.append(record)
+    if len(ledger) > _LEDGER_MAX:
+        del ledger[: len(ledger) - _LEDGER_MAX]
+    _save(data)

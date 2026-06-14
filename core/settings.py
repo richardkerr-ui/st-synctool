@@ -39,6 +39,9 @@ DEFAULTS: dict = {
     # M9.1: opt-out toggle for log shipping. Shipping is on by default once a
     # remote base is set.
     "log_shipping_enabled": True,
+    # M12.4: play a completion sound when an offload finishes (the DIT has
+    # usually walked away from the cart). On by default.
+    "completion_sound_enabled": True,
 }
 
 # Per-key environment overrides (read-only; they win over the file).
@@ -149,3 +152,16 @@ def set_log_shipping_enabled(enabled: bool, *, path=None) -> dict:
 def activity_log_configured(*, path=None) -> bool:
     """True when shipping should actually run: a remote base is set and not opted out."""
     return bool(activity_remote_base(path=path)) and log_shipping_enabled(path=path)
+
+
+# --------------------------------------------------------------------------- #
+# M12.4 completion sound toggle
+# --------------------------------------------------------------------------- #
+
+def completion_sound_enabled(*, path=None) -> bool:
+    """Whether to play a sound when an offload finishes. Defaults True."""
+    return bool(get_setting("completion_sound_enabled", True, path=path))
+
+
+def set_completion_sound_enabled(enabled: bool, *, path=None) -> dict:
+    return set_setting("completion_sound_enabled", bool(enabled), path=path)

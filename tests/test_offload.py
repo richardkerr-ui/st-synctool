@@ -466,6 +466,39 @@ def _default_config(**overrides) -> OffloadConfig:
     return cfg
 
 
+class TestSourceIsNeverWritten:
+    """M12.3: the read-only guarantee. A full offload must leave the source
+    tree byte-identical — same files, sizes, contents and mtimes."""
+
+    def _snapshot(self, root: Path) -> dict:
+        import hashlib
+        snap = {}
+        for p in sorted(root.rglob("*")):
+            if p.is_file():
+                st = p.stat()
+                snap[str(p.relative_to(root))] = (
+                    st.st_size, st.st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest()
+                )
+        return snap
+
+    def test_source_unchanged_after_offload(self, tmp_path):
+        src = _make_source_dir(tmp_path, "A001", {
+            "DCIM/clip1.mov": b"camera original one",
+            "DCIM/clip2.mov": b"camera original two",
+            "AUDIO/take.wav": b"sound",
+        })
+        dst = OffloadDest(label="NAS", path=tmp_path / "nas")
+        dst.path.mkdir()
+
+        before = self._snapshot(src.path)
+        results, _, _ = run_offload(
+            [src], [dst], _default_config(), MagicMock(), MagicMock())
+        assert all(r.state == CellState.DONE for r in results)
+
+        after = self._snapshot(src.path)
+        assert after == before, "offload must not modify the source tree"
+
+
 class TestRunOffloadSpacePreflight:
     """M12.1: a destination without room aborts before any byte is copied."""
 
