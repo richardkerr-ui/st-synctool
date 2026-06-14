@@ -82,7 +82,7 @@ class SourceRowWidget(QWidget):
         layout.addWidget(self._label)
 
         self._path = DropLineEdit()
-        self._path.setPlaceholderText("Source path…")
+        self._path.setPlaceholderText("Drag a folder here, or paste a source path…")
         self._path.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self._path)
 
@@ -164,7 +164,7 @@ class DestRowWidget(QWidget):
         layout.addWidget(self._label)
 
         self._path = DropLineEdit()
-        self._path.setPlaceholderText("Destination path…")
+        self._path.setPlaceholderText("Drag a folder here, or paste a destination path…")
         self._path.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self._path)
 

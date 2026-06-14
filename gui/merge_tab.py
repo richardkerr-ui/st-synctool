@@ -532,7 +532,7 @@ class MergeTab(QWidget):
         grid.addWidget(QLabel("Server (Theirs):"), 2, 0)
         self.server_input = PathInputWidget("merge_server", self)
         self.server_input.input.setPlaceholderText(
-            "/Volumes/NAS/project  or  https://drive.google.com/drive/folders/..."
+            "Drag a folder, or paste /Volumes/NAS/project or a Drive URL…"
         )
         grid.addWidget(self.server_input, 2, 1)
         health_btn = QPushButton("Check")

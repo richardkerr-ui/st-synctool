@@ -120,7 +120,7 @@ class VerifyTab(QWidget):
         frow.addWidget(QLabel("Folder to Verify:   "))
         self.folder_input = PathInputWidget("verify_folder", self)
         self.folder_input.input.setPlaceholderText(
-            "Local path  or  https://drive.google.com/drive/folders/..."
+            "Drag a folder here, or paste a local path / Drive URL…"
         )
         frow.addWidget(self.folder_input)
         ig.addLayout(frow)

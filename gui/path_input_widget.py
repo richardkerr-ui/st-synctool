@@ -36,7 +36,7 @@ class PathInputWidget(QWidget):
 
         # Public handle to the underlying QLineEdit
         self.input = self._combo.lineEdit()
-        self.input.setPlaceholderText("Paste path or GDrive URL…")
+        self.input.setPlaceholderText("Drag a folder here, or paste a path / Drive URL…")
         self.input.textChanged.connect(self._on_text_changed)
         layout.addWidget(self._combo)
 
