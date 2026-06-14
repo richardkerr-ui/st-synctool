@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QProgressBar, QFileDialog, QMessageBox, QCheckBox,
     QComboBox, QDialog, QListWidget, QListWidgetItem, QTextEdit,
-    QDialogButtonBox, QGraphicsOpacityEffect, QFrame,
+    QDialogButtonBox, QGraphicsOpacityEffect, QFrame, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
@@ -449,7 +449,16 @@ class MergeTab(QWidget):
         """Orchestrates the MergeTab layout. Each section is built by a focused
         sub-builder that sets the relevant self.* attributes."""
         self.setStyleSheet(theme.tab_stylesheet(theme.tab_accent("Merge")))
-        root = QVBoxLayout(self)
+        # Scroll the whole tab so a short window scrolls instead of squishing the
+        # diff table + conflict panel; a tall window lets the diff group expand.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setSpacing(13)
         root.setContentsMargins(20, 16, 20, 12)
         root.addLayout(self._build_project_row())
@@ -459,6 +468,8 @@ class MergeTab(QWidget):
         root.addWidget(self._build_diff_group(), stretch=1)
         root.addWidget(self._build_conflict_panel())
         self._build_log_panel(root)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
         # Wire diff_table → conflict panel after both exist
         self.diff_table.conflict_selected.connect(self._on_conflict_selected)
         self.diff_table.conflict_action_changed.connect(self._on_conflict_action_changed)
