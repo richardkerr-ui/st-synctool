@@ -2,13 +2,20 @@
 
 [![CI](https://github.com/richardkerr-ui/st-synctool/actions/workflows/ci.yml/badge.svg)](https://github.com/richardkerr-ui/st-synctool/actions/workflows/ci.yml)
 
-A desktop sync tool for reconciling production files between local SSDs and Google Drive (or a NAS), built for Signal Theory's video production workflow.
+A desktop tool for keeping production work in sync between **Google Drive and a Synology NAS**, built for Signal Theory.
 
-Handles multi-GB video / audio / PSD / After Effects assets without re-uploading the world every time someone tweaks a comp.
+We're a full-service advertising agency, and our post and content team runs off the NAS — it's fast and redundant, so it's the active drive for jobs, backup and archive. But the agency side lives in Google Drive: design, concepting, copy and strategy reach us as Illustrator, Photoshop, video and audio files. We also work remote and cross-office, and from home on Mondays and Fridays. ST SyncTool moves work cleanly between those two worlds and fixes the four things we used to do by hand, or not at all:
+
+- **Reconciling work taken home.** On WFH days and across offices, jobs diverge from the NAS copy. **Merge** does a three-way diff and applies only the real changes — no guessing which version wins, nothing silently clobbered.
+- **Pulling agency assets off Drive.** **Transfer** copies Drive → NAS through the rclone Google Drive API, which recombines multipart `.zip` downloads and rebuilds complex folder trees automatically — no terminal commands, no manual reassembly.
+- **Knowing who owns what.** When a manager bulk-moves project folders between partitions to free space, the original owner gets lost. The org-wide **History** log records every job and move across all machines.
+- **Seeing integrity, not just trusting it.** Drive and Synology both checksum internally but never show you. **Verify** re-hashes against a saved manifest and reports plainly: OK / missing / mismatch.
+
+It also ingests camera cards (**Offload**) with full verification and chain-of-custody — useful now that the whole team has it, not just the single ShotPut Pro seat. It handles multi-GB video / audio / PSD / After Effects assets without re-uploading the world every time someone tweaks a comp.
 
 ## What it does
 
-Five tabs:
+The five tabs:
 
 - **Transfer** — push or pull a folder one-way, with integrity verification (optional ASC MHL sidecar for delivery)
 - **Merge** — reconcile diverged copies using a three-way diff and apply only the changes

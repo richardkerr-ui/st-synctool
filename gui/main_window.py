@@ -559,9 +559,13 @@ class MainWindow(QMainWindow):
                 "widget": None,
                 "title":  "Welcome to ST SyncTool",
                 "body":   (
-                    "This quick tour walks you through the five tabs — Transfer, "
-                    "Merge, Offload, Verify and History — plus Settings and "
-                    "Report a Problem. Skip any time and replay it via '? Tour'."
+                    "ST SyncTool keeps Signal Theory's work in sync between "
+                    "Google Drive and the Synology NAS. Merge reconciles jobs you "
+                    "took home on WFH days, Transfer pulls agency assets off Drive "
+                    "(auto-recombining multipart zips), History shows who touched "
+                    "what across the team, and Verify surfaces the integrity checks "
+                    "Drive and the NAS hide. It also offloads camera cards. This "
+                    "quick tour shows each — skip any time, replay via '? Tour'."
                 ),
             },
 
