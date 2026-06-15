@@ -273,17 +273,21 @@ def verify_gdrive_deep(
     progress_cb: Optional[ProgressCallback] = None,
     log_cb: Optional[LogCallback] = None,
     cat_fn: Optional[Callable] = None,
+    cat_md5_fn: Optional[Callable] = None,
 ) -> list:
     """
-    Deep-verify a Drive folder by streaming every file through `rclone cat` to a
-    SHA-256 and comparing to the manifest (M5.1). No file is retained locally.
-    Bandwidth-bound, so an honest size + time estimate is logged up front.
+    Deep-verify a Drive folder by streaming every file through `rclone cat` and
+    comparing to the manifest (M5.1). No file is retained locally.
 
-    cat_fn is injectable for testing; defaults to rclone_bridge.cat_sha256.
+    Prefers SHA-256 per entry; falls back to MD5 for Drive-origin manifests that
+    only carry MD5. Marks MISMATCH only when neither hash is present.
+
+    cat_fn / cat_md5_fn are injectable for testing.
     """
     progress = progress_cb or _noop_progress
     log = log_cb or _noop_log
     cat = cat_fn or rclone_bridge.cat_sha256
+    cat_md5 = cat_md5_fn or rclone_bridge.cat_md5
 
     remote, flags = gdrive_url_to_rclone(str(folder))
     files = manifest.get("files", {})
@@ -301,16 +305,23 @@ def verify_gdrive_deep(
     results: list = []
     for i, (rel_path, entry) in enumerate(files.items()):
         progress(int(i / total * 100), rel_path)
-        expected_val = (expected_checksums(entry).get("sha256") or "").lower()
-
-        if not expected_val:
+        cs = expected_checksums(entry)
+        if cs.get("sha256"):
+            algo = "sha256"
+            expected_val = cs["sha256"].lower()
+            _cat = cat
+        elif cs.get("md5"):
+            algo = "md5"
+            expected_val = cs["md5"].lower()
+            _cat = cat_md5
+        else:
             results.append({"path": rel_path, "status": "MISMATCH",
-                            "detail": "No sha256 in manifest for deep comparison"})
-            log(f"  MISMATCH (no sha256 in manifest): {rel_path}", "error")
+                            "detail": "No sha256 or md5 in manifest for deep comparison"})
+            log(f"  MISMATCH (no hash in manifest): {rel_path}", "error")
             continue
 
         try:
-            actual_val = cat(_join_remote(remote, rel_path), extra_flags=flags).lower()
+            actual_val = _cat(_join_remote(remote, rel_path), extra_flags=flags).lower()
         except Exception as e:
             results.append({"path": rel_path, "status": "MISSING",
                             "detail": f"Could not read from Drive: {e}"})
@@ -319,11 +330,11 @@ def verify_gdrive_deep(
 
         if actual_val == expected_val:
             results.append({"path": rel_path, "status": "OK",
-                            "detail": f"sha256: {actual_val[:16]}... (downloaded)"})
+                            "detail": f"{algo}: {actual_val[:16]}... (downloaded)"})
             log(f"  OK: {rel_path}", "success")
         else:
             results.append({"path": rel_path, "status": "MISMATCH",
-                            "detail": f"Expected {expected_val[:16]}... | Got {actual_val[:16]}..."})
+                            "detail": f"Expected {expected_val[:16]}... | Got {actual_val[:16]}... ({algo})"})
             log(f"  MISMATCH: {rel_path}", "error")
 
     progress(100, "Complete")

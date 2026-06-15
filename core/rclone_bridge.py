@@ -180,18 +180,8 @@ def cancel_current() -> bool:
         return False
 
 
-def cat_sha256(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
-    """
-    Stream a single remote file via `rclone cat` and return its SHA-256, without
-    retaining the file on disk or buffering it in memory (M5.1 deep Drive verify).
-
-    Bytes are read from stdout in chunks and folded into the hash incrementally,
-    so a multi-GB clip costs only one chunk of RAM. Honours cancel_current() by
-    registering the process in _current_proc.
-
-    Returns the lowercase hex digest. Raises RuntimeError on a non-zero rclone
-    exit (e.g. file missing, auth failure) or TimeoutError on timeout.
-    """
+def _cat_file(remote_path, algo, extra_flags=None, timeout=3600, chunk_size=1 << 20):
+    """Stream a remote file via `rclone cat` and return its hex digest for `algo`."""
     import hashlib
 
     global _current_proc
@@ -207,7 +197,7 @@ def cat_sha256(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
     with _current_proc_lock:
         _current_proc = proc
 
-    h = hashlib.sha256()
+    h = hashlib.new(algo)
     try:
         while True:
             chunk = proc.stdout.read(chunk_size)
@@ -232,6 +222,18 @@ def cat_sha256(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
                 pass
         with _current_proc_lock:
             _current_proc = None
+
+
+def cat_sha256(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
+    """Stream a remote file and return its SHA-256 hex digest (M5.1 deep verify)."""
+    return _cat_file(remote_path, "sha256", extra_flags=extra_flags,
+                     timeout=timeout, chunk_size=chunk_size)
+
+
+def cat_md5(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
+    """Stream a remote file and return its MD5 hex digest (fallback for Drive-origin manifests)."""
+    return _cat_file(remote_path, "md5", extra_flags=extra_flags,
+                     timeout=timeout, chunk_size=chunk_size)
 
 
 def lsjson(remote_path, extra_flags=None, with_checksum=True):

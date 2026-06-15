@@ -260,12 +260,30 @@ def test_deep_missing_on_cat_error(monkeypatch):
     assert "not found" in r["detail"]
 
 
-def test_deep_no_sha256_is_mismatch(monkeypatch):
-    manifest = {"files": {"a.mov": {"size": 5, "checksums": {"md5": "abc"}}}}
-    cat_fn = _deep_setup(monkeypatch, {})  # cat never called
+def _md5(data: bytes) -> str:
+    import hashlib
+    return hashlib.md5(data).hexdigest()
+
+
+def test_deep_md5_fallback_ok(monkeypatch):
+    """MD5-only manifest entry (Drive-origin) should verify OK via cat_md5."""
+    data = b"frame"
+    manifest = {"files": {"a.mov": {"size": len(data), "checksums": {"md5": _md5(data)}}}}
+    cat_fn = _deep_setup(monkeypatch, {})   # sha256 path never called
+    md5_fn = lambda remote_path, extra_flags=None: _md5(data)
+    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn,
+                                  cat_md5_fn=md5_fn)[0]
+    assert r["status"] == "OK"
+    assert "md5" in r["detail"]
+
+
+def test_deep_no_hash_is_mismatch(monkeypatch):
+    """Entry with no sha256 or md5 should be MISMATCH, not a silent skip."""
+    manifest = {"files": {"a.mov": {"size": 5, "checksums": {}}}}
+    cat_fn = _deep_setup(monkeypatch, {})
     r = verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn)[0]
     assert r["status"] == "MISMATCH"
-    assert "No sha256" in r["detail"]
+    assert "No sha256 or md5" in r["detail"]
 
 
 def test_deep_logs_estimate(monkeypatch):
