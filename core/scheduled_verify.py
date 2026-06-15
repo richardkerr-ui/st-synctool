@@ -47,11 +47,14 @@ def build_launchd_plist(
     day: int = 1,
     hour: int = 3,
     minute: int = 0,
+    working_directory: str = "",
 ) -> bytes:
     """Build a launchd agent plist (monthly StartCalendarInterval) as bytes.
 
-    `program_args` is the full argv the agent runs (e.g. the app executable plus
-    SCHEDULED_VERIFY_FLAG). Defaults wake at 03:00 on the 1st of each month.
+    `program_args` is the full argv the agent runs — all paths must be absolute,
+    because launchd starts agents from / with no shell or PATH. `working_directory`
+    sets WorkingDirectory in the plist; pass the repo root on git installs so
+    Python's import machinery resolves modules correctly.
     """
     if not program_args:
         raise ValueError("program_args must not be empty")
@@ -63,6 +66,8 @@ def build_launchd_plist(
         "StandardOutPath": str(_verify.VERIFY_LOGS_DIR / "scheduled_verify.out.log"),
         "StandardErrorPath": str(_verify.VERIFY_LOGS_DIR / "scheduled_verify.err.log"),
     }
+    if working_directory:
+        spec["WorkingDirectory"] = working_directory
     return plistlib.dumps(spec)
 
 
@@ -78,6 +83,7 @@ def install_schedule(
     day: int = 1,
     hour: int = 3,
     minute: int = 0,
+    working_directory: str = "",
     runner: Callable = subprocess.run,
 ) -> Path:
     """Write the agent plist and load it via launchctl. Returns the plist path.
@@ -87,7 +93,8 @@ def install_schedule(
     """
     path = plist_path(label)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = build_launchd_plist(program_args, label=label, day=day, hour=hour, minute=minute)
+    data = build_launchd_plist(program_args, label=label, day=day, hour=hour, minute=minute,
+                               working_directory=working_directory)
     # Atomic write so a crash can't leave a half-written plist launchd might read.
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_bytes(data)
