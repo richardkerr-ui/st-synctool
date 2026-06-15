@@ -726,7 +726,7 @@ class MergeTab(QWidget):
         self._cp_local_mtime = QLabel()
         self._cp_local_hash  = QLabel()
         for lbl in (self._cp_local_size, self._cp_local_mtime, self._cp_local_hash):
-            lbl.setStyleSheet("font-family: monospace; font-size: 11px;")
+            lbl.setStyleSheet("font-family: Menlo, Monaco, 'Courier New', monospace; font-size: 11px;")
             local_col.addWidget(lbl)
         cols.addLayout(local_col)
 
@@ -742,7 +742,7 @@ class MergeTab(QWidget):
         self._cp_server_mtime = QLabel()
         self._cp_server_hash  = QLabel()
         for lbl in (self._cp_server_size, self._cp_server_mtime, self._cp_server_hash):
-            lbl.setStyleSheet("font-family: monospace; font-size: 11px;")
+            lbl.setStyleSheet("font-family: Menlo, Monaco, 'Courier New', monospace; font-size: 11px;")
             server_col.addWidget(lbl)
         cols.addLayout(server_col)
         cols.addStretch()
