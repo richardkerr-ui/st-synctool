@@ -396,6 +396,13 @@ def copyto(src, dst, src_flags=None, dst_flags=None, log_cb=None):
     return r.returncode == 0
 
 
+def copyto_result(src: str, dst: str) -> tuple:
+    """Like copyto but returns (ok: bool, stderr: str) so callers can classify errors."""
+    args = ["copyto", src, dst, "--checksum"]
+    r = _run(args, timeout=24 * 3600)
+    return r.returncode == 0, r.stderr or ""
+
+
 def _log_quota_classification(stderr, log_cb):
     """Surface a plain-language Google quota / rate-limit message (M10.2)."""
     from core import quota

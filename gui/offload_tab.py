@@ -375,9 +375,6 @@ class SummaryDialog(QDialog):
                 else:
                     color = theme.VERDICT_MUTED
                     msg   = f"• {src_label} — Safe to eject (not yet cleared to format)"
-            elif all_done:
-                color = theme.VERDICT_CORAL
-                msg   = f"⚠ {src_label} — Errors on some destinations — review before ejecting"
             else:
                 color = theme.VERDICT_MUTED
                 msg   = f"• {src_label} — Not all destinations completed"

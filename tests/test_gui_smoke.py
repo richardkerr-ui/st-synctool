@@ -494,7 +494,8 @@ class TestMainWindowSmoke:
     # M9.1: pending-activity banner
     def test_pending_banner_hidden_when_nothing_pending(self, window, monkeypatch):
         import gui.main_window as mw
-        fake = type("S", (), {"escalate": False, "status_line": lambda self: None,
+        fake = type("S", (), {"escalate": False, "last_ok": None,
+                              "status_line": lambda self: None,
                               "banner": lambda self: None})()
         monkeypatch.setattr(mw, "_LogShipWorker", mw._LogShipWorker)
         monkeypatch.setattr("core.log_sync.pending_status", lambda *a, **k: fake)
@@ -502,7 +503,7 @@ class TestMainWindowSmoke:
         assert not window._pending_banner.isVisible()
 
     def test_pending_banner_shows_when_pending(self, window, monkeypatch):
-        fake = type("S", (), {"escalate": False,
+        fake = type("S", (), {"escalate": False, "last_ok": None,
                               "status_line": lambda self: "Activity log: 2 reports waiting to upload",
                               "banner": lambda self: None})()
         monkeypatch.setattr("core.log_sync.pending_status", lambda *a, **k: fake)
@@ -798,6 +799,22 @@ class TestCompletionBanner:
         b.dismiss()
         assert b.isHidden()
 
+    def test_subtitle_renders_amber_html_when_present(self, qtbot):
+        from gui.completion_banner import CompletionBanner
+        from PyQt6.QtCore import Qt
+        b = CompletionBanner(); qtbot.addWidget(b)
+        b.show_result("Transfer complete", ok=True, subtitle="3 files used rclone fallback")
+        assert "3 files used rclone fallback" in b.msg.text()
+        assert b.msg.textFormat() == Qt.TextFormat.RichText
+
+    def test_no_subtitle_keeps_plain_text(self, qtbot):
+        from gui.completion_banner import CompletionBanner
+        from PyQt6.QtCore import Qt
+        b = CompletionBanner(); qtbot.addWidget(b)
+        b.show_result("All good", ok=True)
+        assert b.msg.text() == "All good"
+        assert b.msg.textFormat() == Qt.TextFormat.PlainText
+
     def test_every_job_tab_has_a_completion_banner(self, qtbot, monkeypatch):
         from gui.completion_banner import CompletionBanner
         from gui.transfer_tab import TransferTab
@@ -817,6 +834,67 @@ class TestCompletionBanner:
         assert isinstance(v._banner, CompletionBanner)
         assert isinstance(m._banner, CompletionBanner)
         assert isinstance(o._completion_banner, CompletionBanner)
+
+
+# ---------------------------------------------------------------------------
+# SummaryDialog eject-gate — green only when cleared; gray when all_done but
+# not cleared (the #10 fix).  Tests construct the dialog directly with
+# synthetic CellResult fixtures so no actual offload I/O is needed.
+# ---------------------------------------------------------------------------
+
+class TestSummaryDialogEjectGate:
+    """SummaryDialog.eject label color reflects clearance, not just completion."""
+
+    def _make_results(self, src_label, dest_labels, state, verified=None):
+        from core.offload import CellResult, CellState
+        s = getattr(CellState, state)
+        return [CellResult(source_label=src_label, dest_label=d, state=s,
+                           files_copied=1, verified=verified)
+                for d in dest_labels]
+
+    def test_green_when_all_done_and_cleared(self, qtbot):
+        """Two DONE destinations satisfy clearance — eject label is green."""
+        from gui.offload_tab import SummaryDialog
+        from gui import theme
+        results = self._make_results("A001", ["NAS1", "NAS2"], "DONE", verified=True)
+        dlg = SummaryDialog(results, log_path="", prior_map=None)
+        qtbot.addWidget(dlg)
+        labels = [w for w in dlg.findChildren(__import__("PyQt6.QtWidgets", fromlist=["QLabel"]).QLabel)
+                  if "Safe to eject" in w.text()]
+        assert labels, "eject label not found"
+        assert theme.VERDICT_GREEN in labels[0].styleSheet()
+
+    def test_gray_when_all_done_but_single_dest_not_cleared(self, qtbot):
+        """Single DONE destination — all_done but clearance requires ≥2 copies."""
+        from gui.offload_tab import SummaryDialog
+        from gui import theme
+        results = self._make_results("A001", ["NAS1"], "DONE", verified=True)
+        dlg = SummaryDialog(results, log_path="", prior_map=None)
+        qtbot.addWidget(dlg)
+        labels = [w for w in dlg.findChildren(__import__("PyQt6.QtWidgets", fromlist=["QLabel"]).QLabel)
+                  if "Safe to eject" in w.text()]
+        assert labels, "eject label not found"
+        assert theme.VERDICT_MUTED in labels[0].styleSheet()
+        assert theme.VERDICT_GREEN not in labels[0].styleSheet()
+
+    def test_muted_when_a_dest_failed(self, qtbot):
+        """One FAILED result means all_done is False — label is muted, not green."""
+        from gui.offload_tab import SummaryDialog
+        from core.offload import CellResult, CellState
+        from gui import theme
+        results = [
+            CellResult(source_label="A001", dest_label="NAS1", state=CellState.DONE,
+                       files_copied=1, verified=True),
+            CellResult(source_label="A001", dest_label="NAS2", state=CellState.FAILED,
+                       files_copied=0),
+        ]
+        dlg = SummaryDialog(results, log_path="", prior_map=None)
+        qtbot.addWidget(dlg)
+        QLabel = __import__("PyQt6.QtWidgets", fromlist=["QLabel"]).QLabel
+        labels = [w for w in dlg.findChildren(QLabel)
+                  if "Not all destinations" in w.text()]
+        assert labels, "incomplete-destinations label not found"
+        assert theme.VERDICT_GREEN not in labels[0].styleSheet()
 
 
 # ---------------------------------------------------------------------------

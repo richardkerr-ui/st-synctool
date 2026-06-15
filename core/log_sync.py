@@ -170,6 +170,7 @@ def ship_logs(
     todo = pending_files(base_dir, ledger, subdirs)
     n_shipped = n_failed = 0
     now_iso = now.isoformat()
+    config_error_seen = False
 
     for rel, abs_path, size in todo:
         key = _file_key(rel, size)
@@ -179,6 +180,8 @@ def ship_logs(
             n_failed += 1
             pending_since.setdefault(key, now_iso)  # remember when it first failed
             log(f"  Log shipping: deferred {rel} ({e})", "warning")
+            if not _is_network_error(str(e)):
+                config_error_seen = True
             continue
         shipped[key] = {"rel": rel, "size": size, "shipped_at": now_iso}
         pending_since.pop(key, None)
@@ -190,6 +193,19 @@ def ship_logs(
         if k in shipped or k not in live_keys:
             pending_since.pop(k, None)
 
+    # Only write last_attempt when the outcome is conclusive:
+    # - Shipped something or had no failures: ok=True
+    # - A failure that isn't a network error (bad remote name, auth, permissions): ok=False
+    # - Pure network failures (offline, timeout): leave last_attempt untouched so a
+    #   transient offline run never fires the "check remote config" hint.
+    if n_shipped > 0 or n_failed == 0:
+        ledger["last_attempt"] = {
+            "at": now_iso, "ok": True, "shipped": n_shipped, "failed": n_failed,
+        }
+    elif config_error_seen:
+        ledger["last_attempt"] = {
+            "at": now_iso, "ok": False, "shipped": n_shipped, "failed": n_failed,
+        }
     _write_ledger(ledger_path, ledger)
     if n_shipped:
         log(f"  Log shipping: uploaded {n_shipped} file(s)", "info")
@@ -230,10 +246,23 @@ def ship_if_configured(
         return None
 
 
+_NETWORK_ERROR_PATTERNS = (
+    "dial tcp", "connection refused", "no such host", "i/o timeout",
+    "connection reset", "context deadline exceeded",
+    "temporary failure in name resolution", "network is unreachable",
+    "tls handshake timeout", "eof",
+)
+
+
+def _is_network_error(msg: str) -> bool:
+    m = msg.lower()
+    return any(p in m for p in _NETWORK_ERROR_PATTERNS)
+
+
 def _default_copy(local_abs: str, remote_dst: str) -> None:
-    ok = rclone_bridge.copyto(local_abs, remote_dst)
+    ok, stderr = rclone_bridge.copyto_result(local_abs, remote_dst)
     if not ok:
-        raise RuntimeError(f"rclone copyto failed: {remote_dst}")
+        raise RuntimeError(stderr or f"rclone copyto failed: {remote_dst}")
 
 
 # --------------------------------------------------------------------------- #
@@ -245,12 +274,17 @@ class PendingStatus:
     count: int
     oldest_age_days: int
     escalate: bool          # True when something has waited >= PENDING_BANNER_DAYS
+    last_ok: Optional[bool] = None   # None = no attempt recorded yet
+    last_at: Optional[str] = None    # ISO timestamp of last attempt
 
     def status_line(self) -> Optional[str]:
         if self.count == 0:
             return None
         noun = "report" if self.count == 1 else "reports"
-        return f"Activity log: {self.count} {noun} waiting to upload"
+        base = f"Activity log: {self.count} {noun} waiting to upload"
+        if self.last_ok is False:
+            return base + " — last upload failed, check remote config"
+        return base
 
     def banner(self) -> Optional[str]:
         if not self.escalate:
@@ -286,8 +320,14 @@ def pending_status(
         age = (now - since).days
         oldest_days = max(oldest_days, age)
 
+    last = ledger.get("last_attempt")
+    last_ok = last.get("ok") if isinstance(last, dict) else None
+    last_at = last.get("at") if isinstance(last, dict) else None
+
     return PendingStatus(
         count=len(todo),
         oldest_age_days=oldest_days,
         escalate=oldest_days >= PENDING_BANNER_DAYS,
+        last_ok=last_ok,
+        last_at=last_at,
     )

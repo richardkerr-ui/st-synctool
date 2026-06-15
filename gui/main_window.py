@@ -315,7 +315,12 @@ class MainWindow(QMainWindow):
         if not text:
             self._pending_banner.setVisible(False)
             return
-        border = theme.ACCENT_CORAL if status.escalate else theme.CHARCOAL_LIGHT
+        if status.escalate:
+            border = theme.ACCENT_CORAL
+        elif status.last_ok is False:
+            border = theme.ACCENT_GOLD
+        else:
+            border = theme.CHARCOAL_LIGHT
         self._pending_banner.setStyleSheet(f"""
             QWidget#pendingBanner {{
                 background-color: {theme.CHARCOAL_LIGHT};
