@@ -23,10 +23,13 @@ else
   echo "✓ Homebrew already installed"
 fi
 
-# 2. Install Python and rclone
+# 2. Install Python 3.11 and rclone
+# Pin to 3.11 — CI runs 3.11, build.sh defaults to /opt/homebrew/bin/python3.11.
+# Do not use the unversioned 'python' formula: it tracks latest (currently 3.14)
+# and PyInstaller/pyobjc wheel availability on 3.14 is unverified as of 2026-06.
 echo ""
-echo "Installing Python and rclone..."
-brew install python rclone
+echo "Installing Python 3.11 and rclone..."
+brew install python@3.11 rclone
 
 # 3. Create virtual environment
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -34,10 +37,11 @@ cd "$SCRIPT_DIR"
 
 if [[ ! -d .venv ]]; then
   echo ""
-  echo "Creating virtual environment..."
-  python3 -m venv .venv
+  echo "Creating virtual environment (Python 3.11)..."
+  python3.11 -m venv .venv
 else
   echo "✓ Virtual environment already exists"
+  echo "  (If it was built with a different Python, delete .venv and re-run.)"
 fi
 
 # 4. Install Python dependencies

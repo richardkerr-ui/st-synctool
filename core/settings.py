@@ -26,6 +26,12 @@ SETTINGS_PATH = Path.home() / ".config" / "st_synctool" / "config.json"
 # (resolved to an rclone connection string via the folder id), a full rclone base
 # ("gdrive:Folder"), or a bare folder name (derived as "<active_remote>:<name>").
 # A value typed in Settings overrides it; empty turns org shipping off.
+# Owner: Richard Kerr (richard.kerr@signaltheory.com). If this folder is deleted,
+# renamed, or loses shared-drive permissions, every cart fails silently on each
+# ship attempt. Files accumulate in the pending ledger and the 7-day pending banner
+# surfaces after one week of failures ("N reports waiting to upload"). That is the
+# current alert path — there is no faster signal. Before expanding beta, add a
+# startup connectivity probe (rclone lsd on this path, 5s timeout, warn on failure).
 DEFAULT_ACTIVITY_BASE = "https://drive.google.com/drive/folders/1bRGj7XQdAKBhjUG8gHqnmbmwvkE6--Ls"
 
 # Known setting keys and their defaults. Unknown keys are preserved on write but

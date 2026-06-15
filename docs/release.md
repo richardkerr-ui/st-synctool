@@ -32,11 +32,24 @@ subprocess call (`rclone`, `ffmpeg`, …) finds the bundled copy first and falls
 back to a system install otherwise. `utils.resources.find_binary()` does the
 same resolution for explicit lookups. Running from source is unaffected.
 
+## Python version requirement
+
+**Build and dev environments must use Python 3.11.** This matches the CI runner
+(`python-version: '3.11'` in `.github/workflows/ci.yml`). Using a different
+version means shipping a binary the test suite never validated.
+
+- `build.sh` defaults to `/opt/homebrew/bin/python3.11` (overridable via `PYTHON=`).
+- `setup.sh` installs `python@3.11` via Homebrew and creates the venv with `python3.11`.
+- Do not use the unversioned `python` Homebrew formula — it currently resolves to
+  3.14, for which PyInstaller and pyobjc wheel availability is unverified.
+
+If you have a `.venv` built with a different Python, delete it and re-run `setup.sh`.
+
 ## Build (unsigned)
 
 ```bash
-brew install rclone        # so it gets bundled
-./build.sh                 # → dist/ST SyncTool.app and dist/ST_SyncTool_<version>.dmg
+brew install python@3.11 rclone   # python@3.11 required; rclone gets bundled
+./build.sh                         # → dist/ST SyncTool.app + dist/ST_SyncTool_<version>.dmg
 ```
 
 `build.sh` runs PyInstaller against `STSyncTool.spec`, then builds a

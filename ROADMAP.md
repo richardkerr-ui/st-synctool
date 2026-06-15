@@ -2,17 +2,9 @@
 
 Structured for execution via `/loop`. Milestones are ordered by dependency: hardening first, then features. Each work item lists scope, acceptance criteria and tests. **Tests are the definition of done for every item.** All new logic lives in `core/` or `utils/`, never in `gui/`.
 
-## Current state (measured 2026-06-12)
-
-- 996 non-GUI tests passing. GUI (pytest-qt) tests must run on macOS, they cannot run in the Linux sandbox (PyQt6 unavailable).
-- Coverage on `core/` + `utils/`: **77%** overall.
-- Weakest modules: `rclone_bridge.py` 11%, `merge_logic.py` 0%, `manifest_helpers.py` 37%, `setup_checks.py` 40%, `oauth_config.py` 43%, `gdrive_utils.py` 63%.
-- Top untested high-risk functions per code-review-graph: `amphetamine.end_session` (0.85), `projects._load`, `transfer.log`, `gdrive_utils.is_gdrive_url`, `gdrive_url_to_rclone`, `oauth_config.get_active_remote`, `rclone_bridge._run`, `TransferError`.
-- Shipped and closed: Phase 1 setup wizard, Phase 2 byte-level progress, Phase 3 conflict resolution UI, SCHEMA_INTEROP_SPEC, Layer 3 property-based tests, install.sh.
-
 ### Loop session notes
 
-- **GUI refresh (cosmetic, post-M11) — item 2 done 2026-06-13:** colours **+ glyphs** on verdicts/states/tiles. Colours match `docs/mockups/app_redesign.html`; we intentionally diverge from the mockup's colour-only treatment by adding ✓/⚠/✗/· glyphs so colour is never the sole signal (colour-blind accessibility — Richard's call). New pure `core/verdict_style.py` (`verdict_severity` + `verdict_symbol`/`severity_symbol`; buckets ok=✓ green #3DBB8E · warn=⚠ gold #F6BE00 · error=✗ coral #EE5340 · neutral=· muted #AEB1B3; unknown→neutral) is the single source of truth; `gui/theme.py` adds `VERDICT_*` tokens (incl. magenta #C0468C for the Mismatch tile), `severity_color()` and `verdict_color()`. Wired: History verdict column coloured + glyph-prefixed (`_style_verdict_cell`); Verify result tiles recoloured (OK green · Extra gold · Missing coral · Mismatch magenta) with the mockup's 30×4 accent bar above each number **and** a glyph in each label; Offload eject + clearance lines migrated to the shared brighter tokens (clearance not-cleared is now gold/warn per the mockup, was coral). 11 tests in `test_verdict_style.py` (pass). GUI rendering covered by CI. **2026-06-13: the local-run blocker is fixed** — `core/quota.py` now has `from __future__ import annotations`, so the stale Py3.9 `.venv` can import the app and run the pytest-qt suite locally (`QT_QPA_PLATFORM=offscreen python -m pytest tests/test_gui_smoke.py` → 49 passed). Note the `.venv` is a stale Py3.9; a fresh `setup.sh` builds it with the system `python3` (3.14). `python main.py` from `.venv` launches the GUI on macOS for live review.
+- **GUI refresh (cosmetic, post-M11) — item 2 done 2026-06-13:** colours **+ glyphs** on verdicts/states/tiles. Colours match `docs/mockups/app_redesign.html`; we intentionally diverge from the mockup's colour-only treatment by adding ✓/⚠/✗/· glyphs so colour is never the sole signal (colour-blind accessibility — Richard's call). New pure `core/verdict_style.py` (`verdict_severity` + `verdict_symbol`/`severity_symbol`; buckets ok=✓ green #3DBB8E · warn=⚠ gold #F6BE00 · error=✗ coral #EE5340 · neutral=· muted #AEB1B3; unknown→neutral) is the single source of truth; `gui/theme.py` adds `VERDICT_*` tokens (incl. magenta #C0468C for the Mismatch tile), `severity_color()` and `verdict_color()`. Wired: History verdict column coloured + glyph-prefixed (`_style_verdict_cell`); Verify result tiles recoloured (OK green · Extra gold · Missing coral · Mismatch magenta) with the mockup's 30×4 accent bar above each number **and** a glyph in each label; Offload eject + clearance lines migrated to the shared brighter tokens (clearance not-cleared is now gold/warn per the mockup, was coral). 11 tests in `test_verdict_style.py` (pass). GUI rendering covered by CI. **2026-06-13: the local-run blocker is fixed** — `core/quota.py` now has `from __future__ import annotations`, so the stale Py3.9 `.venv` can import the app and run the pytest-qt suite locally (`QT_QPA_PLATFORM=offscreen python -m pytest tests/test_gui_smoke.py` → 49 passed). Note the `.venv` is a stale Py3.9; a fresh `setup.sh` now pins `python3.11` (see Python versions note below). `python3.11 main.py` from a fresh `.venv` launches the GUI on macOS for live review.
 - **GUI refresh — item 1 done 2026-06-13:** scroll rollout to Transfer/Verify/Offload. Each tab's `_build_ui` now wraps its content in a `QScrollArea` (`setWidgetResizable(True)`, `NoFrame`, horizontal scrollbar off) exactly like Merge — a short window scrolls instead of squishing the controls/log; a tall window lets the log/diff expand. Widget attributes (`self.log`, tiles, etc.) unchanged, so smoke tests are unaffected.
 - **GUI refresh — item 3 done 2026-06-13:** table zebra striping + row hover. New `theme.table_stylesheet()` (header #222628/muted, charcoal rows, #24282A zebra, #2C3033 hover, muted slate selection #33414C — never the bright accent) is the shared look. Applied to the Merge diff table (replaced its bespoke inline QSS) and the History table (previously unstyled — added `setAlternatingRowColors` + the shared sheet). Both tables get `setMouseTracking(True)` so `::item:hover` repaints live.
 - **GUI refresh — item 4 done 2026-06-13:** header discoverability. The three header actions (Settings / Report a Problem / Tour) were near-invisible (#888 grey, triplicated inline QSS). New shared `theme.header_chip_style()` matched to the mockup chip (brighter #9A9DA0 text, charcoal-light bg, hover→cream), a pointing-hand cursor, and a leading glyph each (⚙ Settings · ✎ Report a Problem · ? Tour). Updated `test_settings_button_present` from an exact-text assert to a substring check (the glyph is intended copy, not a regression).
@@ -25,12 +17,13 @@ Structured for execution via `/loop`. Milestones are ordered by dependency: hard
   - **History sortable columns:** `setSortingEnabled`; `_SortItem` sorts When by ISO timestamp (not display text); default newest-first; populate toggles sorting off/on; custody-log filename stored on the When item (`_LOG_ROLE`) so double-click survives a re-sort.
   - **Window-state persistence:** `MainWindow` saves/restores geometry + active tab via `QSettings` (closeEvent / `_restore_window_state`).
   - **Completion toasts:** Transfer and Verify now fire a success/warn toast on finish (Offload keeps its SummaryDialog — the safe-to-format review).
-  - Tests: relative/full-timestamp + sorting + log-survives-sort + project/operation-tint; full suite **1758 passed / 1 skipped** locally.
-- **GUI refresh — item 7 (friction + inline confirms) done 2026-06-13:** new `gui/toast.py::show_toast` (non-blocking, colour-coded, auto-dismiss) replaces routine "it worked" modals — Merge "Apply complete" / "Nothing to do" and the Report-a-Problem "saved" confirmation are now toasts (Finder already reveals the zip). Destructive friction: the Merge apply confirm now counts deletions, shows a ⚠ "N file(s) will be permanently DELETED" warning, and defaults to Cancel so a stray Return can't trigger a delete (Mirror mode already had its coral box + confirm). Error/decision modals retained. 1 toast smoke test. **GUI refresh COMPLETE — all 7 items done.** Full suite 1747 passed / 1 skipped locally (GUI incl.).
-- **Next item: M11.3 (wire the M9 cluster onto Settings).** M11.1 (settings store) and M11.2 (Settings dialog) are DONE — the keystone exists: `core.settings.activity_remote_base()` / `log_shipping_enabled()` / `activity_log_configured()` are now configurable via the Settings header button. M11.3 finishes the previously-blocked integration: M9.1 shipping triggers (launch + post-op) reading `activity_log_configured()`, M9.2 `append_activity` call sites in offload/transfer/merge/verify, and the M9.3 GUI History tab + org refresh. Then M7.1 (last, blocked on Apple Dev account; skip until the account exists).
-- **Baseline 2026-06-13 (latest):** non-GUI suite **1375 passed** (after M7.3), core+utils coverage **90%**. Full suite on CI (macOS, incl. GUI) **1564 passed / 91%** (run 27470092097). Last commit `b4ad03c` (M7.3), pushed to `origin/main`, CI green.
+  - Tests: relative/full-timestamp + sorting + log-survives-sort + project/operation-tint.
+- **GUI refresh — item 7 (friction + inline confirms) done 2026-06-13:** new `gui/toast.py::show_toast` (non-blocking, colour-coded, auto-dismiss) replaces routine "it worked" modals — Merge "Apply complete" / "Nothing to do" and the Report-a-Problem "saved" confirmation are now toasts (Finder already reveals the zip). Destructive friction: the Merge apply confirm now counts deletions, shows a ⚠ "N file(s) will be permanently DELETED" warning, and defaults to Cancel so a stray Return can't trigger a delete (Mirror mode already had its coral box + confirm). Error/decision modals retained. 1 toast smoke test. **GUI refresh COMPLETE — all 7 items done.**
+- **Current baseline (2026-06-15, after M12.6):** full suite **1810 passed / 1 skipped**, core+utils coverage **91%** (CI macOS runner). This is the single authoritative count — earlier counts in these notes are historical steps, not current state.
 - **CI now runs the full pytest-qt GUI suite** on every push (macOS runner, `QT_QPA_PLATFORM=offscreen`). When adding GUI code that starts a worker/modal in `MainWindow.__init__`, defer it via `QTimer` AND suppress it in the `test_gui_smoke.py` MainWindow fixture (monkeypatch the worker's `start`), or CI aborts with exit 134 (pytest-qt pumps events at setup). After a GUI-touching change, push and watch the run: `gh run list --workflow=ci.yml --limit 1` then `gh run watch <id> --exit-status`.
-- **M9.1+M9.2 are core-complete** (`core/log_sync.py`, `core/activity_index.py`) but the integration (fire `ship_logs` after each op + on launch, a Settings field for the shared Drive remote base + opt-out toggle, GUI status line/banner, `append_activity` call sites, manual e2e) is **blocked on a Settings remote that does not exist yet** — do not attempt until a Settings remote-config story exists; it rides with M9.3.
+- **~~M9.1+M9.2 blocked on Settings remote~~** — STALE, do not follow. M11.1/M11.2 shipped the settings store + dialog (2026-06-13); M11.3 wired the full M9 cluster. M9.1 shipping and M9.2 activity appends are integrated. The only remaining M9 work is the in-app e2e smoke (see Manual checks).
+- **Python versions — known drift, needs resolution before M7.1:** `.venv` is Py3.9 (stale, built by old `setup.sh`), CI runs Py3.11, macOS system `python3` is 3.14. PyInstaller builds against whatever `python3` resolves to at build time — on 3.14 that is untested and PyQt6/pyobjc wheels may be absent or broken. **Pin build and local dev to Py3.11 to match CI before cutting a signed DMG.** Update `setup.sh` to call `python3.11` explicitly and document the requirement in `docs/release.md`.
+- **Hardcoded shared Drive folder ID `1bRGj7XQdAKBhjUG8gHqnmbmwvkE6--Ls` in `core/settings.py`:** if this folder breaks mid-beta, every cart silently accumulates pending logs. Nothing surfaces until someone reads History and notices a stale cart — by which point multiple shoots may have no org record. The 7-day pending banner is the current alert path; it is too slow and doesn't distinguish "offline, normal, will retry" from "configured but failing repeatedly." **Deferred real fix (post-beta, needs code):** a launch-time warning when pending files are aging and `activity_log_configured()` is true. Implementation: use `first_seen` age from the existing ledger (free, no new state), warn when oldest pending file exceeds a threshold (e.g. 48h). **Known limitation of this approach:** age cannot distinguish "folder broken, ship attempts failing" from "DIT genuinely offline on a remote shoot." Both produce aging pending files. A DIT offline for 48h+ on a legitimate shoot trips the same warning as a broken folder. This contradicts the design principle that offline is normal — it will produce false positives on extended remote shoots. True separation requires recording ship attempt outcomes (attempted + failed vs never attempted due to no network), which needs a new ledger field. That is more implementation than age-based warning justifies at this scope. **Accept as-stated:** warns on pending age ≥48h with `activity_log_configured()` true; genuine extended-offline carts also warn. That is a nudge, not a hard block — a DIT can dismiss it and the warning is honest ("N reports waiting"). Record it as "warns on pending-too-long, not as a clean configured-vs-offline distinction." The pre-beta manual gate validates day-zero state only; it does not close the mid-beta breakage hole.
 - **Pushing:** commit locally by default. Pushing to `main` requires explicit user OK in interactive sessions (the auto-approver blocks unprompted pushes); in an autonomous 3 AM run, commit locally and report — do not assume push permission.
 - Rebuild the graph each session: `code-review-graph build --repo . --data-dir /tmp/crg_<uid>`. Stale `/tmp/crg_data` dirs from prior sessions may be owned by another uid and unwritable, so use a fresh uniquely named dir and query `graph.db` read-only.
 - Run `/cover-risk` at the start of any milestone touching `core/` to re-rank targets.
@@ -40,28 +33,46 @@ Structured for execution via `/loop`. Milestones are ordered by dependency: hard
 
 ---
 
-## Manual checks outstanding (single source of truth, updated 2026-06-13)
+## Manual checks outstanding (single source of truth, updated 2026-06-15)
 
 The only checks still needing Richard. The GUI smoke/worker tests that older findings tag "needs one manual Mac run" are **no longer manual** — M7.2 CI runs the full pytest-qt suite on every push, so those are retired; do not re-run them by hand. What remains genuinely needs real rclone against real Drive, real hardware, or an account that CI cannot provide.
 
 **Before beta (provisioning, Richard):**
 - [x] **Shared Drive folder created + org activity wired 2026-06-13.** `core/settings.DEFAULT_ACTIVITY_BASE` is set to the shared Drive folder URL; `_resolve_base` converts it to the rclone connection string `gdrive,root_folder_id=1bRGj7XQdAKBhjUG8gHqnmbmwvkE6--Ls:` (reusing the M3 `gdrive_url_to_connstr` helper), so every install ships with zero per-tester setup. The Settings field accepts a Drive URL / rclone base / folder name and overrides the default. **Real-rclone smoke PASSED 2026-06-13:** `rclone copy` into `gdrive,root_folder_id=1bRGj7XQdAKBhjUG8gHqnmbmwvkE6--Ls:smoketest/` → "Copied (new)"; `rclone lsjson` (the verb `find_activity_shards` uses) listed it back; cleaned up. `root_folder_id` works for this Shared Drive folder — no team_drive wrinkle. The app ships/pulls with these exact verbs, so the M9.1 push + M9.3 list mechanism is confirmed at the rclone level. Optionally point Synology Cloud Sync at the same folder so the NAS mirrors it.
 
-**Actionable now (nothing blocking it):**
-- [ ] **M5.1 deep-verify e2e** — tick "Deep verify (downloads files)" against a junk Drive folder, confirm files stream-download, hash and report.
-- [ ] **M10.3 ASC MHL external-tool round-trip** — generate a `.mhl` (tick "Export ASC MHL" on a transfer/offload), import it into Silverstack or YoYotta and confirm it verifies the files. Schema validation against the published XSD is already automated; this is the third-party-tool confirmation.
-- [x] **M7.4 guide read-through** — `docs/QUICKSTART.md` approved by Richard 2026-06-13.
+**Pre-beta gate (full list — nothing ships until all pass):**
+
+*Code milestones (must land and pass CI):*
+- [ ] M13 complete (xxh128 rewrite, paranoid removed, Merkle root)
+- [ ] M14 complete (card-wipe gate, cold-read verify, atomic ledger writes) — awaiting approval
+- [ ] M15 complete (verified-scope clarification, rclone `--checksum` audit) — awaiting approval
+
+*Signing (Richard — blocked on Apple account):*
+- [ ] **M7.1 sign + notarize + fresh-Mac launch** — build scripts + unsigned DMG done (2026-06-13). Remaining: code-sign/notarize/staple per `docs/release.md`, then fresh-Mac acceptance launch. Also gates beta-tester recruitment.
+
+*Hard prerequisites (resolve before building the release DMG):*
+- [ ] **Python 3.11 pin confirmed on signing machine** — `setup.sh` now pins `python@3.11`; `build.sh` defaults to `/opt/homebrew/bin/python3.11`. Confirm both resolve correctly on the machine that cuts the signed DMG. See `docs/release.md`.
+- [ ] **Shared Drive folder connectivity probe** — confirm folder `1bRGj7...` is accessible from a fresh rclone config before distributing. Day-zero check only; mid-beta breakage remains an open hole (see loop notes).
+- [ ] **M5.3 toggle decision** — ship now or keep deferred? Core is built; only the Settings UI toggle is missing. Decide before recruit.
+
+*Manual checks (all must pass after M13/M14/M15 land):*
+- [ ] **M9.1 in-app log-shipping e2e** — do a real offload, relaunch, confirm files land under `{base}/{workstation}/{user}/` and status line clears. Feature confirmation, not polish — in-app trigger has never run against real Drive.
+- [ ] **M5.1 deep-verify e2e** — run after M13. Compare key changed (sha256 → xxh128 / md5 fallback); re-run required.
+- [ ] **M10.3 ASC MHL round-trip** — run after M13. Export now writes `<xxh128>` not `<xxh3>`; re-validate in Silverstack/YoYotta.
+- [ ] **M12.1 space preflight block dialog** — trigger a shortfall, confirm wording is clear.
+- [ ] **M12.2 duplicate-card warn dialog** — re-insert a prior-offloaded card, confirm warn-and-confirm fires.
+- [ ] **M14.2 real-device cold-read experiment** — write to flash, corrupt on-disk via raw block-device write while page cache holds good copy, run verify, confirm it detects corruption (read came off device not cache). Out-of-band divergence is the proof; latency is supporting evidence only.
+- [ ] **M15.1 copy-path metadata audit** — for each copy path (shutil local, rclone local-to-Drive, rclone local-to-NAS, rclone Drive-to-Drive): record what xattrs/resource forks actually survive. Do not assume shutil.copy2 strips xattrs — test it. Find where the real loss is before scoping a fix.
+- [ ] **M15.2 rclone backend hash audit** — for each supported backend (Drive, local APFS, exFAT, NAS SMB/NFS): confirm `--checksum` produces a hash comparison or falls back to size+modtime, and document which. Any fallback backend must surface a loud error in the custody log.
 
 **Blocked until a prerequisite lands (do not attempt yet):**
-- [x] **M9.1 log-shipping** — rclone write into the shared Drive folder confirmed 2026-06-13 (see provisioning note). In-app trigger uses the same `copyto`; an end-to-end in-app run (do a real offload, confirm files land under `{base}/{workstation}/{user}/`) is the only remaining polish.
-- [x] **M9.3 org-refresh** — `rclone lsjson` on the shared folder confirmed 2026-06-13 (the verb the refresh uses). Full in-app refresh with a second machine's shard present is optional polish.
+- [x] **M9.3 org-refresh** — `rclone lsjson` on the shared folder confirmed 2026-06-13. Full in-app refresh with a second machine's shard present is optional polish.
 - [ ] **M5.3 scheduled-verify e2e** — enable the schedule, confirm the launchd agent loads, force a failing archive, confirm the next-launch banner appears and dismisses. Blocked on M7.1 packaging (needs a stable `.app` executable path).
-- [ ] **M7.1 sign + notarize + fresh-Mac launch** — build scripts + unsigned DMG done and validated (2026-06-13). Remaining: code-sign/notarize/staple per `docs/release.md` then the fresh-Mac acceptance launch. Blocked on an Apple Developer account ($99/yr, Richard to set up). Also gates beta-tester recruitment.
-- [ ] **M8 AI assist** — one live API check per feature. On hold (not scheduled).
+- [ ] **M8 AI assist** — on hold (not scheduled).
 
 **Optional "does it feel right" visual checks (fully test-covered, not obligations):**
 - [ ] M7.3 — feedback save dialog + Finder reveal of the zip.
-- [ ] M5.1 / M5.2 / M5.4 — Drive checkbox, "Verify All Projects" button, the persisted verify-report file landing on disk.
+- [ ] M5.2 / M5.4 — "Verify All Projects" button, the persisted verify-report file landing on disk.
 
 **Already confirmed (do not re-do):**
 - [x] **M3 Drive→Drive e2e** — Richard confirmed 2026-06-12.
@@ -389,9 +400,217 @@ A bare percentage does not let a DIT schedule the rest of the set. Surface bytes
 
 ---
 
+## M13: Hashing architecture rewrite (approved 2026-06-15)
+
+Pre-launch opportunity: no USER manifests exist yet, so there is no corpus migration and no backward-compat debt for shipped data. **Test and fixture debt is real:** sha256 fixtures, paranoid-mode tests, the M1.4 writer-reader matrix, schema contract tests, and Layer 3 property tests all assert the old keys — these require systematic rewrite, not just a key rename. Do not conflate "no user migration" with "no work."
+
+**M13 pushes the pre-beta gate — it is not additive.** Two already-completed manual checks test code that M13 changes and must be re-run against new output before recruiting testers:
+- **M5.1 deep-verify** — M13.1 removes the Drive sha256-download branch, which IS the deep-verify comparison path. The replacement (download → xxh128 → compare to manifest xxh128) is specified in M13.1. Must re-run against real Drive after M13 lands.
+- **M10.3 MHL round-trip** — post-M13 the export writes `<xxh128>` not `<xxh3>`. Different MHL element; Silverstack/YoYotta must be re-validated against xxh128 output.
+
+**Design decisions (approved 2026-06-15):**
+- **Hot path (transfers, offloads, merge copy-verify):** xxh128 (`xxhash.xxh3_128()`). I/O-bound operations do not benefit from a cryptographic hash; 128-bit width puts the accidental collision birthday bound at ~2⁶⁴ items.
+- **GDrive transfers:** compute both xxh128 and md5 locally before upload, store both in the manifest entry. MD5 stays as the rclone transport-verification key; xxh128 is the content-identity key used by comparisons, merge and MHL export. **xxh128 is not universal:** Drive-to-Drive rclone paths (no local bytes) remain MD5-only and cannot be changed without downloading — this asymmetry is intentional and must be documented in SCHEMA_INTEROP_SPEC and handled explicitly in `preferred_algorithm` fallback logic.
+- **Record layer (activity log):** no record hashing. Trust model is the team + Drive access controls + Drive version history — not a technical guarantee. SHA-256 chaining is deferred indefinitely: it has no consumer or UI today, and the call to drop it must remain true for the tool's whole future (chaining cannot be retrofitted onto past records). If a future client chain-of-custody requirement arises, that is a new feature with a real spec behind it. **Do not describe the log as tamper-evident or append-only — it is neither; Drive files are mutable and rclone only guarantees copy-time correctness.**
+- **Folder verification:** xxh128 Merkle tree. Hash files, hash the hashes up to a root. Gives a single root digest per folder and enables incremental diffing (only descend where hashes differ), which directly feeds the merge pre-scan.
+- **Paranoid verification checkbox:** killed. Its guarantee (download-and-rehash immediately after upload) is superseded by the new flow: xxh128 computed before upload and stored in the manifest, so the Verify tab's deep-verify provides the same assurance on demand and deferred. All `paranoid_verify` parameters, the manifest `paranoid_fallback_*` fields and the GUI checkbox are removed.
+- **ASC MHL:** the rewrite is a net improvement. The manifest `xxhash3_64` key becomes `xxh128`, which maps directly to MHL's native `<xxh128>` element. No changes to `core/asc_mhl.py` beyond removing the `xxhash3_64` row from `MANIFEST_TO_MHL` once the key no longer appears. GDrive entries gain xxh128 alongside md5, producing richer MHL sidecars for post houses.
+- **Algorithm tagging:** every manifest entry already stores `hash_algorithm`; the convention is unchanged, the value becomes `"xxh128"` for local entries and the preferred algorithm for GDrive entries.
+
+### M13.1 Core algorithm + paranoid removal
+
+Replace `xxh3_64` with `xxh128` in `core/checksum.py` and kill the paranoid verification path entirely.
+
+Scope:
+- `core/checksum.py`: rename `include_xxhash` param to `include_xxhash128`, swap `xxhash.xxh3_64()` for `xxhash.xxh3_128()`, rename the result key from `"xxhash3_64"` to `"xxh128"`.
+- `core/transfer.py`: remove `paranoid_verify` param from `transfer_folder_rclone` and `route_transfer`, remove `_paranoid_sha256_map`, remove all `paranoid_verify`/`paranoid_fallback_*` manifest fields and logging, remove the Drive branch that computes sha256 on download.
+- `core/comparison.py`: update `_ALGO_PRIORITY` to `("xxh128", "md5")` — sha256 removed as a writer key; if foreign sha256 manifests must still be readable, keep `"sha256"` in the reader ladder and document it explicitly (see M13.4). Pick one: drop it entirely or keep it reader-only. Cannot have sha256-first in the ladder and "sha256 nowhere" in M13.4's grep-clean simultaneously.
+- `core/verify.py` `verify_gdrive_deep`: the sha256-download branch IS the deep-verify path and is removed here. Replace with: download via `rclone cat` → hash with xxh128 → compare to manifest `"xxh128"` key. For Drive-to-Drive manifests (md5-only, no xxh128 stored), deep-verify falls back to downloading and comparing md5. A manifest with neither xxh128 nor md5 → MISMATCH (cannot deep-compare). Document this asymmetry in a code comment and in the M5.1 manual check output — the DIT must know which algorithm the deep-verify used. Update the local algo preference ladder to `xxh128 > md5` (drop sha256, consistent with M13.4).
+- `core/verify.py` (local): update the local algo preference ladder to `xxh128 > md5` (drop sha256, or keep as reader-only if foreign ingestion is required — same decision as comparison.py, must be consistent).
+- `gui/transfer_tab.py`: remove the `paranoid_chk` checkbox, its `setEnabled` wiring and the `v_method == "paranoid"` completion-banner branch.
+- Update test fixtures that assert `"xxhash3_64"` keys or `"paranoid"` manifest fields.
+
+**Done when:** `xxhash3_64` appears nowhere in production code; `paranoid` appears nowhere outside this file and test tombstones; all existing tests pass with updated fixtures; `core/checksum.py` 100% covered; the sha256-ladder decision is documented and consistent with M13.4's grep scope.
+
+### M13.2 Hot-path migration (local transfers, offload, merge)
+
+Migrate every local hot-path caller from sha256 to xxh128 as the integrity key.
+
+Scope:
+- `core/transfer.py` `copy_file` (lines 111-117): change local branch to `include_xxhash128=True, include_md5=False`, integrity key `"xxh128"`. Manifest `hash_algorithm` → `"xxh128"`.
+- `core/offload.py`: rename `_sha256` → `_xxh128`, swap to `compute_all(..., include_xxhash128=True, include_md5=False)["xxh128"]`; update `"algorithm": "sha256"` → `"xxh128"` throughout; update `clearance.py` and `offload_ledger.py` if they read the hash key directly.
+- `core/merge_ops.py` `_local_copy_verify` (lines 82-85): swap sha256 for xxh128.
+- `core/thumbnail.py` line 1008: swap sha256 for xxh128 for the contact-sheet integrity check.
+- `core/asc_mhl.py` `MANIFEST_TO_MHL`: remove the `("xxhash3_64", "xxh3")` row (key no longer written); the `("xxh128", "xxh128")` row was already present.
+- Update writer-reader matrix tests and pipeline integration tests to use `"xxh128"` keys.
+
+**Done when:** `include_xxhash=False` and `"sha256"` as a hot-path integrity key appear nowhere in transfer/offload/merge; all pipeline integration tests pass; writer-reader matrix covers `"xxh128"` as the primary local algorithm.
+
+### M13.3 GDrive dual-hash path
+
+For local-to-Drive transfers (where the bytes are available before upload), compute both xxh128 and md5 and store both in the manifest entry. Drive-to-Drive rclone paths are unchanged (no local bytes).
+
+Scope:
+- `core/transfer.py` `copy_file` GDrive branch (line 111): change to `include_xxhash128=True, include_md5=True`. Integrity key for copy-verify stays `"md5"` (rclone's native check). Manifest `hash_algorithm` → `"xxh128"` (preferred for content comparisons); both `"xxh128"` and `"md5"` keys stored under `checksums`.
+- `core/transfer.py` `transfer_folder` manifest entry (line 205): `hash_algorithm` → `"xxh128"` for the GDrive branch.
+- `core/verify.py` `verify_gdrive_deep`: update to prefer `"xxh128"` over `"sha256"` when downloading and re-hashing.
+- `core/manifest.py`: update `preferred_algorithm` for GDrive to `"xxh128"` (falling back to `"md5"` when xxh128 is absent, e.g. Drive-to-Drive entries).
+- Update tests: GDrive manifest entries now carry both `"xxh128"` and `"md5"` under `checksums`.
+
+**Done when:** a GDrive transfer manifest entry carries `{"xxh128": "...", "md5": "..."}` and `hash_algorithm: "xxh128"`; Drive-to-Drive entries are unchanged (md5 only); deep verify uses xxh128 when available; tests cover both cases.
+
+### M13.4 SHA-256 cleanup: manifest ID + hashlib audit
+
+Remove sha256 as a file-integrity hash. Do not add record hashing to the activity log. The trust model for the activity log is the team and Drive access controls and Drive version history — not a technical guarantee. This must be stated honestly in documentation: **the log is not tamper-evident; Drive files are mutable and rclone only guarantees copy-time correctness.** SHA-256 chaining is deferred indefinitely (it cannot be retrofitted onto past records, so the decision to skip it must hold for the tool's whole future).
+
+Scope:
+- `core/manifest.py:43` `_project_id`: `hashlib.sha256(key.encode()).hexdigest()[:12]` → `xxhash.xxh3_128(key.encode()).hexdigest()[:12]`. This is a deterministic keying function (same paths → same ID), so `uuid4` is wrong here — it would break idempotency. Keep the `[:12]` truncation but note 48-bit width means ~50% collision probability at ~16M distinct path pairs; acceptable for an internal registry.
+- Audit `import hashlib` across `core/` after M13.1-M13.3 land. The GDrive path likely still needs `hashlib.md5` for local MD5 computation — confirm before removing. Only remove imports that are genuinely unused after the rewrite.
+- Confirm `"sha256"` does not appear as a checksum key in any manifest writer, activity record or verify report.
+- Update SCHEMA_INTEROP_SPEC.md: xxh128 is the sole file-integrity algorithm for local and GDrive-with-local-bytes paths; MD5 is the rclone transport key for Drive-to-Drive paths; the activity log trust model is documented honestly (team trust + Drive controls, not tamper-evident).
+
+**Done when:** `sha256` does not appear as a checksum key in any production writer or test fixture; `_project_id` uses xxh128; `hashlib` imports are removed only where confirmed unused (Drive MD5 path may retain `hashlib.md5`); SCHEMA_INTEROP_SPEC states the log trust model without overstating the guarantee; grep for `"sha256"` in `core/` returns only comments and this roadmap. **Fixture note:** swapping the keying function changes the actual ID values produced, not just the algorithm — any test fixture with a hardcoded `project_id` derived from the old sha256 function will silently mismatch. The grep-clean pass must cover fixture files whose values came from the old function, not only literal `"sha256"` strings. Pre-launch this is free to regenerate; flag it explicitly so it is not missed.
+
+### M13.5 Merkle folder root digest
+
+Build a folder root digest for each verified folder. This is a **corruption fingerprint** — it detects accidental bit-rot and enables incremental diffing (only descend where roots differ). It is not tamper-evident: the tree is all-xxh128 and its adversarial strength is bounded by xxh128 collision resistance, the same as the leaf hashes. The structural guards (domain separation, odd-node promote-not-duplicate, `CaseFoldCollision`) prevent accidental root ambiguity — they are correctness properties, not security properties. Do not describe this as tamper-evident anywhere in code, docs or UI; the label "folder root" is intentional (not "merkle root") to avoid implying a security guarantee the construction does not deliver.
+
+Tree format (pinned — changing any of these changes all roots):
+- **Leaves:** `xxh3_128(b"file:" + path_norm.encode("utf-8") + b":" + xxh128_digest.encode("ascii")).hexdigest()` — domain-separated so a leaf can never collide with an internal node.
+- **Path normalisation:** forward slashes, Unicode NFC, lowercase. Lowercasing buys cross-platform root agreement on case-insensitive volumes (macOS APFS default, exFAT camera cards, Windows NTFS). **Collision guard required:** if two source paths normalise to the same key (e.g. `Photo.jpg` and `photo.jpg` on a case-sensitive volume), `merkle_root` must raise `CaseFoldCollision` rather than silently overwriting — a dict overwrite drops a file from the tree and produces a clean-looking root for an incomplete folder. Camera card media is almost always case-insensitive, but a case-sensitive APFS scratch disk or Linux source would hit this. The guard converts a silent wrong answer into a loud, fixable error.
+- **Sort:** leaves sorted by normalised `rel_path`, ascending.
+- **Internal nodes:** `xxh3_128(b"node:" + left.encode("ascii") + b":" + right.encode("ascii")).hexdigest()`.
+- **Odd node:** promote unchanged (do not duplicate — duplicating the last node introduces CVE-2012-2459-style ambiguity where two different trees can produce the same root).
+- **Empty folder:** defined sentinel `xxh3_128(b"empty").hexdigest()`.
+- **Version tag:** root output is `"v1:" + root_hex` so a format change is detectable.
+
+Scope:
+- New `core/merkle.py`: `normalise_path(rel_path) -> str`; `file_leaf(norm_path, xxh128_digest) -> str`; `internal_node(left, right) -> str`; `merkle_root(leaves: dict[str, str]) -> str` (accepts raw rel_paths, normalises internally, raises `CaseFoldCollision` if any two paths normalise to the same key). All-xxh128, no hashlib, no sha256.
+- `core/verify.py` `verify_local`: compute root over `{rel_path: xxh128_digest}` for all OK files, include `"folder_root"` in the verify report (not "merkle_root" — avoid implying a security property the name doesn't deliver).
+- `core/verify.py` `build_verify_report`: carry `folder_root` in the report JSON.
+- GUI: Verify tab shows "Folder root: abc123…" under the summary tiles — one line, truncated, copyable tooltip. Label must not say "tamper-evident."
+- No merge integration this milestone — the root is surfaced in the Verify tab only.
+
+**Done when:** `core/merkle.py` is 100% covered (leaf hashing, internal nodes, single-leaf, two-leaf, even count, odd-count promote-not-duplicate, empty sentinel, path normalisation, domain separation, version tag, round-trip identity, `CaseFoldCollision` raised on case-collision — not silently overwritten); `verify_local` carries `folder_root`; the verify report JSON includes it; a round-trip test on the same fixture produces the same root; the GUI label renders in the smoke test; no sha256 or hashlib anywhere in `core/merkle.py`.
+
+---
+
+## M14: Irreversible-loss hardening (awaiting approval)
+
+Three failure modes that can destroy footage with no recovery path. Everything in M12 and M13 is recoverable from; these are not. Spec stubs only — implementation begins on Richard's approval.
+
+### M14.1 Card-wipe gate audit
+
+**Resolve before writing any M14.1 code:** the `integrity_verified` flag for rclone/Drive destinations has no data source until M15.2's `--checksum` audit. Choose one: (a) pull `--checksum`-result detection into M14.1 so the flag is settable now, or (b) default all rclone-managed destinations to `integrity_verified=False` and document that Drive cannot reach the 2-dest clearance gate until M15.2 ships. Either is acceptable; leaving it unresolved is not — an unsettable flag means Drive never clears, a wrongly-truthy flag means the gate is broken. Document the decision in M14.1's Findings before closing.
+
+M10.1 (`core/clearance.py`) already produces a `ClearanceVerdict` and the M12.4 banner surfaces it. Three specific guarantees to confirm or patch before this is considered closed.
+
+**Gap 1: destination count and integrity definition.** `compute_clearance` must require `≥ MIN_CLEAN_DESTS (2)` integrity-verified destinations to set `cleared=True`. Two things must both be true for a destination to count:
+
+- The copy completed (state == DONE) and every file verified OK.
+- The verification was integrity-based — a content hash was compared, not just size+modtime. A destination where rclone fell back to size+modtime does not count, regardless of whether it "passed." This is the definition of "integrity-verified" for clearance purposes.
+
+**Ordering dependency on M15.2:** for rclone/Drive destinations, the signal "did rclone actually hash-compare vs fall back" requires the `--checksum` audit that lives in M15.2. Between M14 and M15, this signal is unavailable. Resolution (choose before implementing M14.1): either pull the `--checksum`-result detection into M14.1 so the flag is settable before M15 ships, or default all rclone-managed destinations to `integrity_verified=False` and document that only `verify_local` (local destinations) can clear the flag until M15.2 lands. The second option means Drive destinations cannot reach the 2-dest gate in the M14.1→M15.1 window — which is honest, since the check is genuinely unconfirmed. Do not leave this unresolved: an unsettable flag means Drive never clears; a wrongly-truthy flag means the gate is broken.
+
+Verify the implementation enforces both conditions. Add explicit tests: (a) 1 clean integrity-verified destination → `cleared=False`; (b) 2 destinations where one verified by size+modtime only → `cleared=False`; (c) 2 integrity-verified destinations → `cleared=True`; (d) 2 destinations where one never reached the verify step → `cleared=False`. If `compute_clearance` has no concept of verification method today, it needs a per-destination `integrity_verified` flag before this item is closed. That flag must default to False and be set True only on a confirmed hash compare — a destination that crashed, was skipped, or exited early must not carry a stale or absent flag that reads as truthy. Absence of a hash compare is not a hash compare.
+
+**Gap 2: does the app format the card, or only advise?** The answer determines what the gate must protect. Audit `OffloadTab` and any eject/format code path:
+- If the app itself issues an `erase`/`diskutil eraseDisk` command: gate the destructive control. When `cleared=False`, the eject/format button or action must be disabled or absent — not merely labelled differently. A string check is insufficient; a user ignoring a red banner and clicking an enabled button loses footage.
+- If the app only advises ("safe to format" is informational and the user formats manually in Finder/Disk Utility): the text IS the gate. In this case say so explicitly in a code comment and in the UI tooltip, and confirm the override/dismiss path on "not cleared" cannot display the clearance phrase. The spec is different for each model — confirm which one this is before writing tests.
+
+**Gap 3: override semantics.** A "yes, format anyway" override on a `cleared=False` verdict is acceptable (cards get reused, names legitimately repeat). The override must dismiss the warning only — it must not flip `cleared` to `True` or unlock any code path gated on `cleared=True`. If the app formats: the destructive action fires exactly once after explicit confirmation, then the guard resets. It does not stay unlocked.
+
+**Done when:** tests confirm (a) 1 clean destination → `cleared=False`; (b) 2 destinations with one size+modtime-only pass → `cleared=False`; (c) 2 integrity-verified destinations → `cleared=True`; the app-formats vs advises-only question is answered and documented; if the app formats, the destructive control is disabled when `cleared=False` and the override is a one-shot confirmation, not a state flip.
+
+### M14.2 Cold-read verify
+
+If `core/verify.py::verify_local` opens a destination file for hashing immediately after the copy writes it, macOS will serve the read from the page cache. The hash compares RAM to RAM. A failing SSD or flaky card reader passes verification clean. "Verified" is partly a lie.
+
+**What F_NOCACHE alone does not fix.** `F_NOCACHE` disables caching on the fd going forward — it does not evict pages already resident from the write that just completed. On a freshly written file the pages are hot and `F_NOCACHE` on the read fd changes nothing. It is not a cold read.
+
+**What a cold read actually requires — two sides:**
+
+*Write side (rclone/shutil):* bytes must physically reach the storage device before the verify read begins. On macOS `fsync()` is not sufficient — it flushes to the controller buffer but not to media. `F_FULLFSYNC` (`fcntl(fd, F_FULLFSYNC)`) forces a full device flush. This is the write seam: it lives in whatever code path calls `shutil.copy2` or hands off to rclone, outside `verify_local` itself. Document where this call belongs and whether rclone's `--checksum` flag already provides this guarantee for rclone-managed copies.
+
+**rclone `--checksum` is also warm for local destinations.** rclone's post-copy readback goes through the same page cache — for a freshly written local-to-local copy, `--checksum` is RAM-to-RAM, the same lie M14.2 describes for `verify_local`. `cold_open` covers `verify_local`'s reads, not rclone-managed verification. This means a destination verified solely by rclone `--checksum` (no subsequent `verify_local` pass) is not cold. **Confirm cold coverage spans every destination the clearance gate counts.** The asymmetry to note: Drive destinations get a genuinely cold server-side MD5 for free (Google computed it independently of the client); local and NAS destinations are the warm-verify risk — which is exactly the common DIT two-disk-plus-Drive case. The clearance gate must know which destinations had a cold-covered verify pass.
+
+*Read side:* after `F_FULLFSYNC` on the write side, the goal is to evict resident pages before opening the file so the read comes off the device. The honest position: **macOS has no confirmed per-file page-eviction primitive.** The documented `fcntl` constants are `F_NOCACHE`, `F_FULLFSYNC`, `F_BARRIERFSYNC`, `F_RDADVISE` and related; `F_PURGE` may or may not exist or behave as a per-fd evict on the target OS versions — it is unverified. The system-wide `purge` command is the known eviction path, but it is nuclear and already rejected. `POSIX_FADV_DONTNEED` is advisory and may be ignored for dirty or recently-written pages. The real-device validation step (see below) is the arbiter: if a candidate primitive proves cold bytes actually came off the card after a fresh write, it earns a place in the implementation. If the bytes come from cache, the primitive doesn't do what its name promises and the macOS eviction story is a gap — discovered before launch rather than after a bad card.
+
+**Implementation.** New `core/cold_read.py::cold_open(path)`:
+- macOS path: `F_FULLFSYNC` on the write side (required regardless of eviction), then open with `F_NOCACHE` on the read fd. Any per-file eviction primitive (`F_PURGE` or equivalent) is attempted but explicitly marked unverified until the real-device validation passes.
+- Linux/other: `POSIX_FADV_DONTNEED` after `fsync` (advisory — document the limitation).
+- Unsupported platform or unverified eviction: plain `open` with `F_NOCACHE`, clearly labelled "cache bypass not confirmed cold on this platform."
+
+`verify_local` uses `cold_open` for destination file reads. Source files read warm — they are the reference.
+
+**Hardware validation — the arbiter.** Unit tests with injectable `cold_fn` verify plumbing only. They cannot prove coldness — the read is always warm in a tmpfs test environment. The real-device step is required and is the mechanism proof, not a polish run:
+
+Write a known file to a USB flash drive or SD card, immediately run `verify_local` on the destination, and prove coldness via **out-of-band divergence**: after the write completes (and before running verify), corrupt the on-disk bytes via a raw block-device write while the page cache still holds the good copy. Then run verify — if it passes, the read came from cache, not the device. If it fails (detects the corruption), the read came off the device and the eviction primitive works. This is the only valid experiment; an in-band write (overwriting via normal file I/O) updates the page cache too, so both copies match and the test proves nothing. Latency timing is noisy and weaker — use divergence as the primary proof, latency as supporting evidence only.
+
+Document the result — pass or fail — in the manual-checks table. "Verified cold on flash storage" is the only label that means the gap is closed.
+
+**Done when:** `core/cold_read.py` 100% covered with injectable fallback; `verify_local` wired to `cold_open` for destination reads; the write-side `F_FULLFSYNC` seam is located and either called or confirmed handled by rclone; the real-device validation step is in the manual-checks table and completed with a documented result; code comments name any macOS eviction primitive as "unverified" until the hardware test passes and update to "verified" after.
+
+### M14.3 Atomic manifest + ledger writes under concurrent offloads
+
+Several paths do tmp+rename atomic writes but two concurrent workers on the same ledger can still clobber each other: the pattern is read-modify-write, and rename atomicity prevents a torn write — it does not prevent a lost update.
+
+**First: declare the concurrency model.** `flock` and `O_APPEND` have different guarantees on local vs network filesystems. The fix must match the deployment:
+
+- Same-host multiprocess (two offloads from the same Mac): `flock(LOCK_EX)` on a dedicated `.lock` sidecar protects the read-modify-write cycle. Works reliably.
+- Multi-DIT shared NAS (two carts writing to a mapped SMB/NFS volume): `flock` is advisory on most NAS implementations — it may silently fail to coordinate across hosts. Per-host shard files (the `activity_{workstation}.jsonl` model M9.2 already uses) are the correct answer here because each machine owns exactly one file and no cross-host locking is needed. Confirm whether the log-sync ledger and projects registry need to live on a shared volume or are always local.
+
+**`flock` on renamed file = lock on dead inode.** The pattern `flock(data_file); …; rename(tmp, data_file)` acquires a lock on the inode that `rename` will unlink. The next writer opens the new inode and acquires its own lock immediately — both proceed. Never lock the data file. Lock a dedicated `.lock` sidecar (`path + ".lock"`) that is never renamed or replaced. The lock file outlives every write cycle; locking it serialises writers without touching the data inode.
+
+**O_APPEND atomicity: do not cite PIPE_BUF.** `PIPE_BUF` is the atomicity guarantee for pipes and FIFOs, not regular files. macOS `PIPE_BUF` is 512 bytes, not 4 KB. Neither figure is the right citation for regular-file O_APPEND behaviour. The conclusion (small local appends are likely safe) may still hold, but prove it empirically with a concurrent two-process append test — same requirement as `locked_json_update` — rather than trusting a constant that governs a different mechanism. Two risks to confirm regardless: (1) each `append_activity` record must serialise small enough that a partial write is implausible on local APFS (measure the largest realistic record, not the typical one); (2) on SMB/NFS/NAS, O_APPEND atomicity is not guaranteed — confirm `activity_index.py` shards are always written to the local `~/Documents/STSyncTool/` path, never directly to a mounted NAS share. If either condition is unmet, replace O_APPEND with the sidecar-lock pattern.
+
+**Audit targets and fixes:**
+
+- `core/activity_index.py::append_activity` — intended to use O_APPEND. Confirm (a) the implementation is `open("a")`, not read-modify-write; (b) each record is under 4 KB; (c) the file always lives locally. If all three hold, O_APPEND is sufficient and no lock is needed. Document the three assumptions in a comment.
+- `core/log_sync.py` ledger (`log_sync_ledger.json`) — read-modify-write JSON. Two simultaneous offloads: worker A reads, B reads, A writes, B writes — B silently drops A's entries. Fix: `locked_json_update` with a `.lock` sidecar (local-only model). Confirm this file always lives locally and is never on a shared NAS.
+- `core/projects.py` registry (`projects.json`) — same read-modify-write pattern. Same fix. Confirm local-only.
+
+**`core/file_lock.py::locked_json_update(path, fn)`:** open `path + ".lock"`, `flock(LOCK_EX)`, read `path` (or empty dict if absent), apply `fn(data) -> data`, write atomically to `path` via tmp+rename, `flock(LOCK_UN)`. The `.lock` file is created if absent and never deleted (its inode is stable). This is explicitly a same-host-multiprocess model: the docstring must state it does not protect against concurrent writes from separate machines to a shared filesystem.
+
+**Done when:** `append_activity` is confirmed O_APPEND + record-size + local-only (or converted); `locked_json_update` exists with a sidecar lock (not the data file), 100% covered, with a concurrent-writer test (two threads, assert no lost update); the log-sync ledger and projects registry route through it; each function's docstring documents whether it is safe for local-only or shared-NAS use.
+
+---
+
+## M15: "Verified" scope clarification (awaiting approval)
+
+Two cases where "verified" is true but narrower than it sounds. Lower blast radius than M14 — footage survives, but a post house may reject the delivery or a downstream tool may disagree on identity. Stub only; implementation after M14 ships.
+
+### M15.1 macOS metadata and filename encoding on copy
+
+**Verify the shutil.copy2 premise before scoping a fix.** Python's `shutil.copy2` calls `copystat`, which on macOS does copy extended attributes (including `com.apple.ResourceFork` and `com.apple.FinderInfo`). The flat claim that "xattrs and resource forks do not survive shutil.copy2" may be wrong for the shutil path — test it before building a fix. The real metadata strip is likely on rclone-managed transfers (Drive, NAS via SMB), not the local shutil path. Audit each copy path (shutil local, rclone local-to-Drive, rclone local-to-NAS, rclone Drive-to-Drive) and record what each actually preserves before deciding what to fix. Solving a non-problem on the shutil path while missing where the loss actually is would produce a false "verified" label in the opposite direction.
+
+`shutil.copy2` may copy the data fork and most xattrs. rclone and Drive/exFAT transfers are the likely metadata-loss paths. Two "verified" copies can differ in metadata a post house's tool cares about. Separately, macOS stores filenames in NFD Unicode normalisation; the NFC/NFD collision guard added for the Merkle tree hits real filenames on copy and compare — a file named `café.mov` may round-trip as `café.mov` and hash differently on a destination that normalises differently.
+
+Scope to decide before implementation:
+- What is explicitly in scope for verification: data fork only, or data fork + xattrs + resource fork? The answer must be stated in the UI and in the chain-of-custody log. "Verified" with no qualifier means data fork only; anything else needs a qualifier.
+- Confirm all path comparisons in `core/comparison.py`, `core/verify.py` and the manifest schema normalise consistently (NFC or NFD, pick one and apply everywhere) before comparing. A mismatch-by-normalisation is a false MISMATCH verdict on an identical file.
+- rclone's behaviour for xattrs and resource forks on each supported backend (APFS to APFS, APFS to exFAT, APFS to Drive) should be documented in `docs/release.md` or a new `docs/filesystem_scope.md` so DITs know what they are and are not getting.
+
+**Normalisation has two representations for the same path — keep them separate.** `folder_root` in `core/merkle.py` deliberately lowercases + NFC + forward-slashes for cross-platform fingerprint agreement. This is an internal comparison key; it may mangle the original name freely. MHL and manifest filenames are an external contract — post houses match files by the real on-disk name, case and Unicode form preserved. If `folder_root`'s normalisation leaks into what MHL writes, the post house cannot locate files (`Shot_01A.mov` recorded as `shot_01a.mov`, NFC where the file is NFD). Pin the rule explicitly in both modules: `folder_root` normalisation is for internal fingerprinting only; MHL and manifest entries carry the true on-disk name, preserved exactly. A test should assert that a mixed-case, NFD-named file round-trips through MHL with its original name unchanged even when the folder root differs.
+
+**Done when:** the verification scope (data fork only) is stated explicitly in the custody log and the Verify tab tooltip; path comparisons are confirmed consistently normalised; rclone xattr/resource-fork behaviour per backend is documented; `core/merkle.py` and `core/asc_mhl.py` both carry a comment pinning which representation each uses; a round-trip test confirms MHL preserves the real on-disk filename.
+
+### M15.2 rclone checksum invocation and version pinning
+
+rclone verifies against whatever the backend provides, but a backend can fully support MD5 and rclone will still verify by size+modtime unless `--checksum` is forced. Backend capability is a necessary condition, not a sufficient one — the invocation flag is the real gate. "Backend has a hash" without `--checksum` in the call is the same silent false-OK, just one layer up.
+
+Two separate problems:
+
+**Invocation audit (the real gate).** Confirm every rclone call that the app treats as a verification step passes `--checksum`. Audit `rclone_bridge.py` for each invocation verb (`sync`, `copyto`, `check`, etc.) used in verification paths. For each: does the call include `--checksum`? If not, add it. Then confirm what each supported backend (Google Drive, local APFS, exFAT card volumes, NAS via SMB/NFS) actually provides — not as an academic check but to know whether `--checksum` will find a hash to compare or silently fall back to size+modtime anyway. Any backend where `--checksum` cannot produce a hash comparison must surface a loud error that reaches the custody log as a non-OK verdict, not just a log line. The clearance rule — a size+modtime pass does not count as integrity-verified — lives in M14.1. M15.2 adds the loud error and version provenance on top of a gate M14.1 already enforces.
+
+**Version pinning.** rclone flag semantics and backend behaviours drift between releases. Add a `RCLONE_REQUIRED_VERSION` constant and a preflight check that compares `rclone version` output against it, refusing to proceed if the version does not match. The pinned version is updated deliberately, not silently on the next build machine's rclone. Additionally, record the rclone version in each custody log at transfer time — not just at preflight — so a future dispute over a specific job can be traced to the exact binary that ran it.
+
+**Done when:** every verification-path rclone invocation is confirmed to pass `--checksum`; each supported backend's actual hash capability is documented; a no-hash fallback produces a loud error that reaches the custody log as a non-OK verdict (the clearance consequence is enforced by M14.1's gate, already in place); `RCLONE_REQUIRED_VERSION` exists and preflight enforces it; the rclone version is recorded per transfer in the custody log; the bundled rclone version in `build.sh` matches the pinned constant.
+---
+
 ## Suggested /loop order (sequencing approved by Richard 2026-06-12)
 
-M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 ✅ → M10.2 ✅ → M7.2 ✅ → M9.1 ✅ → M9.2 ✅ → M7.5 ✅ → M7.3 ✅ → M7.4 ✅ → M9.3 ✅ → M10.3 ✅ → M11.1 ✅ → M11.2 ✅ → M11.3 ✅ → **M12.1 ✅ → M12.2 ✅ → M12.3 ✅ → M12.4 ✅ → M12.5 ✅ → M12.6 ✅ (beta field-safety, approved + completed 2026-06-14)** → M7.1 🔶 (unsigned build done + validated; sign/notarize blocked on Apple account) → recruit beta testers. (M8 AI assist KILLED 2026-06-14. M5.3 scheduled verify retained but its toggle stays deferred to M7.1.)
+M1.1 ✅ → M1.2 ✅ → M1.3 ✅ → M1.4 ✅ → M2 ✅ → M1.5 ✅ → M3 ✅ → M4.1 ✅ → M4.2 spike ✅ (deferred to M7.1) → M10.1 ✅ → M5.0 ✅ → M5.1 ✅ → M5.2 ✅ → M5.4 ✅ → M10.2 ✅ → M7.2 ✅ → M9.1 ✅ → M9.2 ✅ → M7.5 ✅ → M7.3 ✅ → M7.4 ✅ → M9.3 ✅ → M10.3 ✅ → M11.1 ✅ → M11.2 ✅ → M11.3 ✅ → **M12.1 ✅ → M12.2 ✅ → M12.3 ✅ → M12.4 ✅ → M12.5 ✅ → M12.6 ✅ (beta field-safety, approved + completed 2026-06-14)** → **M13.1 → M13.2 → M13.3 → M13.4 → M13.5 (hashing rewrite, approved 2026-06-15)** → **M14.1 → M14.2 → M14.3 (irreversible-loss hardening, awaiting approval)** → **M15.1 → M15.2 (verified-scope clarification, awaiting approval)** → M7.1 🔶 (unsigned build done + validated; sign/notarize blocked on Apple account) → recruit beta testers. (M8 AI assist KILLED 2026-06-14. M5.3 scheduled verify retained but its toggle stays deferred to M7.1.)
 
 **Reorder note (2026-06-12):** M7.1 (signed DMG) moved to the end of the list because it is blocked on an Apple Developer account ($99/yr, Richard to set up) and was stalling the autonomous loop. Everything ahead of it is workable without signing. Dependency caveat: **beta-tester recruitment still cannot happen until M7.1 lands** (testers need the signed DMG), so M7.1 sits immediately before "recruit beta testers" despite being last in work order. M7.2 CI is now the next item — it retroactively validates every "needs a manual Mac run" GUI item via a macOS runner.
 
