@@ -889,6 +889,7 @@ def write_chain_of_custody_log(
     results: list,
     source_manifests: dict,
     ts: str,
+    prior_clean_dests_map: dict = None,
 ) -> Path:
     """
     Write a human-readable chain-of-custody log for the entire offload run.
@@ -952,7 +953,10 @@ def write_chain_of_custody_log(
             lines.append(f"    {info.get('checksum', '')[:16]}  {rel}")
         # M10.1: explicit safe-to-format clearance verdict for this source.
         from core.clearance import compute_clearance
-        verdict = compute_clearance(src.label, results)
+        verdict = compute_clearance(
+            src.label, results,
+            prior_clean_dests=(prior_clean_dests_map or {}).get(src.label),
+        )
         lines.append(
             f"  CLEARANCE: {'SAFE TO FORMAT' if verdict.cleared else 'NOT CLEARED'} "
             f"— {verdict.to_text()}"
@@ -1303,8 +1307,36 @@ def run_offload(
             )
 
     flat = list(cell_results.values())
+
+    # Build prior-clean-dests map from the M12.2 ledger so the chain-of-custody
+    # log and activity-index verdicts match what the GUI shows (M12.2 cross-run
+    # redundancy counts toward the two-copy minimum). Best-effort: any failure
+    # leaves the map empty, which yields a conservative per-run-only verdict.
+    _prior_map: dict = {}
+    try:
+        from core import projects as _proj_prior
+        from core.offload_ledger import (
+            fingerprint_from_manifest as _fp_from_mfst,
+            match_prior_offloads as _match_prior,
+        )
+        _history = _proj_prior.list_offload_fingerprints()
+        if _history:
+            for _src in active_sources:
+                _smfst = source_manifests.get(_src.label)
+                if not _smfst:
+                    continue
+                _fp = _fp_from_mfst(_src, _smfst)
+                _dests: set = set()
+                for _m in _match_prior(_fp, _history):
+                    _dests |= set(_m["record"].get("dests", []))
+                if _dests:
+                    _prior_map[_src.label] = _dests
+    except Exception:
+        pass
+
     log_path = write_chain_of_custody_log(
-        active_sources, active_dests, flat, source_manifests, ts
+        active_sources, active_dests, flat, source_manifests, ts,
+        prior_clean_dests_map=_prior_map,
     )
 
     # M9.2: record one activity-index line per source (local-only, never raises).
@@ -1316,7 +1348,7 @@ def run_offload(
         smfst = source_manifests.get(src.label)
         if not smfst:
             continue
-        cleared = compute_clearance(src.label, flat).cleared
+        cleared = compute_clearance(src.label, flat, prior_clean_dests=_prior_map.get(src.label)).cleared
         safe_append_activity(
             record_from_manifest(
                 smfst, operation="offload", source=src.label, dests=dest_labels,

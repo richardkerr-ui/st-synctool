@@ -45,9 +45,10 @@ class RcloneErrorClass:
     message: str
 
 
-# Google API reason strings (and human-readable variants) that mean the daily
-# upload / rate limit was hit. Matched case-insensitively as substrings of the
-# captured rclone stderr.
+# Google Drive API "reason" strings surfaced in rclone stderr. These are GDrive
+# API constants, not rclone-specific strings — re-verify after a rclone major
+# bump or if users report unrecognised quota errors (new Google quota type would
+# fall through to generic error handling rather than the friendly message).
 _RATE_LIMIT_MARKERS = (
     "userratelimitexceeded",
     "ratelimitexceeded",

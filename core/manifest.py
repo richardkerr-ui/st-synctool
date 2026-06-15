@@ -31,7 +31,12 @@ def _primary_algorithm(gdrive: bool) -> str:
 
 
 def _project_id(local_path: str, counterpart_path: str) -> str:
-    """Stable 12-char hex ID derived from the (local_path, counterpart_path) pair."""
+    """Stable 12-char hex ID derived from the (local_path, counterpart_path) pair.
+
+    Convention: local_path is always the on-disk root; counterpart_path is the
+    remote/Drive path. Callers must not reverse the order — a reversed call
+    produces a different (silently valid) ID and a duplicate project entry.
+    """
     if not local_path:
         return ""
     key = f"{local_path}|{counterpart_path or ''}"
