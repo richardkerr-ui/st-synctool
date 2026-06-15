@@ -30,11 +30,24 @@ class CompletionBanner(QFrame):
         self._close.clicked.connect(self.dismiss)
         lay.addWidget(self._close)
 
-    def show_result(self, text: str, ok: bool) -> None:
-        """Show the banner: green when ok, coral when there's a problem."""
+    def show_result(self, text: str, ok: bool, subtitle: str = "") -> None:
+        """Show the banner: green when ok, coral when there's a problem.
+
+        subtitle renders below the main line in smaller amber text — use for
+        advisory warnings that don't change the ok/fail verdict (e.g. paranoid
+        fallback count).
+        """
         bg = theme.VERDICT_GREEN if ok else theme.VERDICT_CORAL
         fg = "#0c1a0f" if ok else "#1a0c0c"
-        self.msg.setText(text)
+        if subtitle:
+            html = (f'<span style="font-size:15px;font-weight:bold;">{text}</span>'
+                    f'<br><span style="font-size:12px;font-weight:normal;color:#7a5c00;">'
+                    f'{subtitle}</span>')
+            self.msg.setText(html)
+            self.msg.setTextFormat(Qt.TextFormat.RichText)
+        else:
+            self.msg.setText(text)
+            self.msg.setTextFormat(Qt.TextFormat.PlainText)
         self.setStyleSheet(
             f"QFrame#CompletionBanner {{ background:{bg}; border-radius:6px; }}"
             f" QLabel {{ background:transparent; color:{fg}; font-size:15px; font-weight:bold; }}"
