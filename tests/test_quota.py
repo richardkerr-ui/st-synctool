@@ -27,7 +27,7 @@ def test_classify_rate_limit(stderr):
     assert cls is not None
     assert cls.kind == "rate_limit"
     assert "daily upload limit" in cls.message
-    assert "midnight Pacific" in cls.message
+    assert "midnight" in cls.message
 
 
 def test_classify_storage_full_beats_rate_limit():

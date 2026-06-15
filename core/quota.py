@@ -67,9 +67,9 @@ _STORAGE_FULL_MARKERS = (
 )
 
 _RATE_LIMIT_MESSAGE = (
-    "Google's daily upload limit was hit for this account. It resets at "
-    "midnight Pacific time. Your files are safe — nothing was corrupted; "
-    "resume the transfer after the reset."
+    "Google's daily upload limit was hit for this account. It resets around "
+    "midnight (advisory — Google resets on its own schedule). Your files are "
+    "safe — nothing was corrupted; resume the transfer after the reset."
 )
 
 _STORAGE_FULL_MESSAGE = (
