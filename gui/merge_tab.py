@@ -207,9 +207,27 @@ class ApplyWorker(QObject):
                     if original_state_by_path.get(path) != fresh_state_by_path.get(path, "DELETED_BOTH")
                 ]
 
+                # Gap-window check: catch paths NOT in self.actions that became
+                # BOTH_CHANGED after the initial scan. Apply wouldn't touch them,
+                # but the regenerated manifest would contain an unreviewed conflict.
+                gap_conflicts = [
+                    (path, original_state_by_path.get(path, "UNMODIFIED"), "BOTH_CHANGED")
+                    for path, fresh_state in fresh_state_by_path.items()
+                    if fresh_state == "BOTH_CHANGED"
+                    and original_state_by_path.get(path) != "BOTH_CHANGED"
+                    and path not in self.actions
+                ]
+                conflicts = conflicts + gap_conflicts
+
                 if conflicts:
-                    log(f"  {len(conflicts)} file(s) changed since initial scan — aborting apply",
-                        "error")
+                    gap_count = len(gap_conflicts)
+                    action_count = len(conflicts) - gap_count
+                    if gap_count and not action_count:
+                        log(f"  {gap_count} new conflict(s) appeared since initial scan — re-scan required",
+                            "error")
+                    else:
+                        log(f"  {len(conflicts)} file(s) changed since initial scan — aborting apply",
+                            "error")
                     for path, orig, fresh in conflicts[:10]:
                         log(f"    {path}: was {orig}, now {fresh}", "warning")
                     self.rescan_conflict.emit([c[0] for c in conflicts])
