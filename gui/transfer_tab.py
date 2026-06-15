@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QProgressBar, QCheckBox, QComboBox,
-    QMessageBox, QSizePolicy, QFrame, QScrollArea,
+    QMessageBox, QSizePolicy, QFrame, QScrollArea, QLineEdit,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
@@ -37,7 +37,7 @@ class TransferWorker(QObject):
     error    = pyqtSignal(str)
 
     def __init__(self, src, dst, gdrive_mode, mirror_mode, paranoid_mode, conflict_handler,
-                 extract_zips, export_mhl=False):
+                 extract_zips, export_mhl=False, job_name=""):
         super().__init__()
         self.src              = src
         self.dst              = dst
@@ -47,6 +47,7 @@ class TransferWorker(QObject):
         self.conflict_handler = conflict_handler
         self.extract_zips     = extract_zips
         self.export_mhl       = export_mhl
+        self.job_name         = job_name
 
     def run(self):
         try:
@@ -59,6 +60,7 @@ class TransferWorker(QObject):
                 progress_cb=lambda p, f: self.progress.emit(p, f),
                 conflict_handler=self.conflict_handler,
                 export_mhl=self.export_mhl,
+                job_name=self.job_name,
             )
             if self.extract_zips and not is_gdrive_url(str(self.dst)):
                 extract_multipart_zip(
@@ -147,6 +149,18 @@ class TransferTab(QWidget):
         io_layout.addLayout(demo_row)
 
         root.addWidget(io_group)
+
+        # ── Job name / number ────────────────────────────────────────────────
+        _job_row = QHBoxLayout()
+        _job_row.addWidget(QLabel("Job Name / Number:"))
+        self.job_name_input = QLineEdit()
+        self.job_name_input.setPlaceholderText("e.g. 24-1234 Nike Spring Spot  (optional — appears in History)")
+        self.job_name_input.setToolTip(
+            "Stored in the activity log so the History tab shows a readable job "
+            "name instead of a folder name."
+        )
+        _job_row.addWidget(self.job_name_input)
+        root.addLayout(_job_row)
 
         # ── Pre-flight summary row ───────────────────────────────────────────
         pf_frame = QFrame()
@@ -529,6 +543,7 @@ class TransferTab(QWidget):
             conflict_handler=self._conflict_handler_str(),
             extract_zips=self.extract_zip_chk.isChecked(),
             export_mhl=self.export_mhl_chk.isChecked(),
+            job_name=self.job_name_input.text().strip(),
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)

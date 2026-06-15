@@ -727,6 +727,18 @@ class OffloadTab(QWidget):
         splitter.setSizes([520, 520])
         root.addWidget(splitter)
 
+        # Job name / number — human label shown in History
+        _job_row = QHBoxLayout()
+        _job_row.addWidget(QLabel("Job Name / Number:"))
+        self.job_name_input = QLineEdit()
+        self.job_name_input.setPlaceholderText("e.g. 24-1234 Nike Spring Spot  (optional — appears in History)")
+        self.job_name_input.setToolTip(
+            "Stored in the activity log so the History tab shows a readable job "
+            "name instead of a folder name."
+        )
+        _job_row.addWidget(self.job_name_input)
+        root.addLayout(_job_row)
+
         root.addWidget(self._build_options_bar())
         root.addWidget(self._build_matrix_group())
         root.addWidget(self._build_log_and_actions())
@@ -1351,6 +1363,7 @@ class OffloadTab(QWidget):
             normalize_filenames=normalize,
             resume_staging=resume_staging,
             export_mhl=self._export_mhl_chk.isChecked(),
+            job_name=self.job_name_input.text().strip(),
         )
 
         self._copy_start.clear()

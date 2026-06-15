@@ -147,6 +147,8 @@ class OffloadConfig:
     resume_staging: bool = False
     # M10.3: also write an ASC MHL v2.0 .mhl sidecar next to each manifest.
     export_mhl: bool = False
+    # Human-readable job name / number for the History tab (e.g. "24-1234 Nike Spot").
+    job_name: str = ""
 
 
 @dataclass
@@ -1349,6 +1351,10 @@ def run_offload(
         if not smfst:
             continue
         cleared = compute_clearance(src.label, flat, prior_clean_dests=_prior_map.get(src.label)).cleared
+        # Use job_name from config as the project label when provided so History
+        # shows e.g. "24-1234 Nike Spot" instead of a raw folder name.
+        if config.job_name:
+            smfst = dict(smfst, label=config.job_name)
         safe_append_activity(
             record_from_manifest(
                 smfst, operation="offload", source=src.label, dests=dest_labels,

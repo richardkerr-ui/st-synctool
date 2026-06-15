@@ -19,7 +19,7 @@ import getpass
 import json
 import socket
 from dataclasses import dataclass, asdict, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -96,9 +96,24 @@ def record_from_manifest(
     total_bytes = manifest.get("total_size_bytes")
     if total_bytes is None:
         total_bytes = sum(int((f or {}).get("size") or 0) for f in files.values())
+    # Resolve a human-readable project name: prefer the display_name registered
+    # in the projects registry, fall back to the manifest label (folder name),
+    # then the hex project_id as a last resort. Never shows a raw hex hash in UI.
+    project_id = manifest.get("project_id") or ""
+    project_display = ""
+    if project_id:
+        try:
+            from core import projects as _projects
+            proj = _projects.get_project(project_id)
+            if proj:
+                project_display = proj.get("display_name") or ""
+        except Exception:
+            pass
+    project_display = project_display or manifest.get("label") or project_id
+
     return record_for(
         operation,
-        project=manifest.get("project_id") or manifest.get("label") or "",
+        project=project_display,
         source=source,
         dests=dests or [],
         file_count=int(file_count or 0),
@@ -137,7 +152,7 @@ def record_for(
     user: Optional[str] = None,
 ) -> ActivityRecord:
     """Build an ActivityRecord, stamping host/user/time so call sites stay terse."""
-    now = now or datetime.now()
+    now = now or datetime.now(timezone.utc)
     return ActivityRecord(
         operation=operation,
         timestamp=now.isoformat(),
@@ -314,7 +329,7 @@ def staleness(records: list, *, now: Optional[datetime] = None,
     Covers M9.1's never-reopened-app gap: a cart that has not reported in
     `stale_after_days` shows up here ("Cart 3 hasn't reported since June 2").
     """
-    now = now or datetime.now()
+    now = now or datetime.now(timezone.utc)
     latest: dict = {}
     for r in records:
         ws = r.get("workstation", "")
@@ -327,8 +342,14 @@ def staleness(records: list, *, now: Optional[datetime] = None,
     out: list = []
     for ws, ts in latest.items():
         try:
-            days = (now - datetime.fromisoformat(ts)).days
-        except ValueError:
+            dt = datetime.fromisoformat(ts)
+            # Normalise to UTC-aware so subtraction never raises TypeError when
+            # mixing naive (old) records with new UTC-aware ones.
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            _now = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+            days = (_now - dt).days
+        except (ValueError, TypeError):
             continue
         out.append(WorkstationStaleness(
             workstation=ws, last_reported=ts, days_since=days,

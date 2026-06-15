@@ -170,7 +170,7 @@ def _maybe_export_mhl(manifest, saved_paths, export_mhl, log):
 
 
 def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None,
-                    conflict_handler="skip", export_mhl=False):
+                    conflict_handler="skip", export_mhl=False, job_name=""):
     """Local-to-local transfer with per-file verification + manifest."""
     def log(m, l="info"):
         if log_cb: log_cb(m, l)
@@ -245,9 +245,10 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None,
     # M9.2: record this job in the local per-machine activity index (local-only,
     # never raises). Shipping to the org folder is a separate step (M9.1).
     from core.activity_index import record_from_manifest, safe_append_activity
+    _manifest_for_log = dict(manifest, label=job_name) if job_name else manifest
     safe_append_activity(
         record_from_manifest(
-            manifest, operation="transfer", source=src.name,
+            _manifest_for_log, operation="transfer", source=src.name,
             dests=[actual_dest.name], verdict="COMPLETE" if not errors else "PARTIAL",
         ), log_cb=log_cb)
 
@@ -259,7 +260,7 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None,
 
 def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwrite",
                            paranoid_verify=False, log_cb=None, progress_cb=None,
-                           export_mhl=False):
+                           export_mhl=False, job_name=""):
     """Routes a transfer through rclone when either side is a Google Drive URL."""
     def log(m, l="info"):
         if log_cb: log_cb(m, l)
@@ -532,6 +533,22 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     _maybe_export_mhl(manifest, saved_paths, export_mhl, log)
 
     if progress_cb: progress_cb(100, "Done")
+
+    # M9.2: record this rclone job in the local activity index (never raises).
+    try:
+        from core.activity_index import record_from_manifest, safe_append_activity
+        _src_label = str(src).rstrip("/").rsplit("/", 1)[-1]
+        _dst_label = str(dst).rstrip("/").rsplit("/", 1)[-1]
+        _verdict = "FAIL" if manifest.get("verify_failures") else "COMPLETE"
+        _manifest_for_log = dict(manifest, label=job_name) if job_name else manifest
+        safe_append_activity(
+            record_from_manifest(
+                _manifest_for_log, operation="transfer",
+                source=_src_label, dests=[_dst_label], verdict=_verdict,
+            ), log_cb=log_cb)
+    except Exception:
+        pass
+
     return {
         "manifest": manifest, "saved_manifest_paths": [str(p) for p in saved_paths],
         "errors": manifest.get("errors", []),
@@ -542,7 +559,7 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
 def route_transfer(src, dst, gdrive_mode=False, mirror_mode=False,
                    paranoid_verify=False,
                    log_cb=None, progress_cb=None, conflict_handler="skip",
-                   export_mhl=False):
+                   export_mhl=False, job_name=""):
     """Top-level dispatcher: picks rclone vs. local based on URL detection."""
     if is_gdrive_url(str(src)) or is_gdrive_url(str(dst)):
         return transfer_folder_rclone(
@@ -552,12 +569,14 @@ def route_transfer(src, dst, gdrive_mode=False, mirror_mode=False,
             paranoid_verify=paranoid_verify,
             log_cb=log_cb, progress_cb=progress_cb,
             export_mhl=export_mhl,
+            job_name=job_name,
         )
     return transfer_folder(
         src, dst, gdrive_mode=gdrive_mode,
         log_cb=log_cb, progress_cb=progress_cb,
         conflict_handler=conflict_handler,
         export_mhl=export_mhl,
+        job_name=job_name,
     )
 
 

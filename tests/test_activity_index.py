@@ -157,7 +157,7 @@ def test_record_from_manifest_derives_fields():
                                 log_filename="cust.txt",
                                 now=datetime(2026, 6, 13, 9, 0, 0))
     assert r.operation == "offload"
-    assert r.project == "projx"
+    assert r.project == "ProjectX"  # label fallback when project_id not in registry
     assert r.workstation == "Cart 9"
     assert r.user == "dit"
     assert r.file_count == 3

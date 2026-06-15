@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QProgressBar, QFileDialog, QMessageBox, QCheckBox,
     QComboBox, QDialog, QListWidget, QListWidgetItem, QTextEdit,
     QDialogButtonBox, QGraphicsOpacityEffect, QFrame, QScrollArea,
+    QLineEdit,
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
@@ -349,11 +350,13 @@ class ApplyWorker(QObject):
                         manifest_path=archive_path,
                     )
                     if archive_path:
+                        _job_name = self.job_name_input.text().strip()
                         project_registry.upsert_project(
                             project_id,
                             local_path=str(self.local_path),
                             server_path=self.server_path,
                             latest_manifest=archive_path,
+                            display_name=_job_name or "",
                         )
                 except Exception as e:
                     log(f"  Could not update project registry: {e}", "warning")
@@ -364,9 +367,11 @@ class ApplyWorker(QObject):
             try:
                 from core.activity_index import record_from_manifest, safe_append_activity
                 verdict = "COMPLETE" if not results["failed"] else "PARTIAL"
+                _srv_label = (self.server_path if is_gdrive_url(self.server_path)
+                              else Path(self.server_path).name)
                 safe_append_activity(record_from_manifest(
                     new_manifest, operation="merge",
-                    source=self.local_path.name, dests=[str(self.server_path)],
+                    source=self.local_path.name, dests=[_srv_label],
                     verdict=verdict))
             except Exception:
                 pass
@@ -564,6 +569,16 @@ class MergeTab(QWidget):
         )
         health_btn.clicked.connect(self._check_server_health)
         grid.addWidget(health_btn, 2, 2)
+
+        # Row 3 — job name / number (human label for History)
+        grid.addWidget(QLabel("Job Name / Number:"), 3, 0)
+        self.job_name_input = QLineEdit()
+        self.job_name_input.setPlaceholderText("e.g. 24-1234 Nike Spring Spot")
+        self.job_name_input.setToolTip(
+            "Optional — used as the project label in History. "
+            "Saved with the project so it appears on every future operation."
+        )
+        grid.addWidget(self.job_name_input, 3, 1, 1, 2)
 
         return group
 
@@ -833,6 +848,7 @@ class MergeTab(QWidget):
             return
         self.local_input.setText(proj.get("local_path", ""))
         self.server_input.setText(proj.get("server_path", ""))
+        self.job_name_input.setText(proj.get("display_name", ""))
         latest = proj.get("latest_manifest", "")
         if latest and Path(latest).exists():
             self.base_input.setText(latest)
@@ -1053,10 +1069,12 @@ class MergeTab(QWidget):
         project_id = yours.get("project_id", "")
         if project_id:
             try:
+                _job_name = self.job_name_input.text().strip()
                 project_registry.upsert_project(
                     project_id,
                     local_path=self.local_input.text(),
                     server_path=self.server_input.text(),
+                    display_name=_job_name or "",
                 )
                 if self._current_project_id != project_id:
                     self._current_project_id = project_id
