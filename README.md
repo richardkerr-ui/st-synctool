@@ -165,7 +165,7 @@ Before starting, the app shows total source size, estimated transfer time at 150
 ### During the transfer
 
 - Progress bar shows percentage (byte-based for Drive transfers)
-- Cancel button kills the rclone subprocess immediately
+- Cancel button terminates the rclone subprocess; rclone may take 5–10 seconds to finish writing the in-flight file before it exits
 - Files are individually verified before being marked complete
 
 ### After the transfer
@@ -336,7 +336,7 @@ Requires pyobjc (`pip install pyobjc-framework-AppKit`). If pyobjc is not instal
 ### Options
 
 - **Filename normalisation** — detects sequential generic naming schemes (`IMG_XXXX`, `GH0XXXXX`, `DJI_XXXX`, etc.) where ≥60% of video files match the pattern, or where two sources share overlapping filenames. If detected, offers to append the first 8 characters of the file's SHA-256 hash to the stem (`IMG_1205.mov` → `IMG_1205_a3f9b2c1.mov`). The rename is deterministic — the same file always gets the same suffix. Source card is never touched; rename happens at the destination during staging.
-- **Generate contact sheet** — requires ffmpeg and Pillow (see dependencies below). Runs after the primary destination commits. See "Contact sheets" below.
+- **Generate contact sheet** — requires ffmpeg and Pillow (see dependencies below). Runs after the first destination in the list (the primary destination) commits and verifies. See "Contact sheets" below.
 - **Continue on failure** — if a destination fails, continue with the remaining destinations for that source rather than aborting.
 
 ### Execution order
@@ -349,7 +349,7 @@ A live grid shows each source/destination pair as: pending / copying / verifying
 
 ### Output
 
-For each offload, a chain-of-custody log is saved to `~/Documents/STSyncTool/Offload Reports/`. It records source manifests, per-destination verification results, any filename renames, and contact sheet artifacts.
+For each offload, a chain-of-custody log is saved to `~/Documents/STSyncTool/Offload Reports/<date>/` (one subfolder per calendar day). It records source manifests, per-destination verification results, any filename renames, and contact sheet artifacts.
 
 ### Safe to format
 
@@ -359,7 +359,7 @@ For every source the log carries an explicit `CLEARANCE:` verdict. A card is mar
 
 ## Contact sheets
 
-After the primary destination commits and verifies, a contact sheet is generated for the source label. One row per clip. Saved to:
+After the primary destination (first in the list) commits and verifies, a contact sheet is generated for the source label. One row per clip. Saved to:
 
 - `{primary_dest}/{source_label}/_contact_sheet_{ts}.pdf`
 - `~/Documents/STSyncTool/Contact Sheets/_contact_sheet_{ts}.pdf`
@@ -524,9 +524,9 @@ Not necessarily a problem. These are files that exist in the folder but were not
 
 Check the log widget for the actual error. The most common cause is rclone OAuth expiration. Re-run `rclone config` and re-authenticate the existing remote.
 
-### Cancel button does not seem to stop the transfer immediately
+### Cancel button does not stop immediately
 
-The cancel button terminates the rclone subprocess, but rclone may take a few seconds to finish writing the in-flight file before exiting. Wait 5–10 seconds. If it still does not release:
+The cancel button terminates the rclone subprocess, but rclone may take up to 10 seconds to finish writing the in-flight file before it exits. If it still does not release after that:
 
 ```bash
 ps aux | grep rclone
@@ -592,7 +592,7 @@ Every offload, transfer, merge and verify writes its custody log and manifest lo
 
 The shared folder is configured once: set `core/settings.DEFAULT_ACTIVITY_FOLDER` to a folder in a Shared Drive every user can reach (e.g. `ST_SyncTool_Activity`) and every install auto-derives its remote base from its own rclone remote — no per-user setup. Individual users can override it under **Settings**. Until that constant is set (or a base is entered in Settings), shipping is a safe no-op.
 
-Offline is treated as the normal case, not the edge case. A "shipped" ledger records exactly what is confirmed uploaded; anything not in the ledger is retried at the next trigger (after each operation and on every app launch), so an offload done off the network ships automatically the next time the app opens with internet. Alerting is quiet on the cart and loud in the office: a passive status line ("Activity log: N reports waiting to upload"), escalating to a gentle banner only when files have been pending 7+ days, never a popup.
+Offline is treated as the normal case, not the edge case. A "shipped" ledger records exactly what is confirmed uploaded; anything not in the ledger is retried at the next trigger (after each operation and on every app launch), so an offload done off the network ships automatically the next time the app opens with internet. Alerting is quiet on the cart and loud in the office: a passive status line ("Activity log: N reports waiting to upload"), escalating to a gentle banner only when files have been pending 7+ days, never a popup. If the last upload attempt was refused by the remote (bad remote name, expired token, permission error), the status line adds "last upload failed, check remote config" and the banner border turns amber. Pure network failures (no connectivity) leave the status line unchanged so a WFH Monday or a cart without internet never triggers a false alarm.
 
 Alongside the raw files, each completed job appends one compact summary line to a per-machine index (`activity_{workstation}.jsonl`: operation, time, user, project, source, destinations, file count, bytes, verdict, log filename). Because each machine writes only its own shard there are no write conflicts and no server. Org-wide views merge the shards (kilobytes) and fetch a raw custody log only when a human opens one. Per-workstation staleness ("Cart 3 hasn't reported since June 2") falls out of the merged shards for free.
 
