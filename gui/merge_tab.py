@@ -573,7 +573,7 @@ class MergeTab(QWidget):
         # Row 3 — job name / number (human label for History)
         grid.addWidget(QLabel("Job Name / Number:"), 3, 0)
         self.job_name_input = QLineEdit()
-        self.job_name_input.setPlaceholderText("e.g. 24-1234 Nike Spring Spot")
+        self.job_name_input.setPlaceholderText("e.g. 61060 Michelin Interviews")
         self.job_name_input.setToolTip(
             "Optional — used as the project label in History. "
             "Saved with the project so it appears on every future operation."

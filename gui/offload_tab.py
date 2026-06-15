@@ -731,7 +731,7 @@ class OffloadTab(QWidget):
         _job_row = QHBoxLayout()
         _job_row.addWidget(QLabel("Job Name / Number:"))
         self.job_name_input = QLineEdit()
-        self.job_name_input.setPlaceholderText("e.g. 24-1234 Nike Spring Spot  (optional — appears in History)")
+        self.job_name_input.setPlaceholderText("e.g. 61060 Michelin Interviews  (optional — appears in History)")
         self.job_name_input.setToolTip(
             "Stored in the activity log so the History tab shows a readable job "
             "name instead of a folder name."
