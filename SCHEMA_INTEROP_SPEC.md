@@ -1,6 +1,6 @@
 # ST SyncTool — Offload Manifest + Rename Contract Spec
 
-> **Status:** Mostly implemented. Schema 1.2, `counterpart_path`, `build_offload_manifest`, `checksums` dict, `modtime`, `renames[]`, and the `offload` custody block (including `overall_result`, per-destination `verified_files`, and all 6 acceptance tests) are done. The remaining item is the `reason` field on merge preserve-rename entries (Part 2). See ROADMAP for context.
+> **Status:** Fully implemented. Schema 1.2, `counterpart_path`, `build_offload_manifest`, `checksums` dict, `modtime`, `renames[]`, the `offload` custody block (including `overall_result`, per-destination `verified_files`, and all 6 acceptance tests), and the `reason` field on merge preserve-rename entries (Part 2) are all done. See ROADMAP for M13 hash-algorithm changes that will require updating the `checksum_context` algorithm field and MHL mapping (Part 4).
 
 Target: next implementation session. Goal is to make offload output consumable by Verify and Merge without a re-scan, and to give offload and merge one shared rename contract so a folder that crosses the offload to merge boundary does not trip the rename-divergence path.
 
@@ -9,9 +9,9 @@ Grounded in the current code, not invented:
 - Offload in-memory manifest: `core/offload.py` `prehash_source` and `build_normalized_manifest`.
 - Rename consumer: `core/comparison.py:96` reads top-level `renames[]` keyed `{from, to}` on relative posix paths.
 
-No hash-algorithm decision is needed. Offload prehash already computes sha256 (`offload.py:386`, `algorithm: "sha256"`), so it overlaps with merge/transfer manifests on sha256.
+Current algorithm: offload prehash computes sha256 (`offload.py:386`, `algorithm: "sha256"`), overlapping with merge/transfer manifests. **M13 rewrites this to xxh128** — see ROADMAP M13. After M13 the `checksum_context.algorithm` field here and in Part 4's MHL mapping must be updated.
 
-> **Note (June 14, 2026):** the diff no longer depends on that overlap holding. `three_way_diff` compares on the strongest **shared** algorithm and, when two sides share none (e.g. a Drive md5-only manifest against a local SHA-256 scan), reports `DiffState.INDETERMINATE` ("Unknown") rather than a false change. SHA-256 overlap is still the desired common case; the indeterminate path is the honest fallback when it is absent.
+> **Note (June 14, 2026):** the diff no longer depends on algorithm overlap. `three_way_diff` compares on the strongest **shared** algorithm and, when two sides share none (e.g. a Drive md5-only manifest against a local xxh128 scan after M13), reports `DiffState.INDETERMINATE` ("Unknown") rather than a false change. The indeterminate path is the honest fallback for the genuine no-shared-algorithm runtime case (Drive md5 vs local xxh128). No migration burden: beta ships clean with no sha256 field archives.
 
 ---
 
@@ -250,11 +250,13 @@ ST SyncTool can export an ASC Media Hash List sidecar (`.mhl`) next to `st_manif
 
 - **Format:** ASC MHL v2.0, namespace `urn:ASC:MHL:v2.0`, single `<hashlist version="2.0">` with required `<creatorinfo>` (creationdate, hostname, tool[@version]), `<processinfo>` (`<process>transfer</process>`) and a `<hashes>` block of `<hash>` entries. Validated against the published schema `xsd/ASCMHL.xsd` (github.com/ascmitc/mhl), bundled at `tests/fixtures/ASCMHL.xsd`.
 - **Per file:** `<path size=".." lastmodificationdate="..">rel/posix/path</path>` plus hash elements in schema order (c4, md5, sha1, xxh128, xxh3, xxh64), each carrying `action="original"` and `hashdate`.
-- **Hash mapping:** manifest `md5` to `<md5>`, manifest `xxhash3_64` to `<xxh3>`. **sha256 is intentionally not exported** because the ASC MHL v2.0 schema defines no sha256 element. Every manifest we write also carries an MHL-compatible hash (xxhash3_64 for local, md5 for Drive), so each file still gets a verifiable hash; a file that somehow has only sha256 is written with its path but no hash element and reported in `MhlExportResult.unhashed`.
+- **Hash mapping:** manifest `md5` to `<md5>`, manifest `xxh128` to `<xxh128>`. **sha256 is intentionally not exported** because the ASC MHL v2.0 schema defines no sha256 element. After M13, every local manifest carries xxh128 and every Drive manifest carries md5 (with xxh128 where local bytes were available), so each file gets a verifiable hash; a pre-M13 manifest with only sha256 is written with its path but no hash element and reported in `MhlExportResult.unhashed`. The prior mapping (`xxhash3_64` → `<xxh3>`) is removed by M13 — the MHL export must be updated in the same M13 PR.
 - **Trigger:** off by default. An "Export ASC MHL (.mhl)" checkbox in the Transfer and Offload tabs sets `export_mhl`, threaded through `route_transfer`/`transfer_folder`/`transfer_folder_rclone` and `OffloadConfig`/`save_offload_manifest`. A `.mhl` (named from the manifest label) is written next to each saved manifest; an export failure is logged and swallowed so it never affects the copy.
 
 ## Out of scope for this change, tracked separately
 
-- `.DS_Store` ingest asymmetry: offload copies it, merge filters it via `comparison._is_ignored`. Unify the ignore list across both subsystems in a follow-up.
 - `root` vs `counterpart_path` path vocabulary across producers (renamed from `server_path` in schema 1.2; `_migrate()` backfills `counterpart_path` from `server_path` for schema versions below 1.2).
-- Same-second COC log filename collision (`offload.py` derives the filename from the current second).
+
+*Previously listed here, now resolved:*
+- `.DS_Store` ingest asymmetry: fixed. Offload now skips it via `SKIP_FILENAMES` frozenset (`offload.py:43`); merge filters it via `comparison._is_ignored`. Both sides aligned.
+- Same-second COC log filename collision: fixed. `write_chain_of_custody_log` appends a 4-char random hex suffix via `secrets.token_hex(2)` (`offload.py:905`).

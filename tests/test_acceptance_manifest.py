@@ -193,6 +193,10 @@ class TestSameNameMergeBaseClean:
 # on the pre-normalization card names, diffed against the normalized destination,
 # must report the normalized paths as RENAMED (not LOCAL_ONLY) and suppress the
 # original paths (not flag them DELETED).
+#
+# Both producers (offload with reason="normalize", merge with reason="preserve")
+# are covered: comparison.py only reads {from, to} and ignores reason, so the
+# collapse logic is identical regardless of producer.
 # ---------------------------------------------------------------------------
 
 class TestOriginalNameMergeBaseCollapses:

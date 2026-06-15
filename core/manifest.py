@@ -118,7 +118,12 @@ def load_manifest(path: Path) -> dict:
 
 
 def _migrate(manifest: dict) -> None:
-    """Backfill fields missing from pre-1.2 manifests, in-place."""
+    """Backfill fields missing from pre-1.2 manifests, in-place.
+
+    Defensive-only: beta ships clean; no pre-1.2 field archives exist.
+    Kept for dev-time artifacts (test fixtures, local developer manifests).
+    Reassess at M13 when schema version bumps again.
+    """
     version = manifest.get("schema_version", "1.0")
     if version >= SCHEMA_VERSION:
         return
