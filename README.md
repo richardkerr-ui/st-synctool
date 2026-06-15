@@ -267,11 +267,29 @@ Any files present in the folder but not in the manifest are noted as a warning (
 
 ### Verify all projects (batch)
 
+Projects are registered automatically: the **Transfer** tab registers each error-free local destination on completion; the **Merge** tab registers on scan and on apply. Both use the same stable project ID (hash of local path + counterpart path) so the same folder registered by either tab is deduplicated to one entry.
+
 The **Verify All Projects** button runs every project in the registry (`~/Documents/STSyncTool/projects.json`) against its latest manifest in one pass and produces a single consolidated report with per-project OK / MISSING / MISMATCH counts and an overall OK / FAIL / ERROR tally. Projects with no manifest on record, no folder, or an unreadable manifest are listed in a "Skipped" section with the reason. A project that fails to verify (unreadable folder, rclone error) is reported as ERROR without aborting the rest of the run.
 
 ### Scheduled monthly verification
 
-The app can install a macOS launchd agent that wakes once a month, verifies every registered project against its latest manifest, writes a consolidated report to `~/Documents/STSyncTool/Verify Reports/scheduled_verify_<timestamp>.txt`, and records the outcome. On the next normal launch, if the last scheduled run found problems, a dismissible banner appears ("2 archives failed verification on June 1"). No daemon and no background app — just a launchd agent the app installs on request and a headless run triggered with `--scheduled-verify`. (The install toggle ships with the signed app build, since the agent must point at the installed application.)
+The app supports a macOS launchd agent that wakes once a month, verifies every registered project against its latest manifest, writes a consolidated report to `~/Documents/STSyncTool/Verify Reports/scheduled_verify_<timestamp>.txt`, and records the outcome. On the next normal launch, if the last scheduled run found problems, a dismissible banner appears ("2 archives failed verification on June 1"). No daemon and no background app — just a launchd agent and a headless run triggered with `--scheduled-verify`.
+
+**Current install status:** The GUI toggle has not shipped yet. On a git install, register the agent manually — run this once from the repo root with the venv active:
+
+```python
+from pathlib import Path
+from core import scheduled_verify
+import sys
+
+repo = Path(__file__).resolve().parent   # absolute repo root
+scheduled_verify.install_schedule(
+    [sys.executable, str(repo / "main.py"), "--scheduled-verify"],
+    working_directory=str(repo),
+)
+```
+
+All paths must be absolute: launchd starts agents from `/` with no shell or PATH. `sys.executable` is the venv Python when the venv is active. The signed `.app` build will expose this as a one-click toggle when it ships.
 
 ### Output
 
@@ -411,7 +429,7 @@ The manifest is a JSON file that lists every file in a folder along with:
 
 - File size
 - Modification time
-- SHA-256, SHA-1, and MD5 hashes
+- SHA-256, SHA-1, MD5, and xxh3 hashes
 - Status info (verified, when, by whom)
 
 **Where they live:**
@@ -579,6 +597,8 @@ Offline is treated as the normal case, not the edge case. A "shipped" ledger rec
 Alongside the raw files, each completed job appends one compact summary line to a per-machine index (`activity_{workstation}.jsonl`: operation, time, user, project, source, destinations, file count, bytes, verdict, log filename). Because each machine writes only its own shard there are no write conflicts and no server. Org-wide views merge the shards (kilobytes) and fetch a raw custody log only when a human opens one. Per-workstation staleness ("Cart 3 hasn't reported since June 2") falls out of the merged shards for free.
 
 ### History
+
+> **Note:** Org-wide History needs a Shared Drive activity remote. Until set, History = this machine only.
 
 The **History** tab renders the merged index as readable rows ("Jun 12 · Cart 3 · Offload · A001 → NAS, Shuttle · 312 files · 1.2 GiB · VERIFIED") with dropdown filters for operation, workstation, user and project. Your own machine's history loads instantly from local files and works offline; **Refresh org activity** downloads only the other machines' summary shards (kilobytes), never the raw logs. Set the shared Drive folder under the **Settings** button first. The query and row-formatting logic lives in `core/history.py` (headless and unit tested); the GUI renders rows and dropdowns only.
 

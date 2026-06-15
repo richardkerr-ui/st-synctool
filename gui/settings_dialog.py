@@ -41,7 +41,11 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         self.remote_base_input = QLineEdit()
         self.remote_base_input.setPlaceholderText("gdrive:ST_SyncTool_Activity")
+        note = QLabel("Blank = local-only. Org-wide view needs a Shared Drive remote all users can reach.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray; font-size: 11px;")
         form.addRow("Activity remote base:", self.remote_base_input)
+        form.addRow("", note)
         root.addLayout(form)
 
         self.shipping_chk = QCheckBox("Ship logs to the shared folder (recommended)")
