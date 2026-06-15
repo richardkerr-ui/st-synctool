@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
     def __init__(self, force_setup: bool = False):
         super().__init__()
         self.setWindowTitle("ST SyncTool -- Signal Theory")
-        self.setMinimumSize(1100, 780)
+        self.setMinimumSize(720, 520)
         self._force_setup = force_setup
         self._build_ui()
         self._restore_window_state()
