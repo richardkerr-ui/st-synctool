@@ -356,14 +356,25 @@ class SummaryDialog(QDialog):
         layout.addWidget(summary_lbl)
 
         # Per-source eject indicators
+        from core.clearance import compute_clearance
         src_labels = list(dict.fromkeys(r.source_label for r in results))
         for src_label in src_labels:
             src_results = [r for r in results if r.source_label == src_label]
             all_done    = all(r.state in (CellState.DONE, CellState.SKIPPED) for r in src_results)
             any_failed  = any(r.state == CellState.FAILED for r in src_results)
+
+            # M10.1: compute clearance before the eject label so the eject color
+            # can reflect it — green only when copies are verified, gray otherwise.
+            verdict = compute_clearance(
+                src_label, results, prior_clean_dests=self._prior_map.get(src_label))
+
             if all_done and not any_failed:
-                color = theme.VERDICT_GREEN
-                msg   = f"✓ {src_label} — Safe to eject"
+                if verdict.cleared:
+                    color = theme.VERDICT_GREEN
+                    msg   = f"✓ {src_label} — Safe to eject"
+                else:
+                    color = theme.VERDICT_MUTED
+                    msg   = f"• {src_label} — Safe to eject (not yet cleared to format)"
             elif all_done:
                 color = theme.VERDICT_CORAL
                 msg   = f"⚠ {src_label} — Errors on some destinations — review before ejecting"
@@ -374,11 +385,6 @@ class SummaryDialog(QDialog):
             eject_lbl.setStyleSheet(f"color:{color};font-weight:bold;font-size:13px;")
             layout.addWidget(eject_lbl)
 
-            # M10.1: safe-to-format clearance (verification-based, stricter than
-            # eject). Logic lives in core.clearance; this only renders it.
-            from core.clearance import compute_clearance
-            verdict = compute_clearance(
-                src_label, results, prior_clean_dests=self._prior_map.get(src_label))
             clr_color = theme.VERDICT_GREEN if verdict.cleared else theme.VERDICT_GOLD
             clr_icon  = "✓" if verdict.cleared else "⚠"
             clr_lbl = QLabel(f"{clr_icon} {verdict.to_text()}")
