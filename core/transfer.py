@@ -15,7 +15,11 @@ class TransferError(Exception): pass
 class TransferWarning(Exception): pass
 
 
-def estimate_time_seconds(size_bytes, speed_mbps=150.0):
+SPEED_MBPS_LOCAL = 150.0   # NAS / local disk
+SPEED_MBPS_DRIVE = 15.0    # WFH upload to Google Drive
+
+
+def estimate_time_seconds(size_bytes, speed_mbps=SPEED_MBPS_LOCAL):
     return size_bytes / (speed_mbps * 1024 * 1024)
 
 
@@ -52,7 +56,7 @@ def pre_flight_checks(source, destination, is_gdrive_dest=False, log_cb=None):
                     )
             else:
                 log(f"Remote source: {format_bytes(total)} across {count} file(s) "
-                    f"— est. {summary['estimated_human']} @ 150 MB/s")
+                    f"— est. {summary['estimated_human']} @ {SPEED_MBPS_LOCAL:.0f} MB/s (download)")
         except TransferError:
             raise
         except Exception as e:
@@ -63,10 +67,12 @@ def pre_flight_checks(source, destination, is_gdrive_dest=False, log_cb=None):
             raise TransferError(f"Source does not exist: {src_path}")
         total = folder_size(src_path)
         summary["source_size"] = total
-        secs = estimate_time_seconds(total)
+        speed_mbps = SPEED_MBPS_DRIVE if is_gdrive_dest else SPEED_MBPS_LOCAL
+        secs = estimate_time_seconds(total, speed_mbps=speed_mbps)
         h = int(secs // 3600); m2 = int((secs % 3600) // 60); s = int(secs % 60)
         summary["estimated_human"] = f"{h}h {m2}m {s}s" if h else f"{m2}m {s}s"
-        log(f"Source size: {format_bytes(total)} — est. {summary['estimated_human']} @ 150 MB/s")
+        dest_label = "Drive upload" if is_gdrive_dest else "local"
+        log(f"Source size: {format_bytes(total)} — est. {summary['estimated_human']} @ {speed_mbps:.0f} MB/s ({dest_label})")
 
         if is_gdrive_dest and total > GDRIVE_DAILY_LIMIT_BYTES:
             raise TransferError(

@@ -23,6 +23,8 @@ from core.amphetamine import check_and_prompt, start_session, end_session
 from core.demo import ensure_demo_folder
 from gui import theme
 from core import rclone_bridge
+from core import projects as project_registry
+from core.manifest import _project_id as _make_project_id
 
 
 class TransferWorker(QObject):
@@ -601,8 +603,14 @@ class TransferTab(QWidget):
         else:
             self.log.log(f"Transfer complete  {result.get('actual_dest', '')}", "success")
             show_toast(self, "Transfer complete.", "success")
+            fallback_count = (result.get("manifest", {})
+                              .get("checksum_context", {})
+                              .get("paranoid_fallback_count", 0))
+            subtitle = (f"{fallback_count} file(s) verified via rclone-checksum, not independent SHA-256."
+                        if fallback_count else "")
             self._banner.show_result(
-                "✓  TRANSFER COMPLETE — all files copied and verified.", ok=True)
+                "✓  TRANSFER COMPLETE — all files copied and verified.", ok=True,
+                subtitle=subtitle)
         # Offer a one-click jump to the output for local destinations.
         dest = result.get("actual_dest") or self.dst_input.text()
         self._last_dest = dest
@@ -610,6 +618,11 @@ class TransferTab(QWidget):
         self.src_input.add_to_recent(self.src_input.text())
         self.dst_input.add_to_recent(self.dst_input.text())
         self._write_txt_log(result)
+        src = self.src_input.text()
+        if not errors and not (is_gdrive_url(src) and is_gdrive_url(dest)):
+            local = dest if not is_gdrive_url(dest) else src
+            remote = src if not is_gdrive_url(dest) else dest
+            self._register_project(result, src=remote, dest=local)
 
     def _reveal_destination(self):
         dest = getattr(self, "_last_dest", "")
@@ -647,6 +660,25 @@ class TransferTab(QWidget):
         self.log.log(f"Manifest saved ({len(manifest['files'])} files)", "success")
         for p in paths:
             self.log.log(f"  -> {p}", "info")
+
+    def _register_project(self, result, src: str, dest: str):
+        """Register the transfer destination in the projects registry.
+
+        Only called on error-free transfers to local destinations, so Verify All
+        and scheduled verify can find this folder. project_id mirrors the formula
+        used by Merge: stable hash of (local_path, counterpart_path).
+        """
+        saved = result.get("saved_manifest_paths", [])
+        project_id = _make_project_id(dest, src)
+        try:
+            project_registry.upsert_project(
+                project_id,
+                local_path=dest,
+                server_path=src,
+                latest_manifest=saved[0] if saved else "",
+            )
+        except Exception as e:
+            self.log.log(f"  Could not register project: {e}", "warning")
 
     def _write_txt_log(self, result):
         import getpass, socket
