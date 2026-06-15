@@ -81,6 +81,13 @@ class DiffTable(QTableWidget):
         self._row_states.clear()
         self._gdrive_urls.clear()
         self._diff_results.clear()
+        # Fully clear before repopulating. setRowCount(len) alone keeps the old
+        # selection when the row count is unchanged across scans, so the conflict
+        # detail panel (driven by itemSelectionChanged) would keep showing the
+        # previous row's data. Dropping to 0 first clears the selection and emits
+        # the signal, so the panel resets until the user picks a row.
+        self.clearSelection()
+        self.setRowCount(0)
         self.setRowCount(len(results))
 
         for row, r in enumerate(results):
