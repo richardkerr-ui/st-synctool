@@ -103,7 +103,12 @@ def relative_date_label(timestamp: str, now: Optional[datetime] = None) -> str:
         dt = datetime.fromisoformat(timestamp)
     except (ValueError, TypeError):
         return timestamp or ""
-    now = now or datetime.now()
+    if now is None:
+        from datetime import timezone
+        now = datetime.now(timezone.utc) if dt.tzinfo else datetime.now()
+    elif dt.tzinfo and now.tzinfo is None:
+        from datetime import timezone
+        now = now.replace(tzinfo=timezone.utc)
     secs = (now - dt).total_seconds()
     if secs < 0:
         return _date_label(timestamp)          # future stamp — show the date
