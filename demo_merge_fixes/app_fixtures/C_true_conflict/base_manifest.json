@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.2",
+  "files": {
+    "edit.prproj": {
+      "type": "file",
+      "size": 32,
+      "modtime": "2026-06-15T00:59:53.005310+00:00",
+      "checksums": {
+        "sha256": "f4515bb90ffe6052dcd418cca6b12f7c709511697fcb6e281022cf582208298f"
+      },
+      "hash_algorithm": "sha256",
+      "gdrive_url": ""
+    }
+  },
+  "renames": []
+}

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ST SyncTool — full redesign proof (all tabs)</title>
+<style>
+  :root{
+    --accent:#5E9BD6; --bg:#25282A; --panel:#2A2E30; --field:#1E2123;
+    --field-border:#3F4347; --text:#FAF7F0; --muted:#888B8E; --coral:#EE5340; --radius:8px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{background:#15171890;background:var(--bg);color:var(--text);
+    font:14px/1.5 -apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;}
+  .window{max-width:1180px;margin:24px auto;background:var(--bg);border:1px solid #1b1d1f;
+    border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45);}
+  .titlebar{background:#ECECEC;height:36px;display:flex;align-items:center;padding:0 14px;gap:8px;}
+  .dot{width:12px;height:12px;border-radius:50%;}
+  .dot.r{background:#FF5F57;}.dot.y{background:#FEBC2E;}.dot.g{background:#28C840;}
+  .titlebar .name{flex:1;text-align:center;color:#3a3a3a;font-weight:700;font-size:13px;margin-right:48px;}
+  .header{display:flex;align-items:center;padding:16px 22px 0;}
+  .brand{font-size:20px;font-weight:800;letter-spacing:.5px;}
+  .brand small{color:var(--muted);font-weight:500;font-size:12px;margin-left:10px;}
+  .tools{margin-left:auto;display:flex;align-items:center;gap:8px;}
+  .chip{font-size:11px;color:#9a9da0;border:1px solid #3a3e42;border-radius:5px;padding:4px 9px;background:#2a2e30;}
+  .ver{color:#5b5e61;font-size:11px;margin-left:4px;}
+  .tabs{display:flex;gap:30px;padding:14px 24px 0;border-bottom:1px solid #303437;}
+  .tab{position:relative;padding:8px 2px 14px;color:var(--muted);font-weight:700;letter-spacing:1.5px;
+    font-size:13px;cursor:pointer;background:none;border:none;}
+  .tab.active{color:var(--text);}
+  .tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:3px;border-radius:3px;background:var(--accent);}
+  .body{padding:24px 28px 16px;min-height:560px;}
+  .pane{display:none;}.pane.active{display:block;}
+  .section-label{text-transform:uppercase;letter-spacing:2px;font-size:12px;font-weight:700;color:var(--accent);margin:22px 0 12px;}
+  .section-label:first-child{margin-top:0;}
+  .row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .lbl{width:120px;color:#c9ccce;}
+  .field{flex:1;background:var(--field);border:1px solid var(--field-border);border-radius:var(--radius);
+    padding:11px 14px;color:var(--muted);display:flex;align-items:center;}
+  .field .caret{margin-left:auto;color:#6a6e71;}
+  .btn{background:#2f3336;color:var(--text);border:1px solid #3f4347;border-radius:var(--radius);padding:10px 16px;font-weight:600;cursor:pointer;}
+  .btn.sm{padding:7px 12px;font-size:12px;}
+  .demo-link{display:block;text-align:right;color:var(--muted);font-size:12px;margin:2px;}
+  .demo-link::before{content:"⊕ ";color:var(--accent);}
+  .preflight{background:#222628;border:1px solid #303437;border-radius:var(--radius);padding:16px 18px;display:flex;gap:42px;color:var(--muted);}
+  .preflight .k{font-size:11px;text-transform:uppercase;letter-spacing:1px;}
+  .preflight .v{color:#c9ccce;}.preflight .hint{margin-left:auto;align-self:center;}
+  .opt{display:flex;align-items:center;gap:10px;margin:11px 0;}
+  .cb{width:18px;height:18px;border-radius:5px;border:1.5px solid #4a4e51;background:#1e2123;flex:none;}
+  .cb.on{background:var(--accent);border-color:var(--accent);position:relative;}
+  .cb.on::after{content:"✓";position:absolute;inset:0;color:var(--bg);font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;}
+  select.sel{background:var(--field);color:var(--text);border:1px solid var(--field-border);border-radius:6px;padding:8px 10px;}
+  .mirror{display:flex;align-items:center;gap:10px;border:1px solid var(--coral);color:var(--coral);border-radius:var(--radius);padding:11px 14px;margin-top:8px;font-size:13px;}
+  .actions{display:flex;align-items:center;gap:12px;margin-top:28px;}
+  .primary{background:var(--accent);color:var(--bg);border:none;border-radius:var(--radius);padding:13px 26px;font-weight:800;font-size:14px;cursor:pointer;}
+  .ghost{background:#2a2e30;color:#cfd2d4;border:1px solid #3f4347;border-radius:var(--radius);padding:13px 18px;cursor:pointer;}
+  .status{color:var(--muted);}.right{margin-left:auto;}
+  .logbar{display:flex;align-items:center;gap:10px;margin-top:24px;}
+  .logbar .lbl2{color:#F6BE00;font-weight:700;letter-spacing:2px;font-size:12px;width:auto;}
+  .logbar .r{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;}
+  .log{height:120px;background:#1b1e20;border:1px solid #303437;border-radius:var(--radius);margin-top:8px;}
+  /* tables */
+  table{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px;}
+  th{background:#222628;color:#aeb1b3;text-align:left;padding:9px 12px;font-weight:700;font-size:11px;letter-spacing:1px;text-transform:uppercase;}
+  td{padding:9px 12px;border-bottom:1px solid #2a2e30;color:#d4d7d9;}
+  .pill{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700;}
+  .p-blue{background:#2c4a63;color:#9fc6e6;}.p-purple{background:#3e3257;color:#c9aee6;}
+  .p-coral{background:#5a2a26;color:#f0a59b;}.p-muted{background:#33373a;color:#9a9da0;}
+  .p-gold{background:#4a3d12;color:#f6cf5a;}
+  .v-green{color:#3DBB8E;font-weight:700;}.v-coral{color:#EE5340;font-weight:700;}.v-amber{color:#F6BE00;font-weight:700;}.v-muted{color:#aeb1b3;font-weight:700;}
+  .summary{color:var(--muted);margin:10px 0 4px;}
+  .tiles{display:flex;gap:14px;margin-top:6px;}
+  .tile{flex:1;background:#222628;border:1px solid #303437;border-radius:var(--radius);padding:16px;text-align:center;}
+  .tile .bar{height:4px;width:30px;border-radius:3px;margin:0 auto 8px;}
+  .tile .n{font-size:20px;font-weight:800;}.tile .t{color:var(--muted);font-size:12px;}
+  .dropzone{border:2px dashed #3f4347;border-radius:var(--radius);padding:30px;text-align:center;color:var(--muted);}
+  .filters{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .filters label{color:var(--muted);font-size:12px;}
+  .banner{background:var(--coral);color:#1a1a1a;border-radius:6px;padding:7px 12px;font-size:13px;font-weight:600;margin:10px 0;}
+  .note{max-width:1180px;margin:14px auto 40px;color:#9a9da0;font-size:13px;text-align:center;}
+  .note b{color:var(--text);}
+  .card{border:1px solid #303437;border-radius:var(--radius);padding:12px;margin-bottom:10px;}
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="name">ST SyncTool — Signal Theory</span></div>
+  <div class="header">
+    <div class="brand">ST SyncTool <small>Signal Theory Productions</small></div>
+    <div class="tools"><span class="chip">Settings</span><span class="chip">Report a Problem</span><span class="chip">? Tour</span><span class="ver">v1.0.0</span></div>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-tab="transfer" data-accent="#5E9BD6">TRANSFER</button>
+    <button class="tab" data-tab="merge" data-accent="#B57EDC">MERGE</button>
+    <button class="tab" data-tab="offload" data-accent="#EE5340">OFFLOAD</button>
+    <button class="tab" data-tab="verify" data-accent="#3DBB8E">VERIFY</button>
+    <button class="tab" data-tab="history" data-accent="#F6BE00">HISTORY</button>
+  </div>
+  <div class="body">
+
+    <!-- TRANSFER -->
+    <section class="pane active" id="transfer">
+      <div class="section-label">Source &amp; Destination</div>
+      <div class="row"><span class="lbl">Source:</span><div class="field">Paste a path or a Google Drive URL… <span class="caret">▾</span></div><button class="btn">Browse…</button></div>
+      <div class="row"><span class="lbl">Destination:</span><div class="field">Paste a path or a Google Drive URL… <span class="caret">▾</span></div><button class="btn">Browse…</button></div>
+      <span class="demo-link">Use demo folder</span>
+      <div class="preflight"><div><div class="k">Source size</div><div class="v">—</div></div><div><div class="k">Free space</div><div class="v">—</div></div><div><div class="k">Est. time</div><div class="v">—</div></div><div class="hint">Enter paths to see the transfer summary</div></div>
+      <div class="section-label">Options</div>
+      <div class="opt"><span>On conflict:</span><select class="sel"><option>Overwrite</option><option>Skip existing</option><option>Rename copy</option></select></div>
+      <div class="opt"><span class="cb"></span> Auto-extract multipart .zips after transfer</div>
+      <div class="opt"><span class="cb"></span> Paranoid verification (independent SHA-256)</div>
+      <div class="opt"><span class="cb on"></span> Export ASC MHL (.mhl) sidecar for post-house verification</div>
+      <div class="mirror"><span class="cb"></span> ⚠ Mirror mode — deletes files at the destination not present in source</div>
+      <div class="actions"><button class="primary">▶ Start Transfer</button><button class="ghost">✕ Cancel</button><span class="status">Ready</span><button class="ghost right">🗎 Generate Manifest Only</button></div>
+    </section>
+
+    <!-- MERGE -->
+    <section class="pane" id="merge">
+      <div class="row"><span class="lbl">Quick Load:</span><select class="sel" style="flex:1"><option>— select project —</option></select><button class="btn sm">⟳</button></div>
+      <div class="section-label">Paths</div>
+      <div class="row"><span class="lbl">Base Manifest:</span><div class="field">Auto-detects st_manifest.json…<span class="caret">▾</span></div><button class="btn">Browse…</button></div>
+      <div class="row"><span class="lbl">Local (Yours):</span><div class="field">Your working copy folder…<span class="caret">▾</span></div><button class="btn">Browse…</button></div>
+      <div class="row"><span class="lbl">Server (Theirs):</span><div class="field">NAS or Drive folder…<span class="caret">▾</span></div><button class="btn">Browse…</button><button class="btn">Check</button></div>
+      <div class="section-label">Options</div>
+      <div class="opt"><span class="cb on"></span> Preserve existing files on overwrite (rename incoming with date-initials suffix)</div>
+      <div class="opt"><span class="cb on"></span> Re-scan before apply (catches drift since the initial scan)</div>
+      <div class="actions" style="margin-top:18px"><button class="primary">Scan &amp; Compare</button><button class="ghost">Apply Selected Actions</button><button class="ghost">Newer Wins</button><span class="status right">3 conflicts · 44 auto-sync · 2 deletions held</span></div>
+      <div class="section-label">Changes</div>
+      <table><thead><tr><th>Path</th><th>State</th><th>Action</th></tr></thead><tbody>
+        <tr><td>DCIM/A001/new_footage.txt</td><td><span class="pill p-gold">Local Only</span></td><td>Push to Server ▾</td></tr>
+        <tr><td>DCIM/A001/scene_01.txt</td><td><span class="pill p-gold">Local Changed</span></td><td>Push to Server ▾</td></tr>
+        <tr><td>DCIM/A001/scene_03.txt</td><td><span class="pill p-coral">Both Changed</span></td><td>Skip ▾</td></tr>
+        <tr><td>AUDIO/sound_report.txt</td><td><span class="pill p-coral">Deleted Local</span></td><td>Pull from Server ▾</td></tr>
+        <tr><td>DCIM/B001/server_add.txt</td><td><span class="pill p-muted">Server Only</span></td><td>Pull from Server ▾</td></tr>
+        <tr><td>DCIM/A001/scene_02.txt</td><td><span class="pill p-muted">Server Changed</span></td><td>Pull from Server ▾</td></tr>
+      </tbody></table>
+      <p class="summary" style="margin-top:8px">Colour key — <span class="v-coral">coral</span>: needs your decision (conflicts &amp; held deletions) · <span class="v-amber">gold</span>: your changes going out · <span class="v-muted">gray</span>: routine incoming from server.</p>
+    </section>
+
+    <!-- OFFLOAD -->
+    <section class="pane" id="offload">
+      <div class="section-label">Sources (read-only)</div>
+      <div class="card"><div class="row" style="margin:0"><span class="cb on"></span><div class="field" style="max-width:160px">A001 — Day 1</div><div class="field">Card or source folder…</div><button class="btn">Browse…</button></div></div>
+      <button class="btn sm">+ Add Source</button>
+      <div class="section-label">Destinations</div>
+      <div class="row"><span>Preset:</span><select class="sel"><option>(select preset)</option></select><button class="btn sm">Load</button><button class="btn sm">Save…</button></div>
+      <div class="card"><div class="row" style="margin:0"><span class="cb on"></span><div class="field" style="max-width:160px">NAS</div><div class="field">Destination folder…</div><button class="btn">Browse…</button></div></div>
+      <button class="btn sm">+ Add Destination</button>
+      <div class="section-label">Options</div>
+      <div class="opt"><span class="cb"></span> Contact sheets &nbsp;·&nbsp; <span class="cb"></span> Export ASC MHL &nbsp;·&nbsp; <span class="cb"></span> Stop on first destination failure &nbsp;·&nbsp; <span class="cb on"></span> Auto-detect media cards</div>
+      <div class="actions"><button class="primary">▶ Start Offload</button><button class="ghost">✕ Cancel</button><span class="status">Ready</span></div>
+      <p class="summary">After an offload each source shows a clearance: <span class="v-green">✓ Safe to format</span> (2+ clean destinations) or <span class="v-amber">Not cleared — …</span>.</p>
+    </section>
+
+    <!-- VERIFY -->
+    <section class="pane" id="verify">
+      <div class="section-label">Folder to Verify</div>
+      <div class="row"><div class="field">Select a local folder or paste a Drive URL…<span class="caret">▾</span></div><button class="btn">Browse…</button></div>
+      <div class="section-label">Manifest File</div>
+      <div class="row"><div class="field">Auto-detects st_manifest.json for local folders…<span class="caret">▾</span></div><button class="btn">Browse…</button></div>
+      <div class="opt" style="margin-top:14px"><span class="cb"></span> Deep verify (downloads files) — Drive only</div>
+      <div class="actions"><button class="primary">🛡 Run Verification</button><button class="ghost">📋 Verify All Projects</button><button class="ghost">✕ Cancel</button></div>
+      <div class="section-label">Results</div>
+      <div class="tiles">
+        <div class="tile"><div class="bar" style="background:#3DBB8E"></div><div class="n" style="color:#3DBB8E">312</div><div class="t">OK</div></div>
+        <div class="tile"><div class="bar" style="background:#F6BE00"></div><div class="n" style="color:#F6BE00">0</div><div class="t">Extra files</div></div>
+        <div class="tile"><div class="bar" style="background:#EE5340"></div><div class="n" style="color:#EE5340">0</div><div class="t">Missing</div></div>
+        <div class="tile"><div class="bar" style="background:#C0468C"></div><div class="n" style="color:#C0468C">0</div><div class="t">Mismatch</div></div>
+      </div>
+      <p class="summary" style="margin-top:8px">OK <span class="v-green">green</span> · Extra files <span class="v-amber">amber</span> · Missing <span style="color:#EE5340;font-weight:700">red</span> · Mismatch <span style="color:#C0468C;font-weight:700">magenta</span>.</p>
+    </section>
+
+    <!-- HISTORY -->
+    <section class="pane" id="history">
+      <div class="filters">
+        <label>Operation</label><select class="sel"><option>— all —</option></select>
+        <label>Workstation</label><select class="sel"><option>— all —</option></select>
+        <label>User</label><select class="sel"><option>— all —</option></select>
+        <label>Project</label><select class="sel"><option>— all —</option></select>
+        <button class="btn sm right">Refresh org activity</button>
+      </div>
+      <div class="banner">⚠ 1 machine has not reported recently: Cart-3 (last reported Jun 1)</div>
+      <table><thead><tr><th>When</th><th>Workstation</th><th>Operation</th><th>Details</th><th>Verdict</th></tr></thead><tbody>
+        <tr><td>Jun 13</td><td>KC-RichardK</td><td>Offload</td><td>A001 → NAS, Shuttle · 312 files · 1.2 GiB</td><td class="v-green">VERIFIED</td></tr>
+        <tr><td>Jun 13</td><td>KC-RichardK</td><td>Transfer</td><td>Edit_Pull → Local · 48 files · 51 MiB</td><td class="v-muted">COMPLETE</td></tr>
+        <tr><td>Jun 12</td><td>KC-RichardK</td><td>Offload</td><td>C001 → NAS · 96 files · 384 MiB</td><td class="v-amber">NOT_CLEARED</td></tr>
+        <tr><td>Jun 11</td><td>Cart-2</td><td>Verify</td><td>Archive_Q2 · 904 files</td><td class="v-coral">FAIL</td></tr>
+        <tr><td>Jun 1</td><td>Cart-3</td><td>Offload</td><td>B002 → NAS, Shuttle · 144 files · 614 MiB</td><td class="v-green">VERIFIED</td></tr>
+      </tbody></table>
+      <p class="summary" style="margin-top:10px">Double-click a row to open its custody log (jobs run on this machine).</p>
+    </section>
+
+    <!-- shared LOG bar (hidden on History/Verify which have their own results) -->
+    <div class="logbar" id="logbar"><span class="lbl2">LOG</span><div class="r"><span class="cb on" style="--accent:#F6BE00"></span> Auto-clear between jobs <button class="btn sm">Save Log</button><button class="btn sm">Clear</button></div></div>
+    <div class="log" id="logarea"></div>
+  </div>
+</div>
+<p class="note"><b>Click each tab</b> to review it in the proposed style. Accent recolours per tab (Transfer blue · Merge purple · Offload coral · Verify green · History gold); layout/controls match the real app. Static mockup — colours &amp; spacing are the proposal.</p>
+<script>
+  const root=document.documentElement;
+  document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById(t.dataset.tab).classList.add('active');
+    root.style.setProperty('--accent',t.dataset.accent);
+    // History & Verify show their own results area, hide the generic log
+    const noLog=['history'].includes(t.dataset.tab);
+    document.getElementById('logbar').style.display=noLog?'none':'flex';
+    document.getElementById('logarea').style.display=noLog?'none':'block';
+  }));
+</script>
+</body>
+</html>

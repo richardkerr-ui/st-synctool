@@ -19,12 +19,12 @@ RCLONE_FLAGS = ["--drive-root-folder-id", "abc123"]
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _file_entry(sha256="aabbcc", size=1024):
-    return {"size": size, "checksums": {"sha256": sha256, "md5": "112233"}}
+def _file_entry(md5="aabbcc", size=1024):
+    return {"size": size, "checksums": {"md5": md5}}
 
 
-def _file_manifest(*names, sha256="aabbcc", size=1024):
-    return {"files": {n: _file_entry(sha256, size) for n in names}, "errors": []}
+def _file_manifest(*names, md5="aabbcc", size=1024):
+    return {"files": {n: _file_entry(md5, size) for n in names}, "errors": []}
 
 
 def _is_drive(s):
@@ -189,16 +189,16 @@ class TestStatusDiff:
     def test_unchanged_when_hash_and_size_match(self, tmp_path, rclone, log_cb):
         result = self._run(tmp_path, rclone, log_cb,
             pre_items=[{"Path": "clip.mov", "IsDir": False, "Size": 1024,
-                        "Hashes": {"SHA256": "AABBCC"}}],
-            post_files={"clip.mov": _file_entry(sha256="aabbcc", size=1024)},
+                        "Hashes": {"MD5": "AABBCC"}}],
+            post_files={"clip.mov": _file_entry(md5="aabbcc", size=1024)},
         )
         assert result["manifest"]["files"]["clip.mov"]["status"] == "unchanged"
 
     def test_updated_when_hash_differs(self, tmp_path, rclone, log_cb):
         result = self._run(tmp_path, rclone, log_cb,
             pre_items=[{"Path": "clip.mov", "IsDir": False, "Size": 1024,
-                        "Hashes": {"SHA256": "OLD000"}}],
-            post_files={"clip.mov": _file_entry(sha256="aabbcc", size=1024)},
+                        "Hashes": {"MD5": "OLD000"}}],
+            post_files={"clip.mov": _file_entry(md5="aabbcc", size=1024)},
         )
         assert result["manifest"]["files"]["clip.mov"]["status"] == "updated"
 
@@ -212,10 +212,10 @@ class TestStatusDiff:
     def test_status_counts_aggregated(self, tmp_path, rclone, log_cb):
         result = self._run(tmp_path, rclone, log_cb,
             pre_items=[{"Path": "a.mov", "IsDir": False, "Size": 1024,
-                        "Hashes": {"SHA256": "AABBCC"}}],
+                        "Hashes": {"MD5": "AABBCC"}}],
             post_files={
-                "a.mov": _file_entry(sha256="aabbcc", size=1024),   # unchanged
-                "b.mov": _file_entry(sha256="001122", size=512),    # uploaded
+                "a.mov": _file_entry(md5="aabbcc", size=1024),   # unchanged
+                "b.mov": _file_entry(md5="001122", size=512),    # uploaded
             },
         )
         counts = result["manifest"]["status_counts"]
@@ -238,26 +238,26 @@ class TestStatusDiff:
 class TestParanoidVerify:
     def _stub_hashes(self, monkeypatch, hashes):
         monkeypatch.setattr("core.transfer._compute_local_hashes",
-                            lambda path, log_cb=None: hashes)
+                            lambda path, log_cb=None, use_md5=False: hashes)
 
-    def test_local_to_drive_verified_on_sha256_match(self, tmp_path, rclone, log_cb, monkeypatch):
+    def test_local_to_drive_verified_on_md5_match(self, tmp_path, rclone, log_cb, monkeypatch):
         self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
-        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", sha256="aabbcc")
+        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
         result = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
                                         paranoid_verify=True, log_cb=log_cb)
         f = result["manifest"]["files"]["file.mov"]
         assert f["verified"] is True
         assert f["verification_method"] == "paranoid"
 
-    def test_local_to_drive_fails_on_sha256_mismatch(self, tmp_path, rclone, log_cb, monkeypatch):
+    def test_local_to_drive_fails_on_md5_mismatch(self, tmp_path, rclone, log_cb, monkeypatch):
         self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
-        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", sha256="DIFFERENT")
+        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="DIFFERENT")
         result = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
                                         paranoid_verify=True, log_cb=log_cb)
         assert "file.mov" in result["manifest"]["verify_failures"]
         assert result["manifest"]["files"]["file.mov"]["verified"] is False
 
-    def test_paranoid_fallback_when_drive_has_no_sha256(self, tmp_path, rclone, log_cb, monkeypatch):
+    def test_paranoid_fallback_when_drive_has_no_md5(self, tmp_path, rclone, log_cb, monkeypatch):
         self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
         rclone.lsjson_to_manifest.return_value = {
             "files": {"file.mov": {"size": 512, "checksums": {}}},
@@ -269,16 +269,16 @@ class TestParanoidVerify:
         assert f["verification_method"] == "rclone-checksum"
         assert "file.mov" in result["manifest"]["checksum_context"]["paranoid_fallback_files"]
 
-    def test_drive_to_local_verified_on_sha256_match(self, tmp_path, rclone, log_cb, monkeypatch):
+    def test_drive_to_local_verified_on_md5_match(self, tmp_path, rclone, log_cb, monkeypatch):
         self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
-        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", sha256="aabbcc")
+        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
         result = transfer_folder_rclone(DRIVE_URL, str(tmp_path),
                                         paranoid_verify=True, log_cb=log_cb)
         assert result["manifest"]["files"]["file.mov"]["verified"] is True
 
-    def test_drive_to_local_fails_on_sha256_mismatch(self, tmp_path, rclone, log_cb, monkeypatch):
+    def test_drive_to_local_fails_on_md5_mismatch(self, tmp_path, rclone, log_cb, monkeypatch):
         self._stub_hashes(monkeypatch, {"file.mov": "zzzzzz"})
-        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", sha256="aabbcc")
+        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
         result = transfer_folder_rclone(DRIVE_URL, str(tmp_path),
                                         paranoid_verify=True, log_cb=log_cb)
         assert "file.mov" in result["manifest"]["verify_failures"]
@@ -290,7 +290,7 @@ class TestParanoidVerify:
         ctx = result["manifest"]["checksum_context"]
         assert ctx["paranoid"] is True
         assert ctx["method"] == "paranoid"
-        assert ctx["algorithm"] == "sha256"
+        assert ctx["algorithm"] == "md5"
 
     def test_checksum_context_non_paranoid_fields(self, tmp_path, rclone, log_cb):
         result = transfer_folder_rclone(str(tmp_path), DRIVE_URL, log_cb=log_cb)

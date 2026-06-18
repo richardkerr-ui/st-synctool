@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.2",
+  "files": {
+    "scene_01.mov": {
+      "type": "file",
+      "size": 56,
+      "modtime": "2026-06-15T00:59:53.003664+00:00",
+      "checksums": {
+        "md5": "55677d07ac433dae4c27d4e583acee39"
+      },
+      "hash_algorithm": "md5",
+      "gdrive_url": ""
+    },
+    "scene_02.mov": {
+      "type": "file",
+      "size": 28,
+      "modtime": "2026-06-15T00:59:53.003765+00:00",
+      "checksums": {
+        "md5": "b47f23f67360a03d9adc8b8434ff81cf"
+      },
+      "hash_algorithm": "md5",
+      "gdrive_url": ""
+    }
+  },
+  "renames": []
+}

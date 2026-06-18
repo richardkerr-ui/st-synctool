@@ -14,6 +14,7 @@ Also covers the SCHEMA_INTEROP_SPEC.md acceptance tests 1-6.
 import hashlib
 import json
 import shutil
+import xxhash
 import pytest
 from pathlib import Path
 
@@ -79,8 +80,8 @@ def offload_source_manifest(sample_dir):
             data = f.read_bytes()
             result[rel] = {
                 "size": len(data),
-                "checksum": hashlib.sha256(data).hexdigest(),
-                "algorithm": "sha256",
+                "checksum": xxhash.xxh128(data).hexdigest(),
+                "algorithm": "xxhash128",
             }
     return result
 
@@ -148,7 +149,7 @@ class TestRequiredTopLevelFields:
         ctx = manifest["checksum_context"]
         assert isinstance(ctx, dict)
         assert "algorithm" in ctx
-        assert ctx["algorithm"] in ("sha256", "md5", "xxhash3_64")
+        assert ctx["algorithm"] in ("xxhash128", "md5", "sha256")
 
 
 # ---------------------------------------------------------------------------
@@ -260,11 +261,11 @@ class TestSaveLoadRoundtrip:
 
 class TestVerifyWorkerCompatibility:
     """
-    VerifyWorker._verify_local does:
+    verify_local does:
         expected_cs = entry.get("dest_checksums") or entry.get("source_checksums")
                       or entry.get("checksums", {})
-        algo = "sha256" if "sha256" in expected_cs else
-               "xxhash3_64" if "xxhash3_64" in expected_cs else "md5"
+        algo = "xxhash128" if "xxhash128" in expected_cs else
+               "md5" if "md5" in expected_cs else "sha256"
         expected_val = expected_cs.get(algo) or ""
 
     A manifest is verify-compatible if every entry's checksums dict has at
@@ -284,8 +285,8 @@ class TestVerifyWorkerCompatibility:
             assert isinstance(cs, dict) and cs, (
                 f"{fixture_name}[{rel_path!r}] has no usable checksum block"
             )
-            algo = ("sha256" if "sha256" in cs else
-                    "xxhash3_64" if "xxhash3_64" in cs else "md5")
+            algo = ("xxhash128" if "xxhash128" in cs else
+                    "md5" if "md5" in cs else "sha256")
             val = (cs.get(algo) or "").lower()
             assert val, (
                 f"{fixture_name}[{rel_path!r}] resolved algo={algo!r} "
@@ -295,15 +296,15 @@ class TestVerifyWorkerCompatibility:
     @pytest.mark.parametrize("fixture_name", [
         "transfer_manifest", "fast_manifest", "offload_manifest",
     ])
-    def test_sha256_checksums_are_64_hex_chars(self, request, fixture_name):
-        """Full 64-char sha256 in manifest (truncation is presentation-only)."""
+    def test_xxh128_checksums_are_32_hex_chars(self, request, fixture_name):
+        """Full 32-char xxhash128 in manifest (truncation is presentation-only)."""
         manifest = request.getfixturevalue(fixture_name)
         for rel_path, entry in manifest["files"].items():
             cs = entry.get("checksums", {})
-            if "sha256" in cs:
-                assert len(cs["sha256"]) == 64, (
-                    f"{fixture_name}[{rel_path!r}] sha256 is truncated: "
-                    f"{cs['sha256']!r}"
+            if "xxhash128" in cs:
+                assert len(cs["xxhash128"]) == 32, (
+                    f"{fixture_name}[{rel_path!r}] xxhash128 is truncated: "
+                    f"{cs['xxhash128']!r}"
                 )
 
 
@@ -399,17 +400,17 @@ class TestOffloadManifestContract:
         """Acceptance test 1: operation field must be 'offload'."""
         assert offload_manifest["operation"] == "offload"
 
-    def test_all_entries_have_full_sha256(self, offload_manifest):
-        """Acceptance test 6: persisted manifest carries 64-char sha256."""
+    def test_all_entries_have_full_xxh128(self, offload_manifest):
+        """Acceptance test 6: persisted manifest carries 32-char xxhash128."""
         for rel_path, entry in offload_manifest["files"].items():
             cs = entry.get("checksums", {})
-            assert "sha256" in cs, f"{rel_path!r} missing sha256 in checksums"
-            assert len(cs["sha256"]) == 64, (
-                f"{rel_path!r} sha256 is truncated: {cs['sha256']!r}"
+            assert "xxhash128" in cs, f"{rel_path!r} missing xxhash128 in checksums"
+            assert len(cs["xxhash128"]) == 32, (
+                f"{rel_path!r} xxhash128 is truncated: {cs['xxhash128']!r}"
             )
 
-    def test_checksum_context_algorithm_is_sha256(self, offload_manifest):
-        assert offload_manifest["checksum_context"]["algorithm"] == "sha256"
+    def test_checksum_context_algorithm_is_xxhash128(self, offload_manifest):
+        assert offload_manifest["checksum_context"]["algorithm"] == "xxhash128"
 
     def test_all_entries_have_modtime(self, offload_manifest, sample_dir):
         """
@@ -443,14 +444,14 @@ class TestOffloadManifestContract:
                 continue
             rel = f.relative_to(sample_dir).as_posix()
             data = f.read_bytes()
-            sha = hashlib.sha256(data).hexdigest()
-            suffix = sha[:8]
+            h = xxhash.xxh128(data).hexdigest()
+            suffix = h[:8]
             stem, ext = rel.rsplit(".", 1) if "." in rel else (rel, "")
             normalized = f"{stem}_{suffix}.{ext}" if ext else f"{stem}_{suffix}"
             source_manifest[normalized] = {
                 "size": len(data),
-                "checksum": sha,
-                "algorithm": "sha256",
+                "checksum": h,
+                "algorithm": "xxhash128",
                 "original_filename": f.name,
                 "filename_hash_suffix": suffix,
                 "hash_method": "sha256_prefix8",

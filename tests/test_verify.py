@@ -283,7 +283,7 @@ def test_deep_no_hash_is_mismatch(monkeypatch):
     cat_fn = _deep_setup(monkeypatch, {})
     r = verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn)[0]
     assert r["status"] == "MISMATCH"
-    assert "No sha256 or md5" in r["detail"]
+    assert "No md5 or sha256" in r["detail"]
 
 
 def test_deep_logs_estimate(monkeypatch):

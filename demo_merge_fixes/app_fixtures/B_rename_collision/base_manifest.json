@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.2",
+  "files": {
+    "old_a.mov": {
+      "type": "file",
+      "size": 19,
+      "modtime": "2026-06-15T00:59:53.004626+00:00",
+      "checksums": {
+        "sha256": "b89b0a5e42d3a685782af05c1fbd2af0b1afa66e091ff26180459103f5efde71"
+      },
+      "hash_algorithm": "sha256",
+      "gdrive_url": ""
+    },
+    "old_b.mov": {
+      "type": "file",
+      "size": 19,
+      "modtime": "2026-06-15T00:59:53.004698+00:00",
+      "checksums": {
+        "sha256": "f1f595847e07bd92e0c727f8d29efb8ffed2af9a307732ddcd2ac67f1f0b2c0b"
+      },
+      "hash_algorithm": "sha256",
+      "gdrive_url": ""
+    }
+  },
+  "renames": [
+    {
+      "from": "old_a.mov",
+      "to": "new.mov"
+    },
+    {
+      "from": "old_b.mov",
+      "to": "new.mov"
+    }
+  ]
+}

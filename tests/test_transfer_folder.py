@@ -28,8 +28,8 @@ from core.transfer import (
 # ---------------------------------------------------------------------------
 
 COPY_RESULT = {
-    "source_checksums": {"sha256": "aabbcc"},
-    "dest_checksums": {"sha256": "aabbcc"},
+    "source_checksums": {"xxhash128": "aabbcc"},
+    "dest_checksums": {"xxhash128": "aabbcc"},
     "verified": True,
 }
 
@@ -273,11 +273,11 @@ class TestManifest:
         m = transfer_folder(src, dst, gdrive_mode=True, log_cb=log_cb)["manifest"]
         assert m["checksum_context"]["algorithm"] == "md5"
 
-    def test_gdrive_mode_false_uses_sha256_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
+    def test_gdrive_mode_false_uses_xxhash128_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
         src = _make_src(tmp_path)
         dst = tmp_path / "dst"
         m = transfer_folder(src, dst, gdrive_mode=False, log_cb=log_cb)["manifest"]
-        assert m["checksum_context"]["algorithm"] == "sha256"
+        assert m["checksum_context"]["algorithm"] == "xxhash128"
 
     def test_gdrive_mode_true_file_entry_hash_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
         src = _make_src(tmp_path)
@@ -291,7 +291,7 @@ class TestManifest:
         dst = tmp_path / "dst"
         m = transfer_folder(src, dst, gdrive_mode=False, log_cb=log_cb)["manifest"]
         for entry in m["files"].values():
-            assert entry["hash_algorithm"] == "sha256"
+            assert entry["hash_algorithm"] == "xxhash128"
 
     def test_same_name_merge_true_when_names_match(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
         """When src.name == dst.name the actual_dest IS dst (same-name merge)."""
@@ -430,14 +430,14 @@ class TestPreFlightChecks:
 class TestCopyFile:
     """Tests for copy_file — patches compute_all and shutil.copy2."""
 
-    CHECKSUMS_SHA = {"sha256": "deadbeef", "xxhash3_64": "cafebabe"}
-    CHECKSUMS_MD5 = {"md5": "abcdef01", "sha256": "deadbeef"}
+    CHECKSUMS_XXH = {"xxhash128": "deadbeef"}
+    CHECKSUMS_MD5 = {"md5": "abcdef01"}
 
     def test_happy_path_returns_verified_true(self, tmp_path):
         src = tmp_path / "file.txt"
         src.write_text("hello")
         dst = tmp_path / "out" / "file.txt"
-        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_SHA), \
+        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_XXH), \
              patch("shutil.copy2"):
             result = copy_file(src, dst)
         assert result["verified"] is True
@@ -446,7 +446,7 @@ class TestCopyFile:
         src = tmp_path / "file.txt"
         src.write_text("hello")
         dst = tmp_path / "out" / "file.txt"
-        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_SHA), \
+        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_XXH), \
              patch("shutil.copy2"):
             result = copy_file(src, dst)
         assert "source_checksums" in result
@@ -456,8 +456,8 @@ class TestCopyFile:
         src = tmp_path / "file.txt"
         src.write_text("hello")
         dst = tmp_path / "out" / "file.txt"
-        src_cs = {"sha256": "aaaa"}
-        dst_cs = {"sha256": "bbbb"}
+        src_cs = {"xxhash128": "aaaa"}
+        dst_cs = {"xxhash128": "bbbb"}
         with patch("core.transfer.compute_all", side_effect=[src_cs, dst_cs]), \
              patch("shutil.copy2"):
             with pytest.raises(TransferError, match="Checksum mismatch"):
@@ -492,7 +492,7 @@ class TestCopyFile:
 
         def capture_compute(path, **kwargs):
             compute_calls.append(kwargs.get("progress_cb"))
-            return self.CHECKSUMS_SHA
+            return self.CHECKSUMS_XXH
 
         with patch("core.transfer.compute_all", side_effect=capture_compute), \
              patch("shutil.copy2"):
@@ -507,7 +507,7 @@ class TestCopyFile:
         src = tmp_path / "file.txt"
         src.write_text("data")
         dst = tmp_path / "deep" / "nested" / "file.txt"
-        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_SHA), \
+        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_XXH), \
              patch("shutil.copy2"):
             copy_file(src, dst)
         assert dst.parent.exists()
@@ -517,7 +517,7 @@ class TestCopyFile:
         src.write_text("data")
         dst = tmp_path / "out" / "file.txt"
         log_cb = MagicMock()
-        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_SHA), \
+        with patch("core.transfer.compute_all", return_value=self.CHECKSUMS_XXH), \
              patch("shutil.copy2"):
             copy_file(src, dst, log_cb=log_cb)
         messages = [c.args[0] for c in log_cb.call_args_list]
@@ -626,14 +626,14 @@ class TestComputeLocalHashes:
 
     def test_happy_path_returns_relpath_keyed_dict(self, tmp_path):
         (tmp_path / "file.txt").write_text("hello")
-        with patch("core.transfer.compute_all", return_value={"sha256": "ABCDEF"}):
+        with patch("core.transfer.compute_all", return_value={"xxhash128": "ABCDEF"}):
             result = _compute_local_hashes(tmp_path)
         assert "file.txt" in result
         assert result["file.txt"] == "abcdef"
 
-    def test_sha256_values_are_lowercased(self, tmp_path):
+    def test_xxh128_values_are_lowercased(self, tmp_path):
         (tmp_path / "upper.txt").write_text("data")
-        with patch("core.transfer.compute_all", return_value={"sha256": "UPPERCASE"}):
+        with patch("core.transfer.compute_all", return_value={"xxhash128": "UPPERCASE"}):
             result = _compute_local_hashes(tmp_path)
         assert result["upper.txt"] == "uppercase"
 
@@ -641,11 +641,11 @@ class TestComputeLocalHashes:
         sub = tmp_path / "subdir"
         sub.mkdir()
         (sub / "clip.mov").write_text("video")
-        with patch("core.transfer.compute_all", return_value={"sha256": "aabbcc"}):
+        with patch("core.transfer.compute_all", return_value={"xxhash128": "aabbcc"}):
             result = _compute_local_hashes(tmp_path)
         assert "subdir/clip.mov" in result
 
-    def test_missing_sha256_in_compute_all_skips_entry(self, tmp_path):
+    def test_missing_xxh128_in_compute_all_skips_entry(self, tmp_path):
         (tmp_path / "file.txt").write_text("hello")
         with patch("core.transfer.compute_all", return_value={"md5": "abc"}):
             result = _compute_local_hashes(tmp_path)
@@ -669,7 +669,7 @@ class TestComputeLocalHashes:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise OSError("permission denied")
-            return {"sha256": "good"}
+            return {"xxhash128": "good"}
 
         with patch("core.transfer.compute_all", side_effect=flaky):
             result = _compute_local_hashes(tmp_path, log_cb=log_cb)
@@ -683,7 +683,7 @@ class TestComputeLocalHashes:
     def test_log_cb_reports_file_count_and_size(self, tmp_path):
         (tmp_path / "file.txt").write_bytes(b"x" * 1024)
         log_cb = MagicMock()
-        with patch("core.transfer.compute_all", return_value={"sha256": "abc123"}):
+        with patch("core.transfer.compute_all", return_value={"xxhash128": "abc123"}):
             _compute_local_hashes(tmp_path, log_cb=log_cb)
         msgs = [c.args[0] for c in log_cb.call_args_list]
         assert any("Hashed" in m for m in msgs)

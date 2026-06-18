@@ -18,8 +18,8 @@ class TestPrimaryAlgorithm:
     def test_returns_md5_for_gdrive(self):
         assert _primary_algorithm(gdrive=True) == "md5"
 
-    def test_returns_sha256_for_local(self):
-        assert _primary_algorithm(gdrive=False) == "sha256"
+    def test_returns_xxhash128_for_local(self):
+        assert _primary_algorithm(gdrive=False) == "xxhash128"
 
 
 # ---------------------------------------------------------------------------

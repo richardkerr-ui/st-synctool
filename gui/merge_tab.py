@@ -600,7 +600,7 @@ class MergeTab(QWidget):
         self.rescan_chk = QCheckBox(
             "Re-scan before apply (catches drift since initial scan)"
         )
-        self.rescan_chk.setChecked(True)
+        self.rescan_chk.setChecked(False)
         make_interactive(
             self.rescan_chk,
             tooltip="Re-read both folders right before applying, so changes made "

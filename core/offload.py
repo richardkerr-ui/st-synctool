@@ -387,8 +387,8 @@ def build_normalized_manifest(source_manifest: dict, norm_plan: dict) -> tuple:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _sha256(path: Path) -> str:
-    return compute_all(path, include_xxhash=False)["sha256"]
+def _xxh128(path: Path) -> str:
+    return compute_all(path, include_xxh128=True)["xxhash128"]
 
 
 def _retryable(exc: Exception) -> bool:
@@ -454,8 +454,8 @@ def prehash_source(
         rel = str(f.relative_to(source.path))
         manifest[rel] = {
             "size":      f.stat().st_size,
-            "checksum":  _sha256(f),
-            "algorithm": "sha256",
+            "checksum":  _xxh128(f),
+            "algorithm": "xxhash128",
         }
         if file_progress_cb:
             file_progress_cb(i + 1, len(files))
@@ -564,7 +564,7 @@ def copy_source_to_staging(
         reuse = False
         if resume_from is not None and dst_file.exists() and isinstance(info, dict):
             if (dst_file.stat().st_size == info.get("size")
-                    and _sha256(dst_file) == info.get("checksum")):
+                    and _xxh128(dst_file) == info.get("checksum")):
                 reuse = True
             else:
                 log_cb(f"[Offload]   staged copy bad, recopying: {rel}", "warning")
@@ -607,7 +607,7 @@ def verify_staging(
         if dst_file.stat().st_size != info["size"]:
             errors.append(f"Size mismatch: {rel}")
             continue
-        actual = _sha256(dst_file)
+        actual = _xxh128(dst_file)
         if actual != info["checksum"]:
             errors.append(
                 f"Checksum mismatch: {rel} "
@@ -723,8 +723,8 @@ def build_offload_manifest(
             "type": "file",
             "size": info["size"],
             "modtime": modtime,
-            "checksums": {"sha256": checksum} if checksum else {},
-            "hash_algorithm": info.get("algorithm", "sha256"),
+            "checksums": {"xxhash128": checksum} if checksum else {},
+            "hash_algorithm": info.get("algorithm", "xxhash128"),
             "gdrive_url": "",
         }
         # Carry through normalisation + thumbnail metadata if present
@@ -747,7 +747,7 @@ def build_offload_manifest(
         "file_count": len(files),
         "renames": list(renames_full) if renames_full else [],
         "checksum_context": {
-            "algorithm": "sha256",
+            "algorithm": "xxhash128",
             "gdrive_mode": False,
             "method": "local",
             "paranoid_fallback_count": 0,
@@ -781,12 +781,12 @@ def build_offload_manifest(
                 dest_complete = r.state in (CellState.DONE, CellState.THUMBNAILS)
                 verified_files: dict = {}
                 for rel, entry in files.items():
-                    sha256 = entry.get("checksums", {}).get("sha256", "")
+                    xxh = entry.get("checksums", {}).get("xxhash128", "")
                     if r.per_file_verify:
                         is_verified = r.per_file_verify.get(rel, False)
                     else:
                         is_verified = bool(r.verified) and dest_complete
-                    verified_files[rel] = {"verified": is_verified, "sha256": sha256}
+                    verified_files[rel] = {"verified": is_verified, "xxhash128": xxh}
                 destinations_block.append({
                     "label":          r.dest_label,
                     "final_path":     str(r.final_path) if r.final_path else "",

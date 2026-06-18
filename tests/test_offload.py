@@ -117,13 +117,13 @@ class TestPrehash:
         for rel, info in manifest.items():
             assert "size" in info
             assert "checksum" in info
-            assert info["algorithm"] == "sha256"
+            assert info["algorithm"] == "xxhash128"
 
-    def test_checksum_is_sha256_hex(self, tmp_path, log_cb):
+    def test_checksum_is_xxh128_hex(self, tmp_path, log_cb):
         source, _ = _make_source(tmp_path)
         manifest = prehash_source(source, log_cb)
         for info in manifest.values():
-            assert len(info["checksum"]) == 64
+            assert len(info["checksum"]) == 32
             int(info["checksum"], 16)  # raises ValueError if not valid hex
 
     def test_size_matches_file(self, tmp_path, log_cb):
@@ -395,7 +395,7 @@ class TestNeverCommitOnFailure:
 class TestFilenameNormalisation:
     def _manifest_from_names(self, names: list[str], cs_prefix: str = "aa") -> dict:
         return {
-            name: {"size": 10, "checksum": f"{cs_prefix}{i:062x}", "algorithm": "sha256"}
+            name: {"size": 10, "checksum": f"{cs_prefix}{i:030x}", "algorithm": "xxhash128"}
             for i, name in enumerate(names)
         }
 
@@ -477,7 +477,7 @@ class TestSourceIsNeverWritten:
             if p.is_file():
                 st = p.stat()
                 snap[str(p.relative_to(root))] = (
-                    st.st_size, st.st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest()
+                    st.st_size, st.st_mtime_ns, xxhash.xxh128(p.read_bytes()).hexdigest()
                 )
         return snap
 
@@ -778,6 +778,7 @@ class TestEjectSignal:
 import re as _re
 import json as _json
 import hashlib as _hashlib
+import xxhash
 
 
 class TestChainOfCustodyLog:
@@ -961,40 +962,40 @@ class TestEffectiveSubfolder:
 
 
 # ---------------------------------------------------------------------------
-# _sha256
+# _xxh128
 # ---------------------------------------------------------------------------
 
-from core.offload import _sha256
+from core.offload import _xxh128
 
 
-class TestSha256:
-    def test_returns_64_char_hex_string(self, tmp_path):
+class TestXxh128:
+    def test_returns_32_char_hex_string(self, tmp_path):
         f = tmp_path / "file.bin"
         f.write_bytes(b"hello world")
-        result = _sha256(f)
+        result = _xxh128(f)
         assert isinstance(result, str)
-        assert len(result) == 64
+        assert len(result) == 32
         assert all(c in "0123456789abcdef" for c in result)
 
     def test_known_value(self, tmp_path):
         f = tmp_path / "file.bin"
         data = b"hello world"
         f.write_bytes(data)
-        expected = _hashlib.sha256(data).hexdigest()
-        assert _sha256(f) == expected
+        expected = xxhash.xxh128(data).hexdigest()
+        assert _xxh128(f) == expected
 
     def test_different_content_different_hash(self, tmp_path):
         a = tmp_path / "a.bin"
         b = tmp_path / "b.bin"
         a.write_bytes(b"aaa")
         b.write_bytes(b"bbb")
-        assert _sha256(a) != _sha256(b)
+        assert _xxh128(a) != _xxh128(b)
 
     def test_empty_file_has_known_hash(self, tmp_path):
         f = tmp_path / "empty.bin"
         f.write_bytes(b"")
-        expected = _hashlib.sha256(b"").hexdigest()
-        assert _sha256(f) == expected
+        expected = xxhash.xxh128(b"").hexdigest()
+        assert _xxh128(f) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -1256,19 +1257,19 @@ from core.offload import build_normalized_manifest
 class TestBuildNormalizedManifest:
     def _source_manifest(self, names_and_checksums):
         return {
-            name: {"size": 100, "checksum": cs, "algorithm": "sha256"}
+            name: {"size": 100, "checksum": cs, "algorithm": "xxhash128"}
             for name, cs in names_and_checksums
         }
 
     def test_empty_norm_plan_returns_source_unchanged(self):
-        manifest = self._source_manifest([("IMG_0001.mov", "a" * 64)])
+        manifest = self._source_manifest([("IMG_0001.mov", "a" * 32)])
         result, norm_block, renames = build_normalized_manifest(manifest, {})
         assert result == manifest
         assert norm_block == {"applied": False}
         assert renames == []
 
     def test_renamed_entry_has_original_filename_field(self):
-        checksum = "abcdef12" + "0" * 56
+        checksum = "abcdef12" + "0" * 24
         manifest = self._source_manifest([("IMG_0001.mov", checksum)])
         norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
         result, norm_block, renames = build_normalized_manifest(manifest, norm_plan)
@@ -1276,14 +1277,14 @@ class TestBuildNormalizedManifest:
         assert result["IMG_0001_abcdef12.mov"]["original_filename"] == "IMG_0001.mov"
 
     def test_renamed_entry_has_hash_suffix_field(self):
-        checksum = "abcdef12" + "0" * 56
+        checksum = "abcdef12" + "0" * 24
         manifest = self._source_manifest([("IMG_0001.mov", checksum)])
         norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
         result, _, _ = build_normalized_manifest(manifest, norm_plan)
         assert result["IMG_0001_abcdef12.mov"]["filename_hash_suffix"] == "abcdef12"
 
     def test_renames_full_list_has_from_to_reason(self):
-        checksum = "abcdef12" + "0" * 56
+        checksum = "abcdef12" + "0" * 24
         manifest = self._source_manifest([("IMG_0001.mov", checksum)])
         norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
         _, _, renames_full = build_normalized_manifest(manifest, norm_plan)
@@ -1294,7 +1295,7 @@ class TestBuildNormalizedManifest:
         assert entry["reason"] == "normalize"
 
     def test_norm_block_applied_true_when_renames_present(self):
-        checksum = "abcdef12" + "0" * 56
+        checksum = "abcdef12" + "0" * 24
         manifest = self._source_manifest([("IMG_0001.mov", checksum)])
         norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
         _, norm_block, _ = build_normalized_manifest(manifest, norm_plan)
@@ -1302,7 +1303,7 @@ class TestBuildNormalizedManifest:
         assert norm_block["method"] == "sha256_prefix8"
 
     def test_generated_artifacts_key_passed_through(self):
-        checksum = "abcdef12" + "0" * 56
+        checksum = "abcdef12" + "0" * 24
         manifest = self._source_manifest([("IMG_0001.mov", checksum)])
         manifest["generated_artifacts"] = {"contact_sheet.jpg": {"type": "thumbnail"}}
         norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
@@ -1350,7 +1351,7 @@ class TestSaveOffloadManifest:
 
     def _source_manifest(self):
         return {
-            "clip.mov": {"size": 10, "checksum": "aa" * 32, "algorithm": "sha256"}
+            "clip.mov": {"size": 10, "checksum": "aa" * 16, "algorithm": "xxhash128"}
         }
 
     def test_returns_list_of_saved_paths(self, tmp_path):

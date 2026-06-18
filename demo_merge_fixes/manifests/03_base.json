@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.2",
+  "files": {
+    "f.mov": {
+      "type": "file",
+      "size": 100,
+      "checksums": {
+        "sha256": "A",
+        "md5": "X"
+      }
+    }
+  }
+}

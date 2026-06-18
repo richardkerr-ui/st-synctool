@@ -76,13 +76,13 @@ def _dest_exists_remote(server_root: str, rel_path: str) -> bool:
 
 
 def _local_copy_verify(src: Path, dst: Path, log_cb=None):
-    """Local-to-local copy with SHA-256 verification.
+    """Local-to-local copy with xxh128 verification.
     Returns {"pre": {...}, "post": {...}, "verified": True} on success, False on failure."""
     try:
-        pre  = compute_all(src, include_xxhash=False, include_md5=False)
+        pre  = compute_all(src, include_xxh128=True, include_md5=False)
         shutil.copy2(src, dst)
-        post = compute_all(dst, include_xxhash=False, include_md5=False)
-        if pre.get("sha256") != post.get("sha256"):
+        post = compute_all(dst, include_xxh128=True, include_md5=False)
+        if pre.get("xxhash128") != post.get("xxhash128"):
             if log_cb: log_cb(f"  Checksum mismatch after copy: {src.name}", "error")
             return False
         return {"pre": pre, "post": post, "verified": True}

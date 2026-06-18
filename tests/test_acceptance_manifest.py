@@ -130,9 +130,9 @@ class TestOffloadManifestLoadable:
         entries = _real_file_entries(m)
         assert entries, "manifest has no file entries"
         for rel, e in entries.items():
-            sha = e["checksums"]["sha256"]
-            assert len(sha) == 64, f"{rel}: sha256 not full length ({len(sha)})"
-            int(sha, 16)  # raises if not valid hex
+            h = e["checksums"]["xxhash128"]
+            assert len(h) == 32, f"{rel}: xxhash128 not full length ({len(h)})"
+            int(h, 16)  # raises if not valid hex
             assert e["hash_algorithm"], f"{rel}: missing hash_algorithm"
             assert e["size"] > 0, f"{rel}: missing/zero size"
             assert e["modtime"], f"{rel}: missing modtime"
@@ -306,10 +306,10 @@ class TestFullHashInManifestTruncationInLog:
         m = load_manifest(ctx["manifest_path"])
 
         entry = next(iter(_real_file_entries(m).values()))
-        full_sha = entry["checksums"]["sha256"]
-        assert len(full_sha) == 64
+        full_h = entry["checksums"]["xxhash128"]
+        assert len(full_h) == 32
 
         log = ctx["log_path"].read_text()
         # Log shows only the 16-char prefix; the full hash never appears in it.
-        assert full_sha not in log
-        assert full_sha[:16] in log
+        assert full_h not in log
+        assert full_h[:16] in log

@@ -15,7 +15,7 @@ from core.comparison import DiffState, DiffResult, three_way_diff, _is_ignored, 
 # ---------------------------------------------------------------------------
 
 def _entry(checksum: str, size: int = 100) -> dict:
-    return {"checksums": {"sha256": checksum}, "size": size}
+    return {"checksums": {"xxhash128": checksum}, "size": size}
 
 
 def _manifest(*files: tuple) -> dict:
@@ -238,16 +238,16 @@ class TestIgnoredFiles:
 # ---------------------------------------------------------------------------
 
 class TestChecksumFallback:
-    def test_sha256_preferred_over_md5(self):
-        # When both sha256 and md5 are present, sha256 governs the diff outcome
-        def _dual_entry(sha, md5):
-            return {"checksums": {"sha256": sha, "md5": md5}, "size": 1}
+    def test_xxh128_preferred_over_md5(self):
+        # When both xxhash128 and md5 are present, xxhash128 governs the diff outcome
+        def _dual_entry(xxh, md5):
+            return {"checksums": {"xxhash128": xxh, "md5": md5}, "size": 1}
 
         base   = {"files": {"f.mov": _dual_entry("A", "X")}}
-        yours  = {"files": {"f.mov": _dual_entry("A", "Y")}}  # md5 differs, sha256 same
+        yours  = {"files": {"f.mov": _dual_entry("A", "Y")}}  # md5 differs, xxhash128 same
         server = {"files": {"f.mov": _dual_entry("A", "Z")}}
         results = {r.path: r.state for r in three_way_diff(base, yours, server)}
-        # sha256 matches on all three → UNCHANGED (not LOCAL_CHANGED from md5 drift)
+        # xxhash128 matches on all three → UNCHANGED (not LOCAL_CHANGED from md5 drift)
         assert results["f.mov"] == DiffState.UNCHANGED
 
     def test_md5_used_when_no_sha256(self):
@@ -264,7 +264,7 @@ class TestChecksumFallback:
         # An entry with no checksums shares no algorithm with anything, so
         # equality is unprovable. The diff refuses to guess "unchanged" and
         # surfaces it as INDETERMINATE for review. Real manifests always carry
-        # SHA-256 (checksum.compute_all), so only malformed input reaches here.
+        # xxhash128 (checksum.compute_all), so only malformed input reaches here.
         base   = {"files": {"f.mov": {"size": 1}}}
         yours  = {"files": {"f.mov": {"size": 1}}}
         server = {"files": {"f.mov": {"size": 1}}}
@@ -468,8 +468,8 @@ class TestConflictSuggestedAction:
 
 class TestCrossAlgorithmComparison:
     @staticmethod
-    def _sha(cs):
-        return {"checksums": {"sha256": cs}, "size": 100}
+    def _xxh(cs):
+        return {"checksums": {"xxhash128": cs}, "size": 100}
 
     @staticmethod
     def _md5(cs):
@@ -477,28 +477,28 @@ class TestCrossAlgorithmComparison:
 
     def test_base_present_server_only_md5_is_indeterminate(self):
         # Identical file on all sides; server manifest happens to carry md5 only
-        # (the Drive case). No shared algo with the sha256 sides → INDETERMINATE,
+        # (the Drive case). No shared algo with the xxhash128 sides → INDETERMINATE,
         # not the old false SERVER_CHANGED.
-        base   = {"files": {"project.prproj": self._sha("abc123")}}
-        yours  = {"files": {"project.prproj": self._sha("abc123")}}
+        base   = {"files": {"project.prproj": self._xxh("abc123")}}
+        yours  = {"files": {"project.prproj": self._xxh("abc123")}}
         server = {"files": {"project.prproj": self._md5("def456")}}
         results = {r.path: r.state for r in three_way_diff(base, yours, server)}
         assert results["project.prproj"] == DiffState.INDETERMINATE
 
     def test_no_base_cross_algo_is_indeterminate(self):
-        # No base manifest, local sha256, server md5 → INDETERMINATE, not the old
+        # No base manifest, local xxhash128, server md5 → INDETERMINATE, not the old
         # false BOTH_CHANGED.
         base   = {"files": {}}
-        yours  = {"files": {"project.prproj": self._sha("abc123")}}
+        yours  = {"files": {"project.prproj": self._xxh("abc123")}}
         server = {"files": {"project.prproj": self._md5("def456")}}
         results = {r.path: r.state for r in three_way_diff(base, yours, server)}
         assert results["project.prproj"] == DiffState.INDETERMINATE
 
-    def test_matching_sha256_wins_over_md5_drift(self):
-        # Shared sha256 is authoritative: a differing md5 is stale metadata, not
-        # a real change. Preserves long-standing sha-preferred behaviour.
-        def dual(sha, md5):
-            return {"checksums": {"sha256": sha, "md5": md5}, "size": 1}
+    def test_matching_xxh128_wins_over_md5_drift(self):
+        # Shared xxhash128 is authoritative: a differing md5 is stale metadata, not
+        # a real change.
+        def dual(xxh, md5):
+            return {"checksums": {"xxhash128": xxh, "md5": md5}, "size": 1}
         base   = {"files": {"f.mov": dual("A", "X")}}
         yours  = {"files": {"f.mov": dual("A", "Y")}}
         server = {"files": {"f.mov": dual("A", "Z")}}

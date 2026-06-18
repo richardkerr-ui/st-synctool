@@ -108,13 +108,13 @@ def copy_file(src, dst, log_cb=None, progress_cb=None, gdrive_mode=False):
         if log_cb: log_cb(m, l)
     dst = Path(dst); dst.parent.mkdir(parents=True, exist_ok=True)
     log(f"  Hashing source: {Path(src).name}")
-    pre = compute_all(Path(src), include_xxhash=not gdrive_mode, include_md5=gdrive_mode,
+    pre = compute_all(Path(src), include_xxh128=True, include_md5=gdrive_mode,
                       progress_cb=lambda p: progress_cb(p // 2) if progress_cb else None)
     shutil.copy2(src, dst)
     log(f"  Verifying destination: {dst.name}")
-    post = compute_all(dst, include_xxhash=not gdrive_mode, include_md5=gdrive_mode,
+    post = compute_all(dst, include_xxh128=True, include_md5=gdrive_mode,
                        progress_cb=lambda p: progress_cb(50 + p // 2) if progress_cb else None)
-    key = "md5" if gdrive_mode else "sha256"
+    key = "md5" if gdrive_mode else "xxhash128"
     if pre.get(key) != post.get(key):
         raise TransferError(f"Checksum mismatch! {key}: {pre.get(key)} vs {post.get(key)}")
     log(f"  Verified {Path(src).name}", "success")
@@ -123,24 +123,25 @@ def copy_file(src, dst, log_cb=None, progress_cb=None, gdrive_mode=False):
 
 
 
-def _compute_local_hashes(local_root, log_cb=None):
-    """Walk a local directory and compute SHA-256 for every file.
-    Returns {relpath: sha256_lowercase}. Used in paranoid verification mode."""
+def _compute_local_hashes(local_root, log_cb=None, use_md5=False):
+    """Walk a local directory and compute xxh128 (or md5 for GDrive paranoid) for every file.
+    Returns {relpath: hash_lowercase}. Used in paranoid verification mode."""
     result = {}
     if not local_root.exists() or not local_root.is_dir():
         return result
     files = [f for f in local_root.rglob("*") if f.is_file()]
     if log_cb:
-        log_cb(f"  [Paranoid] Hashing {len(files)} local file(s)...", "info")
+        algo_label = "md5" if use_md5 else "xxh128"
+        log_cb(f"  [Paranoid] Hashing {len(files)} local file(s) ({algo_label})...", "info")
     total_bytes = 0
     for f in files:
         rel = str(f.relative_to(local_root))
         try:
             total_bytes += f.stat().st_size
-            cs = compute_all(f, include_xxhash=False, include_md5=False)
-            sha = cs.get("sha256", "")
-            if sha:
-                result[rel] = sha.lower()
+            cs = compute_all(f, include_xxh128=not use_md5, include_md5=use_md5)
+            h = cs.get("md5" if use_md5 else "xxhash128", "")
+            if h:
+                result[rel] = h.lower()
         except Exception as e:
             if log_cb:
                 log_cb(f"  Hash failed for {rel}: {e}", "warning")
@@ -202,7 +203,7 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None,
                 "checksums": r.get("dest_checksums", {}),
                 # MANIFEST-FIX: record the primary algorithm per file so a transfer
                 # manifest used as a merge base does not rely on presence-based inference.
-                "hash_algorithm": "md5" if gdrive_mode else "sha256",
+                "hash_algorithm": "md5" if gdrive_mode else "xxhash128",
                 "verification_method": "local-copy",
                 "gdrive_url": "",
             })
@@ -227,7 +228,7 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None,
         # MANIFEST-FIX: standardise checksum_context shape (algorithm, gdrive_mode,
         # method, paranoid_fallback_count) so every writer is interoperable.
         "checksum_context": {
-            "algorithm": "md5" if gdrive_mode else "sha256",
+            "algorithm": "md5" if gdrive_mode else "xxhash128",
             "gdrive_mode": gdrive_mode,
             "method": "local",
             "verification": "pre-post-copy",
@@ -308,7 +309,8 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     # Paranoid mode: compute local source hashes BEFORE sync (Local -> Drive case)
     local_source_hashes = {}
     if paranoid_verify and not src_is_url:
-        local_source_hashes = _compute_local_hashes(Path(src), log_cb=log)
+        # GDrive destination: compare local md5 against Drive's native md5
+        local_source_hashes = _compute_local_hashes(Path(src), log_cb=log, use_md5=True)
 
     # Capture pre-sync destination state so we can label each file accurately
     pre_state = {}
@@ -350,7 +352,8 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     # Paranoid mode: compute local destination hashes AFTER sync (Drive -> Local case)
     local_dest_hashes = {}
     if paranoid_verify and src_is_url:
-        local_dest_hashes = _compute_local_hashes(Path(dst), log_cb=log)
+        # GDrive source: compare Drive's native md5 against local md5
+        local_dest_hashes = _compute_local_hashes(Path(dst), log_cb=log, use_md5=True)
 
     if progress_cb: progress_cb(95, "Building manifest from remote listing...")
     try:
@@ -386,37 +389,37 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
 
         # Verification source/dest hashes depend on direction and paranoid mode
         if paranoid_verify and not src_is_url:
-            # Local -> Drive: src from local hash, dst from Drive lsjson
-            src_sha = local_source_hashes.get(fpath, "")
-            dst_sha = drive_cs.get("sha256", "")
-            if src_sha and dst_sha:
-                v_ok = (src_sha == dst_sha.lower())
+            # Local -> Drive: compare local md5 against Drive's native md5
+            src_h = local_source_hashes.get(fpath, "")
+            dst_h = drive_cs.get("md5", "")
+            if src_h and dst_h:
+                v_ok = (src_h == dst_h.lower())
                 v_method = "paranoid"
             else:
-                # Drive hasn't computed SHA-256 for this file yet
+                # Drive hasn't computed md5 for this file yet
                 v_ok = True
                 v_method = "rclone-checksum"
                 paranoid_fallback_files.append(fpath)
-                src_sha = src_sha or dst_sha
-                dst_sha = dst_sha or src_sha
-            fdata["source_checksums"] = {"sha256": src_sha}
-            fdata["dest_checksums"] = {"sha256": dst_sha}
+                src_h = src_h or dst_h
+                dst_h = dst_h or src_h
+            fdata["source_checksums"] = {"md5": src_h}
+            fdata["dest_checksums"] = {"md5": dst_h}
         elif paranoid_verify and src_is_url:
-            # Drive -> Local: src from Drive lsjson, dst from local hash
-            src_sha = drive_cs.get("sha256", "")
-            dst_sha = local_dest_hashes.get(fpath, "")
-            if src_sha and dst_sha:
-                v_ok = (src_sha.lower() == dst_sha)
+            # Drive -> Local: compare Drive's native md5 against local md5
+            src_h = drive_cs.get("md5", "")
+            dst_h = local_dest_hashes.get(fpath, "")
+            if src_h and dst_h:
+                v_ok = (src_h.lower() == dst_h)
                 v_method = "paranoid"
             else:
-                # Drive hasn't computed SHA-256 for this file yet
+                # Drive hasn't computed md5 for this file yet
                 v_ok = True
                 v_method = "rclone-checksum"
                 paranoid_fallback_files.append(fpath)
-                src_sha = src_sha or dst_sha
-                dst_sha = dst_sha or src_sha
-            fdata["source_checksums"] = {"sha256": src_sha}
-            fdata["dest_checksums"] = {"sha256": dst_sha}
+                src_h = src_h or dst_h
+                dst_h = dst_h or src_h
+            fdata["source_checksums"] = {"md5": src_h}
+            fdata["dest_checksums"] = {"md5": dst_h}
         else:
             # Default: rclone --checksum verified; same hash on both sides
             fdata["source_checksums"] = drive_cs
@@ -429,13 +432,11 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
         # MANIFEST-FIX: record the primary algorithm per file. Paranoid transfers
         # verify on SHA-256; non-paranoid relies on rclone's internal --checksum.
         if paranoid_verify and v_method == "paranoid":
-            fdata["hash_algorithm"] = "sha256"
-        elif "sha256" in drive_cs:
-            fdata["hash_algorithm"] = "sha256"
+            fdata["hash_algorithm"] = "md5"
         elif "md5" in drive_cs:
             fdata["hash_algorithm"] = "md5"
-        elif "xxhash3_64" in drive_cs:
-            fdata["hash_algorithm"] = "xxhash3_64"
+        elif "sha256" in drive_cs:
+            fdata["hash_algorithm"] = "sha256"  # legacy Drive files
         else:
             fdata["hash_algorithm"] = "rclone-checksum"
         fdata.setdefault("gdrive_url", "")
@@ -465,7 +466,7 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
     # MANIFEST-FIX: standardise checksum_context shape — always expose `method`
     # and `gdrive_mode` alongside the rclone-specific paranoid fields.
     manifest["checksum_context"] = {
-        "algorithm": "sha256" if paranoid_verify else "rclone-checksum",
+        "algorithm": "md5" if paranoid_verify else "rclone-checksum",
         "method": "paranoid" if paranoid_verify else "rclone",
         "gdrive_mode": bool(src_is_url or dst_is_url),
         "paranoid": paranoid_verify,

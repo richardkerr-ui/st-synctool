@@ -164,7 +164,7 @@ class TestLocalCopyVerify:
         dst = tmp_path / "dst.mov"
         src.write_bytes(b"important footage data")
         result = _local_copy_verify(src, dst)
-        assert result["pre"]["sha256"] == result["post"]["sha256"]
+        assert result["pre"]["xxhash128"] == result["post"]["xxhash128"]
 
     def test_destination_file_created(self, tmp_path):
         src = tmp_path / "src.mov"

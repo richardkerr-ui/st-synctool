@@ -111,14 +111,14 @@ def conflict_suggested_action(result: "DiffResult") -> str:
 def _cs(entry):
     if not entry: return None
     c = entry.get("checksums", {})
-    return c.get("sha256") or c.get("xxhash3_64") or c.get("md5")
+    return c.get("xxhash128") or c.get("md5") or c.get("sha256")
 
 
 def _checksums(entry):
     return (entry or {}).get("checksums", {}) or {}
 
 
-_ALGO_PRIORITY = ("sha256", "xxhash3_64", "md5")
+_ALGO_PRIORITY = ("xxhash128", "md5", "sha256")  # sha256 retained for legacy manifest compat
 
 
 def _same(a, b):

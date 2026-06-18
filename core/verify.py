@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+import hashlib as _hashlib
 from core.checksum import compute_all
 import core.media_verify as _media_verify
 from core import rclone_bridge
@@ -66,12 +67,12 @@ def expected_checksums(entry: dict) -> dict:
 
 
 def _select_algo(checksums: dict) -> str:
-    """Local algo preference: sha256 > xxhash3_64 > md5."""
-    if "sha256" in checksums:
-        return "sha256"
-    if "xxhash3_64" in checksums:
-        return "xxhash3_64"
-    return "md5"
+    """Local algo preference: xxhash128 > md5 > sha256 (sha256 retained for legacy manifests)."""
+    if "xxhash128" in checksums:
+        return "xxhash128"
+    if "md5" in checksums:
+        return "md5"
+    return "sha256"
 
 
 def verify_local(
@@ -102,11 +103,15 @@ def verify_local(
 
         expected_cs = expected_checksums(entry)
         algo = _select_algo(expected_cs)
-        actual = compute_all(
-            abs_path,
-            include_xxhash=(algo == "xxhash3_64"),
-            include_md5=(algo == "md5"),
-        )
+        if algo == "sha256":
+            # Legacy manifest — compute sha256 inline; not in the main checksum module
+            actual = {"sha256": _hashlib.sha256(abs_path.read_bytes()).hexdigest()}
+        else:
+            actual = compute_all(
+                abs_path,
+                include_xxh128=(algo == "xxhash128"),
+                include_md5=(algo == "md5"),
+            )
         expected_val = (expected_cs.get(algo) or "").lower()
         actual_val = (actual.get(algo) or "").lower()
 
@@ -197,9 +202,9 @@ def verify_gdrive(
         expected_cs = expected_checksums(entry)
         drive_hashes = drive_files[rel_path]
 
-        # Pick the strongest hash available on both sides
+        # Pick the strongest shared hash — prefer md5 (Drive's native algo)
         algo = None
-        for candidate in ("sha256", "sha1", "md5"):
+        for candidate in ("md5", "sha256", "sha1"):
             if candidate in expected_cs and candidate in drive_hashes:
                 algo = candidate
                 break
@@ -306,17 +311,17 @@ def verify_gdrive_deep(
     for i, (rel_path, entry) in enumerate(files.items()):
         progress(int(i / total * 100), rel_path)
         cs = expected_checksums(entry)
-        if cs.get("sha256"):
-            algo = "sha256"
-            expected_val = cs["sha256"].lower()
-            _cat = cat
-        elif cs.get("md5"):
+        if cs.get("md5"):
             algo = "md5"
             expected_val = cs["md5"].lower()
             _cat = cat_md5
+        elif cs.get("sha256"):
+            algo = "sha256"
+            expected_val = cs["sha256"].lower()
+            _cat = cat
         else:
             results.append({"path": rel_path, "status": "MISMATCH",
-                            "detail": "No sha256 or md5 in manifest for deep comparison"})
+                            "detail": "No md5 or sha256 in manifest for deep comparison"})
             log(f"  MISMATCH (no hash in manifest): {rel_path}", "error")
             continue
 
