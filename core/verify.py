@@ -535,6 +535,8 @@ def verify_folder(
     progress_cb: Optional[ProgressCallback] = None,
     log_cb: Optional[LogCallback] = None,
     deep: bool = False,
+    *,
+    skip_activity_log: bool = False,
 ) -> list:
     """
     Dispatch to local, Drive-metadata, or deep-Drive verification.
@@ -549,13 +551,18 @@ def verify_folder(
             results = verify_gdrive(folder, manifest, progress_cb, log_cb)
     else:
         results = verify_local(folder, manifest, progress_cb, log_cb)
-    _log_verify_activity(folder, manifest, results)
+    if not skip_activity_log:
+        log_verify_activity(folder, manifest, results)
     return results
 
 
-def _log_verify_activity(folder, manifest: dict, results: list) -> None:
-    """M9.2: record one 'verify' line in the local activity index. Never raises —
-    activity logging must not affect the verify it describes."""
+def log_verify_activity(
+    folder, manifest: dict, results: list, *, log_filename: str = ""
+) -> None:
+    """Record one 'verify' line in the local activity index. Never raises —
+    activity logging must not affect the verify it describes.
+
+    Pass log_filename (basename only) so the History tab can open the report."""
     try:
         from core.activity_index import record_from_manifest, safe_append_activity
         label = manifest.get("label") or str(folder).rstrip("/").rsplit("/", 1)[-1]
@@ -564,6 +571,7 @@ def _log_verify_activity(folder, manifest: dict, results: list) -> None:
             manifest, operation="verify",
             source=str(folder).rstrip("/").rsplit("/", 1)[-1],
             verdict=summary.verdict,
+            log_filename=log_filename,
         ))
     except Exception:
         pass

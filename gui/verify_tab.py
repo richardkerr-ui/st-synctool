@@ -52,18 +52,23 @@ class VerifyWorker(QObject):
                 progress_cb=lambda pct, path: self.progress.emit(pct, path),
                 log_cb=lambda msg, level: self.log.emit(msg, level),
                 deep=self.deep,
+                skip_activity_log=True,
             )
             # M5.4: persist the format-verification evidence so it survives the
             # window closing. Persistence must never fail the verify itself.
             log_cb = lambda msg, level: self.log.emit(msg, level)
+            report_name = ""
             try:
-                _verify.write_verify_report(
+                report_path = _verify.write_verify_report(
                     self.folder, results, label=self.label, deep=self.deep, log_cb=log_cb)
+                report_name = report_path.name
                 if self.manifest_path:
                     _verify.persist_media_verify_to_manifest(
                         self.manifest_path, results, log_cb=log_cb)
             except Exception as pe:
                 self.log.emit(f"  Could not persist verify results: {pe}", "warning")
+            _verify.log_verify_activity(
+                self.folder, self.manifest, results, log_filename=report_name)
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
