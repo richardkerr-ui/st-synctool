@@ -25,7 +25,9 @@ from gui import theme
 _ANY = "— all —"
 _FILTER_LABELS = {"operation": "Operation", "workstation": "Workstation",
                   "user": "User", "project": "Project"}
-_LOG_ROLE = Qt.ItemDataRole.UserRole       # stores a row's custody-log filename
+_LOG_ROLE       = Qt.ItemDataRole.UserRole        # stores a row's custody-log filename
+_TIMESTAMP_ROLE = Qt.ItemDataRole.UserRole + 1   # stores the ISO timestamp for fuzzy lookup
+_OPERATION_ROLE = Qt.ItemDataRole.UserRole + 2   # stores the operation string
 
 
 class _SortItem(QTableWidgetItem):
@@ -195,9 +197,12 @@ class HistoryTab(QWidget):
             when = _SortItem(history.relative_date_label(row.timestamp),
                              sort_key=row.timestamp)
             when.setToolTip(history.full_timestamp_label(row.timestamp))
-            # Store the log filename on the row so double-click still works after
-            # the user re-sorts (visual row != insertion order any more).
+            # Store log filename, timestamp, and operation so double-click still
+            # works after re-sort and can fall back to timestamp matching for
+            # older rows that predate log_filename storage.
             when.setData(_LOG_ROLE, row.log_filename)
+            when.setData(_TIMESTAMP_ROLE, row.timestamp)
+            when.setData(_OPERATION_ROLE, row.operation_label.lower())
             self.table.setItem(r, 0, when)
             self.table.setItem(r, 1, _SortItem(row.workstation))
             self.table.setItem(r, 2, _SortItem(row.operation_label))
@@ -245,6 +250,13 @@ class HistoryTab(QWidget):
             return
         name = when_item.data(_LOG_ROLE)
         path = activity_index.find_local_log(name) if name else None
+        if path is None:
+            # Fallback for rows written before log_filename was stored: match by
+            # the job's UTC timestamp against report filenames on disk.
+            ts = when_item.data(_TIMESTAMP_ROLE)
+            op = when_item.data(_OPERATION_ROLE)
+            if ts:
+                path = activity_index.find_local_log_by_timestamp(ts, op)
         if path:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
         else:

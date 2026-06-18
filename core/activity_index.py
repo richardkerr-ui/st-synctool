@@ -296,6 +296,58 @@ def find_local_log(filename: str, base_dir=STSYNC_DIR) -> Optional[Path]:
     return None
 
 
+def find_local_log_by_timestamp(
+    timestamp_iso: str,
+    operation: str,
+    base_dir=STSYNC_DIR,
+    window_seconds: int = 120,
+) -> Optional[Path]:
+    """Fallback for history rows written before log_filename was stored.
+
+    Scans the report dirs for files whose name-encoded timestamp (YYYYMMDD_HHMMSS,
+    local time) is within `window_seconds` of the record's UTC timestamp.
+    Returns the closest match, or None.
+    """
+    import re
+    TS_RE = re.compile(r"(\d{8}_\d{6})")
+
+    try:
+        rec_utc = datetime.fromisoformat(timestamp_iso)
+        if rec_utc.tzinfo is None:
+            rec_utc = rec_utc.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+    base = Path(base_dir)
+    subs = list(_paths.FEEDBACK_SUBDIRS) + ["logs", "offload_logs"]
+
+    best: Optional[Path] = None
+    best_delta: float = float("inf")
+
+    for sub in subs:
+        d = base / sub
+        if not d.is_dir():
+            continue
+        for f in d.rglob("*"):
+            if not f.is_file():
+                continue
+            m = TS_RE.search(f.name)
+            if not m:
+                continue
+            try:
+                # File timestamp is local-naive; convert to UTC for comparison.
+                file_local = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S")
+                file_utc = file_local.astimezone(timezone.utc)
+            except ValueError:
+                continue
+            delta = abs((rec_utc - file_utc).total_seconds())
+            if delta <= window_seconds and delta < best_delta:
+                best_delta = delta
+                best = f
+
+    return best
+
+
 def load_org_records(*, local_dir=ACTIVITY_DIR, cache_dir=ORG_CACHE_DIR,
                      log_cb=None) -> list:
     """Merge this machine's shards with the cached org shards into one
