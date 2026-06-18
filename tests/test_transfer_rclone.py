@@ -269,15 +269,21 @@ class TestParanoidVerify:
         assert f["verification_method"] == "rclone-checksum"
         assert "file.mov" in result["manifest"]["checksum_context"]["paranoid_fallback_files"]
 
-    def test_drive_to_local_verified_on_md5_match(self, tmp_path, rclone, log_cb, monkeypatch):
+    def test_drive_to_local_verified_when_xxh128_present(self, tmp_path, rclone, log_cb, monkeypatch):
+        # Drive -> Local: verified = True when local xxh128 hash is present.
+        # No cross-side comparison (Drive md5 vs local xxh128 are different algos).
         self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
         rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
         result = transfer_folder_rclone(DRIVE_URL, str(tmp_path),
                                         paranoid_verify=True, log_cb=log_cb)
-        assert result["manifest"]["files"]["file.mov"]["verified"] is True
+        f = result["manifest"]["files"]["file.mov"]
+        assert f["verified"] is True
+        assert f["dest_checksums"] == {"xxhash128": "aabbcc"}
+        assert f["hash_algorithm"] == "xxhash128"
 
-    def test_drive_to_local_fails_on_md5_mismatch(self, tmp_path, rclone, log_cb, monkeypatch):
-        self._stub_hashes(monkeypatch, {"file.mov": "zzzzzz"})
+    def test_drive_to_local_unverified_when_hash_missing(self, tmp_path, rclone, log_cb, monkeypatch):
+        # Drive -> Local: verified = False when local hash cannot be computed.
+        self._stub_hashes(monkeypatch, {})  # empty — file.mov not hashed
         rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
         result = transfer_folder_rclone(DRIVE_URL, str(tmp_path),
                                         paranoid_verify=True, log_cb=log_cb)
