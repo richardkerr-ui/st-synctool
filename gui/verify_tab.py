@@ -197,6 +197,10 @@ class VerifyTab(QWidget):
 
         # ── Summary cards ────────────────────────────────────────
         summary_group = QGroupBox("RESULTS")
+        # M15.1: make the verification scope explicit — "verified" is the data
+        # fork (file contents) only; xattrs/resource forks are not hashed.
+        from core.verify import VERIFY_SCOPE_NOTE
+        summary_group.setToolTip(VERIFY_SCOPE_NOTE)
         sg = QHBoxLayout(summary_group)
         sg.setSpacing(10)
 
@@ -241,6 +245,20 @@ class VerifyTab(QWidget):
             setattr(self, attr, num_lbl)
 
         root.addWidget(summary_group)
+
+        # M13.5: folder root (corruption fingerprint) — one truncated line under
+        # the tiles, full value in the tooltip. Deliberately NOT labelled
+        # "tamper-evident": it is a bit-rot fingerprint bounded by xxh128, not a
+        # security guarantee.
+        self._folder_root_lbl = QLabel("")
+        self._folder_root_lbl.setStyleSheet(
+            f"font-size:11px; color:{theme.TEXT_MUTED}; background:transparent;"
+        )
+        self._folder_root_lbl.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._folder_root_lbl.setVisible(False)
+        root.addWidget(self._folder_root_lbl)
 
         # ── Progress bar ─────────────────────────────────────────
         self.progress_bar = QProgressBar()
@@ -449,6 +467,17 @@ class VerifyTab(QWidget):
             level,
         )
         self.status_label.setText(f"{ok}/{total} files OK")
+
+        # M13.5: surface the folder root (computed in core/verify) for local verifies.
+        from core import verify as _verify
+        folder_root = _verify.folder_root_from_results(results)
+        if folder_root:
+            self._folder_root_lbl.setText(f"Folder root: {folder_root[:24]}…")
+            self._folder_root_lbl.setToolTip(folder_root)
+            self._folder_root_lbl.setVisible(True)
+        else:
+            self._folder_root_lbl.setVisible(False)
+
         if clean:
             show_toast(self, f"Verification passed — {ok}/{total} files OK.", "success")
             self._banner.show_result(

@@ -17,7 +17,6 @@ from core.transfer import (
     resolve_folder_conflict,
     extract_multipart_zip,
     route_transfer,
-    _compute_local_hashes,
     TransferError,
     TransferWarning,
 )
@@ -28,8 +27,8 @@ from core.transfer import (
 # ---------------------------------------------------------------------------
 
 COPY_RESULT = {
-    "source_checksums": {"xxhash128": "aabbcc"},
-    "dest_checksums": {"xxhash128": "aabbcc"},
+    "source_checksums": {"xxh128": "aabbcc"},
+    "dest_checksums": {"xxh128": "aabbcc"},
     "verified": True,
 }
 
@@ -267,31 +266,33 @@ class TestErrors:
 # ---------------------------------------------------------------------------
 
 class TestManifest:
-    def test_gdrive_mode_true_uses_md5_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
+    def test_gdrive_mode_true_uses_xxh128_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
+        # M13.3: xxh128 is the content-identity algorithm even for gdrive; md5 is
+        # stored alongside per file as rclone's transport key.
         src = _make_src(tmp_path)
         dst = tmp_path / "dst"
         m = transfer_folder(src, dst, gdrive_mode=True, log_cb=log_cb)["manifest"]
-        assert m["checksum_context"]["algorithm"] == "md5"
+        assert m["checksum_context"]["algorithm"] == "xxh128"
 
-    def test_gdrive_mode_false_uses_xxhash128_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
+    def test_gdrive_mode_false_uses_xxh128_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
         src = _make_src(tmp_path)
         dst = tmp_path / "dst"
         m = transfer_folder(src, dst, gdrive_mode=False, log_cb=log_cb)["manifest"]
-        assert m["checksum_context"]["algorithm"] == "xxhash128"
+        assert m["checksum_context"]["algorithm"] == "xxh128"
 
     def test_gdrive_mode_true_file_entry_hash_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
         src = _make_src(tmp_path)
         dst = tmp_path / "dst"
         m = transfer_folder(src, dst, gdrive_mode=True, log_cb=log_cb)["manifest"]
         for entry in m["files"].values():
-            assert entry["hash_algorithm"] == "md5"
+            assert entry["hash_algorithm"] == "xxh128"
 
     def test_gdrive_mode_false_file_entry_hash_algorithm(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
         src = _make_src(tmp_path)
         dst = tmp_path / "dst"
         m = transfer_folder(src, dst, gdrive_mode=False, log_cb=log_cb)["manifest"]
         for entry in m["files"].values():
-            assert entry["hash_algorithm"] == "xxhash128"
+            assert entry["hash_algorithm"] == "xxh128"
 
     def test_same_name_merge_true_when_names_match(self, tmp_path, log_cb, mock_copy_file, mock_save_manifest):
         """When src.name == dst.name the actual_dest IS dst (same-name merge)."""
@@ -430,7 +431,7 @@ class TestPreFlightChecks:
 class TestCopyFile:
     """Tests for copy_file — patches compute_all and shutil.copy2."""
 
-    CHECKSUMS_XXH = {"xxhash128": "deadbeef"}
+    CHECKSUMS_XXH = {"xxh128": "deadbeef"}
     CHECKSUMS_MD5 = {"md5": "abcdef01"}
 
     def test_happy_path_returns_verified_true(self, tmp_path):
@@ -456,8 +457,8 @@ class TestCopyFile:
         src = tmp_path / "file.txt"
         src.write_text("hello")
         dst = tmp_path / "out" / "file.txt"
-        src_cs = {"xxhash128": "aaaa"}
-        dst_cs = {"xxhash128": "bbbb"}
+        src_cs = {"xxh128": "aaaa"}
+        dst_cs = {"xxh128": "bbbb"}
         with patch("core.transfer.compute_all", side_effect=[src_cs, dst_cs]), \
              patch("shutil.copy2"):
             with pytest.raises(TransferError, match="Checksum mismatch"):
@@ -471,6 +472,17 @@ class TestCopyFile:
         with patch("core.transfer.compute_all", return_value=cs), \
              patch("shutil.copy2"):
             result = copy_file(src, dst, gdrive_mode=True)
+        assert result["verified"] is True
+
+    def test_gdrive_mode_stores_both_xxh128_and_md5(self, tmp_path):
+        # M13.3: a real local-to-Drive copy computes BOTH content keys before
+        # upload and stores them; copy-verify is on md5 (rclone's transport key).
+        src = tmp_path / "file.txt"
+        src.write_bytes(b"dual-hash payload")
+        dst = tmp_path / "out" / "file.txt"
+        result = copy_file(src, dst, gdrive_mode=True)
+        assert set(result["dest_checksums"]) == {"xxh128", "md5"}
+        assert set(result["source_checksums"]) == {"xxh128", "md5"}
         assert result["verified"] is True
 
     def test_gdrive_mode_mismatch_raises(self, tmp_path):
@@ -618,75 +630,12 @@ class TestExtractMultipartZip:
 
 
 # ---------------------------------------------------------------------------
-# TestComputeLocalHashes
+# TestComputeLocalHashes — TOMBSTONE (M13.1)
+# `_compute_local_hashes` existed only to support the paranoid download-and-rehash
+# verify path, which M13.1 removed. Its guarantee is superseded by xxh128 stored
+# in the manifest before upload plus the Verify tab's on-demand deep-verify, so
+# the helper and its tests are gone with no replacement.
 # ---------------------------------------------------------------------------
-
-class TestComputeLocalHashes:
-    """Tests for _compute_local_hashes — patches compute_all to avoid disk I/O."""
-
-    def test_happy_path_returns_relpath_keyed_dict(self, tmp_path):
-        (tmp_path / "file.txt").write_text("hello")
-        with patch("core.transfer.compute_all", return_value={"xxhash128": "ABCDEF"}):
-            result = _compute_local_hashes(tmp_path)
-        assert "file.txt" in result
-        assert result["file.txt"] == "abcdef"
-
-    def test_xxh128_values_are_lowercased(self, tmp_path):
-        (tmp_path / "upper.txt").write_text("data")
-        with patch("core.transfer.compute_all", return_value={"xxhash128": "UPPERCASE"}):
-            result = _compute_local_hashes(tmp_path)
-        assert result["upper.txt"] == "uppercase"
-
-    def test_subdir_files_keyed_by_relative_posix_path(self, tmp_path):
-        sub = tmp_path / "subdir"
-        sub.mkdir()
-        (sub / "clip.mov").write_text("video")
-        with patch("core.transfer.compute_all", return_value={"xxhash128": "aabbcc"}):
-            result = _compute_local_hashes(tmp_path)
-        assert "subdir/clip.mov" in result
-
-    def test_missing_xxh128_in_compute_all_skips_entry(self, tmp_path):
-        (tmp_path / "file.txt").write_text("hello")
-        with patch("core.transfer.compute_all", return_value={"md5": "abc"}):
-            result = _compute_local_hashes(tmp_path)
-        assert result == {}
-
-    def test_missing_directory_returns_empty_dict(self, tmp_path):
-        result = _compute_local_hashes(tmp_path / "nonexistent")
-        assert result == {}
-
-    def test_empty_directory_returns_empty_dict(self, tmp_path):
-        result = _compute_local_hashes(tmp_path)
-        assert result == {}
-
-    def test_hash_failure_logs_warning_and_continues(self, tmp_path):
-        (tmp_path / "a.txt").write_text("a")
-        (tmp_path / "b.txt").write_text("b")
-        log_cb = MagicMock()
-        call_count = {"n": 0}
-
-        def flaky(path, **kwargs):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                raise OSError("permission denied")
-            return {"xxhash128": "good"}
-
-        with patch("core.transfer.compute_all", side_effect=flaky):
-            result = _compute_local_hashes(tmp_path, log_cb=log_cb)
-
-        # One file should succeed; one warned
-        warnings = [c.args[0] for c in log_cb.call_args_list
-                    if len(c.args) >= 2 and c.args[1] == "warning"]
-        assert any("Hash failed" in w for w in warnings)
-        assert len(result) == 1
-
-    def test_log_cb_reports_file_count_and_size(self, tmp_path):
-        (tmp_path / "file.txt").write_bytes(b"x" * 1024)
-        log_cb = MagicMock()
-        with patch("core.transfer.compute_all", return_value={"xxhash128": "abc123"}):
-            _compute_local_hashes(tmp_path, log_cb=log_cb)
-        msgs = [c.args[0] for c in log_cb.call_args_list]
-        assert any("Hashed" in m for m in msgs)
 
 
 # ---------------------------------------------------------------------------

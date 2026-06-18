@@ -502,7 +502,8 @@ class TestCancelCurrent:
 
 
 # ---------------------------------------------------------------------------
-# cat_sha256 — streaming hash of a remote file (M5.1 deep Drive verify)
+# cat_xxh128 — streaming hash of a remote file (M13 deep Drive verify; was
+# cat_sha256 pre-M13)
 # ---------------------------------------------------------------------------
 
 class FakeCatProc:
@@ -529,52 +530,60 @@ class FakeCatProc:
         return self.returncode
 
 
-class TestCatSha256:
+class TestCatXxh128:
     def _patch(self, fake):
         return patch("core.rclone_bridge.subprocess.Popen", return_value=fake)
 
     def test_hashes_streamed_bytes(self):
-        import hashlib
+        import xxhash
         data = b"alpha bravo charlie" * 1000
         fake = FakeCatProc(stdout=data, returncode=0)
         with self._patch(fake):
-            digest = rb.cat_sha256("gdrive:a.mov")
-        assert digest == hashlib.sha256(data).hexdigest()
+            digest = rb.cat_xxh128("gdrive:a.mov")
+        assert digest == xxhash.xxh128(data).hexdigest()
 
     def test_chunked_read_matches_full(self):
-        import hashlib
+        import xxhash
         data = bytes(range(256)) * 5000
         fake = FakeCatProc(stdout=data, returncode=0)
         with self._patch(fake):
-            digest = rb.cat_sha256("gdrive:a.mov", chunk_size=64)
-        assert digest == hashlib.sha256(data).hexdigest()
+            digest = rb.cat_xxh128("gdrive:a.mov", chunk_size=64)
+        assert digest == xxhash.xxh128(data).hexdigest()
 
     def test_nonzero_exit_raises(self):
         fake = FakeCatProc(stdout=b"", stderr=b"directory not found", returncode=3)
         with self._patch(fake):
             with pytest.raises(RuntimeError, match="rclone cat failed"):
-                rb.cat_sha256("gdrive:missing.mov")
+                rb.cat_xxh128("gdrive:missing.mov")
 
     def test_timeout_raises_and_kills(self):
         fake = FakeCatProc(stdout=b"x", hang=True)
         with self._patch(fake):
             with pytest.raises(TimeoutError):
-                rb.cat_sha256("gdrive:a.mov", timeout=1)
+                rb.cat_xxh128("gdrive:a.mov", timeout=1)
         assert fake.killed is True
 
     def test_current_proc_cleared(self):
         fake = FakeCatProc(stdout=b"data", returncode=0)
         with self._patch(fake):
-            rb.cat_sha256("gdrive:a.mov")
+            rb.cat_xxh128("gdrive:a.mov")
         assert rb._current_proc is None
 
     def test_extra_flags_passed(self):
         fake = FakeCatProc(stdout=b"data", returncode=0)
         with patch("core.rclone_bridge.subprocess.Popen", return_value=fake) as popen:
-            rb.cat_sha256("gdrive:a.mov", extra_flags=["--drive-root-folder-id", "X"])
+            rb.cat_xxh128("gdrive:a.mov", extra_flags=["--drive-root-folder-id", "X"])
         args = popen.call_args[0][0]
         assert "cat" in args and "--drive-root-folder-id" in args
         assert args[-1] == "gdrive:a.mov"
+
+    def test_cat_md5_still_available_for_fallback(self):
+        import hashlib
+        data = b"drive-to-drive bytes"
+        fake = FakeCatProc(stdout=data, returncode=0)
+        with self._patch(fake):
+            digest = rb.cat_md5("gdrive:a.mov")
+        assert digest == hashlib.md5(data).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -710,18 +719,23 @@ class TestLsjsonToManifest:
         assert "clips" not in m["files"]
         assert m["file_count"] == 3
 
-    def test_hashes_lowercased_and_mapped(self):
+    def test_md5_mapped_sha256_dropped(self):
+        # M13: Drive listings keep only md5 (Drive's universal native hash);
+        # sha256 is no longer carried as a checksum key.
         cs = self._manifest()["files"]["clips/a.mov"]["checksums"]
-        assert cs["sha256"] == "aa11"
-        assert cs["md5"] == "bb22"
+        assert cs == {"md5": "bb22"}
+        assert "sha256" not in cs
 
-    def test_xxhash_mapped_to_xxhash3_64(self):
+    def test_rclone_xxhash_not_mapped(self):
+        # rclone's "xxhash" is XXH3-64, a different width/algorithm from our
+        # xxh128 content key, so it is deliberately not mapped in. An entry with
+        # only that hash has no usable checksum and falls back to rclone-lsjson.
         entry = self._manifest()["files"]["b.wav"]
-        assert entry["checksums"]["xxhash3_64"] == "cc33"
-        assert entry["hash_algorithm"] == "xxhash3_64"
+        assert entry["checksums"] == {}
+        assert entry["hash_algorithm"] == "rclone-lsjson"
 
-    def test_hash_algorithm_prefers_sha256(self):
-        assert self._manifest()["files"]["clips/a.mov"]["hash_algorithm"] == "sha256"
+    def test_hash_algorithm_is_md5(self):
+        assert self._manifest()["files"]["clips/a.mov"]["hash_algorithm"] == "md5"
 
     def test_no_hashes_falls_back_to_rclone_lsjson(self):
         entry = self._manifest()["files"]["c.txt"]

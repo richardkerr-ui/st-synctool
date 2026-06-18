@@ -109,6 +109,8 @@ def rclone_artifacts(tmp_path, monkeypatch):
 
     # Fake the rclone binary at the lsjson layer with the REAL hashes of the
     # fixture files, then let the real lsjson_to_manifest build the manifest.
+    # M13: Drive's native hash is md5 (the only key lsjson_to_manifest keeps),
+    # so the fake listing must carry MD5, not SHA256.
     items = []
     for i, (rel, data) in enumerate(FILES.items()):
         items.append({
@@ -116,7 +118,7 @@ def rclone_artifacts(tmp_path, monkeypatch):
             "Size": len(data),
             "ModTime": "2026-06-12T00:00:00Z",
             "ID": f"driveid{i}",
-            "Hashes": {"SHA256": hashlib.sha256(data).hexdigest()},
+            "Hashes": {"MD5": hashlib.md5(data).hexdigest()},
         })
     with patch.object(rb, "_run") as fake_run:
         fake_run.return_value = type(

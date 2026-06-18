@@ -730,7 +730,7 @@ class MainWindow(QMainWindow):
                 "title":  "Start Offload",
                 "body":   (
                     "Copies all sources to all destinations simultaneously with "
-                    "paranoid checksum verification. Designed for end-of-day "
+                    "independent xxh128 checksum verification. Designed for end-of-day "
                     "camera card offloads to two drives at once."
                 ),
             },

@@ -21,6 +21,20 @@ echo "==> Building ST SyncTool v${VERSION}"
 
 if ! command -v rclone >/dev/null 2>&1; then
   echo "WARNING: rclone not on PATH — it will NOT be bundled. Install with: brew install rclone" >&2
+else
+  # M15.2: the bundled rclone must match the pinned version so flag/hash
+  # semantics are deterministic. Bump core.rclone_bridge.RCLONE_REQUIRED_VERSION
+  # deliberately when you intend to ship a new rclone — never silently.
+  PINNED_RCLONE="$("$PYTHON" -c 'import core.rclone_bridge as r; print(r.RCLONE_REQUIRED_VERSION)')"
+  BUNDLED_RCLONE="$(rclone version | sed -n 's/^rclone v//p' | head -1)"
+  if [ "$BUNDLED_RCLONE" != "$PINNED_RCLONE" ]; then
+    echo "ERROR: rclone on PATH is v${BUNDLED_RCLONE} but the pinned version is" \
+         "v${PINNED_RCLONE}." >&2
+    echo "       Install the pinned version, or update RCLONE_REQUIRED_VERSION in" \
+         "core/rclone_bridge.py deliberately." >&2
+    exit 1
+  fi
+  echo "==> rclone pinned version OK: v${PINNED_RCLONE}"
 fi
 
 echo "==> PyInstaller"

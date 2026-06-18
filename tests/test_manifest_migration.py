@@ -31,7 +31,7 @@ def _write_v10(path: Path) -> None:
         "files": {
             "clip.mov": {
                 "type": "file", "size": 10, "modtime": "",
-                "checksums": {"sha256": "a" * 64},
+                "checksums": {"xxh128": "a" * 32},
             }
         },
     }, indent=2))
@@ -48,8 +48,8 @@ def _write_v11(path: Path, server_path_val: str = "/old/server") -> None:
         "files": {
             "clip.mov": {
                 "type": "file", "size": 10, "modtime": "",
-                "checksums": {"sha256": "b" * 64},
-                "hash_algorithm": "sha256",
+                "checksums": {"xxh128": "b" * 32},
+                "hash_algorithm": "xxh128",
                 "gdrive_url": "",
             }
         },
@@ -140,7 +140,7 @@ class TestMigrateManifestFile:
         assert data["schema_version"] == SCHEMA_VERSION
         # Backfilled top-level + per-file fields are now present on disk.
         assert "filename_normalization" in data
-        assert data["files"]["clip.mov"]["hash_algorithm"] == "sha256"
+        assert data["files"]["clip.mov"]["hash_algorithm"] == "xxh128"
         assert data["files"]["clip.mov"]["gdrive_url"] == ""
 
     def test_backup_preserves_original(self, tmp_path):

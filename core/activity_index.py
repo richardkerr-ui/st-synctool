@@ -66,6 +66,19 @@ def append_activity(
     JSONL append is a single write of one newline-terminated line, so concurrent
     readers never see a torn line. Returns the shard path. Each machine only ever
     writes its own shard, so there is no cross-machine write contention.
+
+    M14.3 — O_APPEND is sufficient here; no sidecar lock is needed because all
+    three assumptions hold:
+      (a) This is a true append (``open("a")``), not a read-modify-write — there
+          is no prior state to lose, so no lost-update window exists.
+      (b) Each record is a single fixed-shape summary line (project, counts,
+          bytes, verdict — never an embedded file list), comfortably under the
+          ~4 KB where a same-host O_APPEND write could plausibly tear on local
+          APFS. Records do not grow with project size.
+      (c) The shard always lives on the LOCAL tree (``ACTIVITY_DIR`` under
+          ``~/Documents/STSyncTool``), never on a mounted NAS share where
+          O_APPEND atomicity is not guaranteed. Org-wide aggregation copies these
+          shards up separately (M9.1); it never writes them in place on a share.
     """
     path = shard_path(record.workstation, activity_dir=activity_dir)
     path.parent.mkdir(parents=True, exist_ok=True)

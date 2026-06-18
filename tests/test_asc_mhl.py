@@ -26,13 +26,13 @@ def _manifest(**over):
         "files": {
             "DCIM/A001/clip_002.mov": {
                 "type": "file", "size": 2048, "modtime": "2026-06-10T09:00:00+00:00",
-                "checksums": {"sha256": "a" * 64, "xxhash3_64": "1234abcd"},
-                "hash_algorithm": "sha256",
+                "checksums": {"xxh128": "1234abcd"},
+                "hash_algorithm": "xxh128",
             },
             "DCIM/A001/clip_001.mov": {
                 "type": "file", "size": 1024, "modtime": "2026-06-10T08:00:00+00:00",
-                "checksums": {"sha256": "b" * 64, "md5": "deadbeef"},
-                "hash_algorithm": "md5",
+                "checksums": {"xxh128": "b" * 32, "md5": "deadbeef"},
+                "hash_algorithm": "xxh128",
             },
         },
     }
@@ -87,15 +87,17 @@ def test_hash_entries_sorted_with_path_attrs():
     assert first_path.get("lastmodificationdate") == "2026-06-10T08:00:00+00:00"
 
 
-def test_xxhash3_maps_to_xxh3_element():
+def test_xxh128_maps_to_xxh128_element():
+    # M13: manifest xxh128 maps to MHL's native <xxh128> element (the prior
+    # xxhash3_64 → <xxh3> mapping was removed with the key).
     root, _ = _root(_manifest())
     hashes = {h.find(_q("path")).text: h for h in root.find(_q("hashes")).findall(_q("hash"))}
     h = hashes["DCIM/A001/clip_002.mov"]
-    xxh3 = h.find(_q("xxh3"))
-    assert xxh3 is not None
-    assert xxh3.text == "1234abcd"
-    assert xxh3.get("action") == "original"
-    assert xxh3.get("hashdate") == "2026-06-13T10:00:00+00:00"
+    xxh128 = h.find(_q("xxh128"))
+    assert xxh128 is not None
+    assert xxh128.text == "1234abcd"
+    assert xxh128.get("action") == "original"
+    assert xxh128.get("hashdate") == "2026-06-13T10:00:00+00:00"
 
 
 def test_md5_maps_to_md5_element():
@@ -114,17 +116,19 @@ def test_sha256_is_never_exported():
 
 
 def test_unhashed_file_reported_and_path_still_written():
+    # A foreign manifest entry whose only hash has no ASC MHL element (here a
+    # crc32) is reported as unhashed but its path is still written.
     m = _manifest(files={
-        "only_sha.mov": {"type": "file", "size": 10, "modtime": "2026-06-10T08:00:00+00:00",
-                         "checksums": {"sha256": "c" * 64}},
+        "only_crc.mov": {"type": "file", "size": 10, "modtime": "2026-06-10T08:00:00+00:00",
+                         "checksums": {"crc32": "c" * 8}},
     })
     root, result = _root(m)
     assert result.hashed_count == 0
-    assert result.unhashed == ["only_sha.mov"]
+    assert result.unhashed == ["only_crc.mov"]
     h = root.find(_q("hashes")).find(_q("hash"))
-    assert h.find(_q("path")).text == "only_sha.mov"
+    assert h.find(_q("path")).text == "only_crc.mov"
     # No hash sub-elements present
-    assert h.find(_q("md5")) is None and h.find(_q("xxh3")) is None
+    assert h.find(_q("md5")) is None and h.find(_q("xxh128")) is None
 
 
 def test_directory_entries_skipped():
@@ -139,15 +143,15 @@ def test_directory_entries_skipped():
 
 
 def test_hash_element_order_matches_schema():
-    # c4, md5, sha1, xxh128, xxh3, xxh64 — schema order; md5 before xxh3.
+    # c4, md5, sha1, xxh128, xxh64 — schema order; md5 before xxh128.
     m = _manifest(files={
         "f.mov": {"type": "file", "size": 1, "modtime": "",
-                  "checksums": {"xxhash3_64": "x", "md5": "m"}},
+                  "checksums": {"xxh128": "x", "md5": "m"}},
     })
     root, _ = _root(m)
     h = root.find(_q("hashes")).find(_q("hash"))
     tags = [c.tag for c in h if c.tag != _q("path")]
-    assert tags == [_q("md5"), _q("xxh3")]
+    assert tags == [_q("md5"), _q("xxh128")]
 
 
 def test_write_mhl_atomic_and_parseable(tmp_path):
@@ -242,7 +246,33 @@ def test_save_offload_manifest_export_mhl(tmp_path, monkeypatch):
     src_manifest = {
         "label": "A001", "files": {
             "clip.mov": {"type": "file", "size": 5, "modtime": "2026-06-10T08:00:00+00:00",
-                         "checksums": {"xxhash3_64": "abcd"}}}}
+                         "checksums": {"xxh128": "abcd"}}}}
     monkeypatch.setattr(off, "build_offload_manifest", lambda *a, **k: src_manifest)
     off.save_offload_manifest(_Src(), src_manifest, [_Cell()], export_mhl=True)
     assert list(dest_dir.rglob("*.mhl")), "offload should write a .mhl when export_mhl is set"
+
+
+# ── M15.1 filename encoding: MHL preserves the true on-disk name ──────────────
+
+def test_mhl_preserves_mixed_case_nfd_filename_even_when_folder_root_differs():
+    """The MHL <path> must carry the exact on-disk name (case + Unicode form),
+    NOT the lowercase/NFC form the internal folder-root fingerprint uses."""
+    import unicodedata
+    from core import merkle
+
+    # A mixed-case, NFD-normalised name as macOS stores it on disk.
+    on_disk = unicodedata.normalize("NFD", "Café_Shot_01A.mov")
+    m = _manifest(files={
+        on_disk: {"type": "file", "size": 1, "modtime": "2026-06-10T08:00:00+00:00",
+                  "checksums": {"xxh128": "abcd"}},
+    })
+    root, _ = _root(m)
+    paths = [h.find(_q("path")).text
+             for h in root.find(_q("hashes")).findall(_q("hash"))]
+    # MHL preserves the real name verbatim …
+    assert paths == [on_disk]
+    # … while the internal folder-root key for the same path is lowercased+NFC,
+    # i.e. a different string — proving the two representations stay separate.
+    folder_key = merkle.normalise_path(on_disk)
+    assert folder_key != on_disk
+    assert folder_key == unicodedata.normalize("NFC", "café_shot_01a.mov")

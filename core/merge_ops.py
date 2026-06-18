@@ -82,7 +82,7 @@ def _local_copy_verify(src: Path, dst: Path, log_cb=None):
         pre  = compute_all(src, include_xxh128=True, include_md5=False)
         shutil.copy2(src, dst)
         post = compute_all(dst, include_xxh128=True, include_md5=False)
-        if pre.get("xxhash128") != post.get("xxhash128"):
+        if pre.get("xxh128") != post.get("xxh128"):
             if log_cb: log_cb(f"  Checksum mismatch after copy: {src.name}", "error")
             return False
         return {"pre": pre, "post": post, "verified": True}

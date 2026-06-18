@@ -14,6 +14,10 @@ Layout on the remote mirrors the local folders, namespaced per machine + user:
 Pure logic, no PyQt6. The rclone copy is injected (`copy_fn`) so the whole flow
 is testable without a real rclone or network. The current time is injectable so
 the 7-day pending threshold can be tested across day boundaries.
+
+INVARIANT (M9.1): this module must NEVER delete files, locally or remotely. The
+activity log is append-only and shipping is copy-only — the only rclone verb it
+issues is a single-file copy. Any delete call added here is a data-loss bug.
 """
 
 from __future__ import annotations
@@ -163,14 +167,18 @@ def ship_logs(
     copy = copy_fn or _default_copy
     log = log_cb or (lambda m, l="info": None)
 
+    # Snapshot read (unlocked) only to decide what to attempt. The authoritative
+    # ledger update happens under a lock below, merging deltas rather than writing
+    # back this snapshot — so two concurrent shippers never lose each other's
+    # entries (M14.3). A file attempted twice just copies twice (idempotent).
     ledger = _read_ledger(ledger_path)
-    shipped = ledger["shipped"]
-    pending_since = ledger["pending_since"]
-
     todo = pending_files(base_dir, ledger, subdirs)
     n_shipped = n_failed = 0
     now_iso = now.isoformat()
     config_error_seen = False
+
+    shipped_updates: dict = {}     # key -> shipped record (delta)
+    pending_additions: dict = {}   # key -> first-seen iso for files that failed
 
     for rel, abs_path, size in todo:
         key = _file_key(rel, size)
@@ -178,35 +186,48 @@ def ship_logs(
             copy(str(abs_path), _remote_dst(remote_base, rel, ws, usr))
         except Exception as e:
             n_failed += 1
-            pending_since.setdefault(key, now_iso)  # remember when it first failed
+            pending_additions.setdefault(key, now_iso)  # remember when it first failed
             log(f"  Log shipping: deferred {rel} ({e})", "warning")
             if not _is_network_error(str(e)):
                 config_error_seen = True
             continue
-        shipped[key] = {"rel": rel, "size": size, "shipped_at": now_iso}
-        pending_since.pop(key, None)
+        shipped_updates[key] = {"rel": rel, "size": size, "shipped_at": now_iso}
         n_shipped += 1
 
-    # Drop pending_since entries for files that no longer exist or are now shipped.
     live_keys = {_file_key(r, s) for r, _, s in enumerate_shippable(base_dir, subdirs)}
-    for k in list(pending_since):
-        if k in shipped or k not in live_keys:
-            pending_since.pop(k, None)
 
-    # Only write last_attempt when the outcome is conclusive:
-    # - Shipped something or had no failures: ok=True
-    # - A failure that isn't a network error (bad remote name, auth, permissions): ok=False
-    # - Pure network failures (offline, timeout): leave last_attempt untouched so a
-    #   transient offline run never fires the "check remote config" hint.
-    if n_shipped > 0 or n_failed == 0:
-        ledger["last_attempt"] = {
-            "at": now_iso, "ok": True, "shipped": n_shipped, "failed": n_failed,
-        }
-    elif config_error_seen:
-        ledger["last_attempt"] = {
-            "at": now_iso, "ok": False, "shipped": n_shipped, "failed": n_failed,
-        }
-    _write_ledger(ledger_path, ledger)
+    def _apply(current: dict) -> dict:
+        current.setdefault("shipped", {})
+        current.setdefault("pending_since", {})
+        shipped = current["shipped"]
+        pending_since = current["pending_since"]
+        shipped.update(shipped_updates)
+        for key in shipped_updates:
+            pending_since.pop(key, None)
+        for key, ts in pending_additions.items():
+            pending_since.setdefault(key, ts)
+        # Drop pending_since entries for files that no longer exist or are shipped.
+        for k in list(pending_since):
+            if k in shipped or k not in live_keys:
+                pending_since.pop(k, None)
+        # Only write last_attempt when the outcome is conclusive:
+        # - Shipped something or had no failures: ok=True
+        # - A non-network failure (bad remote name, auth, permissions): ok=False
+        # - Pure network failures (offline): leave last_attempt untouched so a
+        #   transient offline run never fires the "check remote config" hint.
+        if n_shipped > 0 or n_failed == 0:
+            current["last_attempt"] = {
+                "at": now_iso, "ok": True, "shipped": n_shipped, "failed": n_failed,
+            }
+        elif config_error_seen:
+            current["last_attempt"] = {
+                "at": now_iso, "ok": False, "shipped": n_shipped, "failed": n_failed,
+            }
+        return current
+
+    from core.file_lock import locked_json_update
+    locked_json_update(ledger_path, _apply,
+                       default={"shipped": {}, "pending_since": {}})
     if n_shipped:
         log(f"  Log shipping: uploaded {n_shipped} file(s)", "info")
     return ShipResult(shipped=n_shipped, failed=n_failed, pending=n_failed)

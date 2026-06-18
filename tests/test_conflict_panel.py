@@ -59,9 +59,9 @@ class TestConflictPanelVisibility:
             path="clip.mov",
             state=DiffState.BOTH_CHANGED,
             yours_entry={"size": 1024, "modtime": "2026-06-10T10:00:00+00:00",
-                         "checksums": {"sha256": "aabbcc"}},
+                         "checksums": {"xxh128": "aabbcc"}},
             server_entry={"size": 2048, "modtime": "2026-06-10T12:00:00+00:00",
-                          "checksums": {"sha256": "ddeeff"}},
+                          "checksums": {"xxh128": "ddeeff"}},
         )
 
     def test_panel_shows_when_conflict_selected(self, merge_tab, qtbot):
@@ -105,8 +105,8 @@ class TestUnresolvedCounterLabel:
             DiffResult(
                 path=f"clip{i}.mov",
                 state=DiffState.BOTH_CHANGED,
-                yours_entry={"size": 1, "checksums": {"sha256": f"aa{i}"}},
-                server_entry={"size": 2, "checksums": {"sha256": f"bb{i}"}},
+                yours_entry={"size": 1, "checksums": {"xxh128": f"aa{i}"}},
+                server_entry={"size": 2, "checksums": {"xxh128": f"bb{i}"}},
             )
             for i in range(3)
         ]

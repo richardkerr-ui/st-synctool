@@ -1221,7 +1221,7 @@ class MergeTab(QWidget):
 
         def _short_hash(entry):
             cs = entry.get("checksums", {})
-            h = cs.get("sha256") or cs.get("md5") or cs.get("xxhash3_64")
+            h = cs.get("xxh128") or cs.get("md5")
             return h[:8] if h else "n/a"
 
         local_size  = _fmt_size(local_e.get("size"))

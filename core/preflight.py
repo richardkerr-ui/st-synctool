@@ -36,6 +36,21 @@ def check_rclone() -> None:
         )
 
 
+def check_rclone_pinned_version() -> None:
+    """M15.2: enforce the pinned rclone version floor. rclone flag/hash semantics
+    drift between releases, so a too-old binary is refused rather than silently
+    trusted. The pin lives in core.rclone_bridge.RCLONE_REQUIRED_VERSION."""
+    from core import rclone_bridge
+    ver = rclone_bridge.rclone_version()
+    if ver and not rclone_bridge.meets_required_version(ver):
+        sys.exit(
+            f"rclone {ver} is older than the pinned "
+            f"{rclone_bridge.RCLONE_REQUIRED_VERSION}; flag and backend-hash "
+            f"semantics may differ and verification cannot be trusted. "
+            f"Run: brew upgrade rclone"
+        )
+
+
 def ensure_remote(remote: str = "gdrive") -> None:
     from core.oauth_config import get_oauth_credentials
 
@@ -58,4 +73,5 @@ def ensure_remote(remote: str = "gdrive") -> None:
 
 def run_preflight(remote: str = "gdrive") -> None:
     check_rclone()
+    check_rclone_pinned_version()
     ensure_remote(remote)
