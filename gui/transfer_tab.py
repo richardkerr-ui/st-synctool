@@ -866,57 +866,83 @@ class TransferTab(QWidget):
 
     def _write_txt_log(self, result):
         import getpass, socket
+        from pathlib import Path as _Path
         from datetime import datetime
         from core import paths as _paths
         log_dir = _paths.transfer_reports_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = log_dir / f"transfer_{ts}.txt"
+        manifest = result.get("manifest", {})
+        src_root = manifest.get("source_root", "")
+        # Include the source folder name in the filename so logs are identifiable
+        # without opening them.
+        src_slug = "".join(
+            c if c.isalnum() or c in "-_" else "_"
+            for c in _Path(src_root).name
+        ).strip("_")[:60] if src_root else ""
+        log_name = f"transfer_{src_slug + '_' if src_slug else ''}{ts}.txt"
+        log_path = log_dir / log_name
         lines = [
             "=" * 60,
             "SIGNAL THEORY -- ST SyncTool Transfer Log",
             f"Date/Time  : {datetime.now().isoformat()}",
             f"Workstation: {socket.gethostname()}",
             f"User       : {getpass.getuser()}",
-            f"Source     : {result.get('manifest', {}).get('source_root', '')}",
+            f"Source     : {src_root}",
             f"Destination: {result.get('actual_dest', '')}",
             f"Same-name merge: {result.get('same_name', False)}",
             "=" * 60,
         ]
-        manifest = result.get("manifest", {})
+        all_files = {
+            k: v for k, v in manifest.get("files", {}).items()
+            if not _Path(k).name.startswith("._")
+        }
         counts = manifest.get("status_counts")
-        vmethod = manifest.get("verification_method", "")
+        vmethod = manifest.get("verification_method", "") or \
+                  manifest.get("checksum_context", {}).get("method", "")
         vfailures = manifest.get("verify_failures", [])
-        if counts or vmethod:
-            lines += ["", "SUMMARY:"]
-            if vmethod == "paranoid":
-                lines.append("  Verification: Paranoid (independent SHA-256 on source and destination)")
-            elif vmethod == "rclone-checksum":
-                lines.append("  Verification: rclone --checksum (source vs destination compared at transfer time)")
-            if vfailures:
-                lines.append(f"  VERIFICATION FAILURES: {len(vfailures)}")
-            if counts:
-                lines += [
-                    f"  Uploaded : {counts.get('uploaded', 0)}",
-                    f"  Updated  : {counts.get('updated', 0)}",
-                    f"  Unchanged: {counts.get('unchanged', 0)}",
-                    f"  Deleted  : {counts.get('deleted', 0)}",
-                ]
+        error_count = manifest.get("error_count", len(result.get("errors") or []))
+        lines += ["", "SUMMARY:"]
+        if vmethod in ("paranoid",):
+            lines.append("  Verification : Paranoid (independent xxHash128 on source and destination)")
+        elif vmethod == "rclone-checksum":
+            lines.append("  Verification : rclone --checksum (source vs destination compared at transfer time)")
+        elif vmethod in ("local", "local-copy"):
+            lines.append("  Verification : Local copy (xxHash128 computed pre- and post-copy)")
+        else:
+            lines.append(f"  Verification : {vmethod or 'unknown'}")
+        lines.append(f"  Files        : {len(all_files)}")
+        if counts:
+            lines += [
+                f"  Uploaded     : {counts.get('uploaded', 0)}",
+                f"  Updated      : {counts.get('updated', 0)}",
+                f"  Unchanged    : {counts.get('unchanged', 0)}",
+                f"  Deleted      : {counts.get('deleted', 0)}",
+            ]
+        if vfailures:
+            lines.append(f"  VERIFICATION FAILURES: {len(vfailures)}")
+        if error_count:
+            lines.append(f"  ERRORS       : {error_count}")
         lines += ["", "FILES IN DESTINATION (POST-TRANSFER):"]
-        for fname, fdata in manifest.get("files", {}).items():
+        for fname, fdata in all_files.items():
             src_block = fdata.get("source_checksums", {}) or {}
             dst_block = fdata.get("dest_checksums",   {}) or {}
-            algo = "SHA-256" if src_block.get("sha256") or dst_block.get("sha256") else "MD5"
-            key  = "sha256"  if algo == "SHA-256" else "md5"
-            src_cs = src_block.get(key, "N/A")
-            dst_cs = dst_block.get(key, "N/A")
+            cs_block  = fdata.get("checksums",        {}) or {}
+            # Prefer xxh128, fall back to md5 then sha256 (Drive manifests may
+            # only carry md5; paranoid mode carries sha256).
+            for algo_key, algo_label in (("xxh128", "XXH128"), ("md5", "MD5"), ("sha256", "SHA-256")):
+                src_cs = src_block.get(algo_key) or cs_block.get(algo_key)
+                dst_cs = dst_block.get(algo_key) or cs_block.get(algo_key)
+                if src_cs or dst_cs:
+                    break
+            else:
+                algo_label, src_cs, dst_cs = "XXH128", "N/A", "N/A"
             status = fdata.get("status", "verified")
             lines += [
                 f"  {fname}  [{status.upper()}]",
-                f"    Size       : {format_bytes(fdata.get('size', 0))}",
-                f"    {algo} src : {src_cs}",
-                f"    {algo} dst : {dst_cs}",
-                f"    Verified   : {fdata.get('verified', False)}",
+                f"    Size          : {format_bytes(fdata.get('size', 0))}",
+                f"    {algo_label} src : {src_cs or 'N/A'}",
+                f"    {algo_label} dst : {dst_cs or 'N/A'}",
             ]
         deleted = manifest.get("deleted_files", [])
         if deleted:
