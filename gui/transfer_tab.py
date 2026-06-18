@@ -7,11 +7,27 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 from pathlib import Path
 
+from dataclasses import dataclass
+
 from gui.ui_helpers import make_interactive, awake_indicator, reveal_in_finder
 from gui.completion_banner import CompletionBanner
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.toast import show_toast
+from gui.widgets.queue_panel import QueuePanel
+
+
+@dataclass
+class TransferJobSpec:
+    src: str
+    dst: str
+    gdrive_mode: bool
+    mirror_mode: bool
+    paranoid_mode: bool
+    conflict_handler: str
+    extract_zips: bool
+    export_mhl: bool
+    job_name: str
 from utils.file_utils import folder_size, free_space, format_bytes
 from utils.gdrive_utils import is_gdrive_url
 from core.transfer import (
@@ -36,13 +52,14 @@ class TransferWorker(QObject):
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
-    def __init__(self, src, dst, gdrive_mode, mirror_mode, conflict_handler,
+    def __init__(self, src, dst, gdrive_mode, mirror_mode, paranoid_mode, conflict_handler,
                  extract_zips, export_mhl=False, job_name=""):
         super().__init__()
         self.src              = src
         self.dst              = dst
         self.gdrive_mode      = gdrive_mode
         self.mirror_mode      = mirror_mode
+        self.paranoid_mode    = paranoid_mode
         self.conflict_handler = conflict_handler
         self.extract_zips     = extract_zips
         self.export_mhl       = export_mhl
@@ -54,6 +71,7 @@ class TransferWorker(QObject):
                 self.src, self.dst,
                 gdrive_mode=self.gdrive_mode,
                 mirror_mode=self.mirror_mode,
+                paranoid_verify=self.paranoid_mode,
                 log_cb=lambda m, l: self.log.emit(m, l),
                 progress_cb=lambda p, f: self.progress.emit(p, f),
                 conflict_handler=self.conflict_handler,
@@ -77,6 +95,9 @@ class TransferTab(QWidget):
         self._worker = None
         self._cancelled = False
         self._last_dest = ""
+        self._job_queue: list[TransferJobSpec] = []
+        self._queue_counter = 0
+        self._current_queue_index: int = -1
         self._build_ui()
         self._install_shortcuts()
 
@@ -219,6 +240,14 @@ class TransferTab(QWidget):
         )
         opts_row1.addWidget(self.extract_zip_chk)
         opts_row1.addSpacing(20)
+        self.paranoid_chk = QCheckBox("Paranoid verification")
+        self.paranoid_chk.setStyleSheet(f"color:{theme.TEXT_MUTED};")
+        make_interactive(
+            self.paranoid_chk,
+            tooltip="Re-hash every file after copying and compare against the "
+                    "source. Slower, but the strongest integrity guarantee.",
+        )
+        opts_row1.addWidget(self.paranoid_chk)
 
         # M10.3: optional ASC MHL v2.0 sidecar for post-house interoperability.
         self.export_mhl_chk = QCheckBox("Export ASC MHL (.mhl)")
@@ -314,14 +343,49 @@ class TransferTab(QWidget):
         make_interactive(self._reveal_btn, tooltip="Open the destination folder in Finder.")
         self._reveal_btn.clicked.connect(self._reveal_destination)
 
+        # Queue button — adds current settings as a pending job without starting.
+        self._queue_btn = QPushButton("+ Queue")
+        self._queue_btn.setFixedHeight(36)
+        make_interactive(self._queue_btn, tooltip="Add these settings as a pending job in the queue.")
+        self._queue_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.ACCENT_GOLD};"
+            f"  border:1px solid {theme.ACCENT_GOLD}; border-radius:4px;"
+            f"  padding:4px 10px; font-size:12px; }}"
+            f"QPushButton:hover {{ background:#3a2a00; }}"
+        )
+        self._queue_btn.clicked.connect(self._queue_job)
+
+        # Clear button — shown after a run completes (solo or queued).
+        self._clear_btn = QPushButton("Clear")
+        self._clear_btn.setFixedHeight(36)
+        self._clear_btn.setVisible(False)
+        make_interactive(self._clear_btn, tooltip="Clear queue and reset the tab.")
+        self._clear_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.TEXT_MUTED};"
+            f"  border:1px solid {theme.BORDER}; border-radius:4px; padding:4px 10px; font-size:12px; }}"
+            f"QPushButton:hover {{ color:#fff; border-color:#888; }}"
+        )
+        self._clear_btn.clicked.connect(self._clear_all_jobs)
+
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(self.cancel_btn)
+        btn_row.addWidget(self._queue_btn)
+        btn_row.addWidget(self._clear_btn)
         btn_row.addWidget(self._status_label)
         btn_row.addWidget(self._awake_lbl)
         btn_row.addStretch()
         btn_row.addWidget(self._reveal_btn)
         btn_row.addWidget(self.manifest_btn)
         root.addLayout(btn_row)
+
+        # Queue panel (hidden until jobs are added)
+        self._queue_panel = QueuePanel()
+        self._queue_panel.setVisible(False)
+        self._queue_panel.run_requested.connect(self._run_next)
+        self._queue_panel.clear_requested.connect(self._clear_all_jobs)
+        self._queue_panel.edit_requested.connect(self._edit_queued_job)
+        self._queue_panel.remove_requested.connect(self._remove_queued_job)
+        root.addWidget(self._queue_panel)
 
         # ── Log panel (includes inline progress bar) ─────────────────────────
         self.log = LogWidget(
@@ -337,6 +401,109 @@ class TransferTab(QWidget):
         # Convenience aliases so progress-related methods need no changes
         self.progress_bar       = self.log.progress_bar
         self.current_file_label = self.log.current_file_label
+
+    # ── Queue helpers ─────────────────────────────────────────────────────────
+
+    def _capture_job_spec(self) -> TransferJobSpec:
+        src = self.src_input.text()
+        dst = self.dst_input.text()
+        src_is_url = is_gdrive_url(src)
+        dst_is_url = is_gdrive_url(dst)
+        return TransferJobSpec(
+            src=src,
+            dst=dst,
+            gdrive_mode=src_is_url or dst_is_url,
+            mirror_mode=self.mirror_chk.isChecked(),
+            paranoid_mode=self.paranoid_chk.isChecked(),
+            conflict_handler=self._conflict_handler_str(),
+            extract_zips=self.extract_zip_chk.isChecked(),
+            export_mhl=self.export_mhl_chk.isChecked(),
+            job_name="",
+        )
+
+    def _queue_job(self):
+        src = self.src_input.text()
+        dst = self.dst_input.text()
+        if not src or not dst:
+            show_toast(self, "Enter source and destination before queuing.", "info")
+            return
+        self._queue_counter += 1
+        spec = self._capture_job_spec()
+        spec.job_name = f"Transfer {self._queue_counter}"
+        path_summary = f"{src} → {dst}"
+        idx = self._queue_panel.add_item(self._queue_counter, spec.job_name, path_summary)
+        self._job_queue.append(spec)
+        self._queue_panel.setVisible(True)
+        # Reset inputs for next job (keep recent-path dropdowns intact)
+        self.src_input.setText("")
+        self.dst_input.setText("")
+        self.job_name_input.setText("")
+
+    def _run_next(self):
+        if not self._job_queue:
+            self._queue_panel.show_clear_button(True)
+            self._clear_btn.setVisible(True)
+            return
+        spec = self._job_queue.pop(0)
+        # Find first Pending row index
+        panel_idx = next(
+            (i for i, r in enumerate(self._queue_panel._rows) if r._status == "Pending"),
+            0,
+        )
+        self._current_queue_index = panel_idx
+        self._queue_panel.set_status(panel_idx, "Running")
+        # Load spec back into widget fields then start
+        self.src_input.setText(spec.src)
+        self.dst_input.setText(spec.dst)
+        self.job_name_input.setText(spec.job_name)
+        self.mirror_chk.setChecked(spec.mirror_mode)
+        self.paranoid_chk.setChecked(spec.paranoid_mode)
+        ci = {"skip": 0, "overwrite": 1, "rename": 2}.get(spec.conflict_handler, 1)
+        self.conflict_combo.setCurrentIndex(ci)
+        self.extract_zip_chk.setChecked(spec.extract_zips)
+        self.export_mhl_chk.setChecked(spec.export_mhl)
+        self._start_transfer()
+
+    def _edit_queued_job(self, index: int):
+        if index < 0 or index >= len(self._job_queue):
+            return
+        spec = self._job_queue.pop(index)
+        self._queue_panel.remove_row(index)
+        if not self._queue_panel._rows:
+            self._queue_panel.setVisible(False)
+        # Load spec into fields so user can edit and re-queue/start
+        self.src_input.setText(spec.src)
+        self.dst_input.setText(spec.dst)
+        self.job_name_input.setText(spec.job_name)
+        self.mirror_chk.setChecked(spec.mirror_mode)
+        self.paranoid_chk.setChecked(spec.paranoid_mode)
+        ci = {"skip": 0, "overwrite": 1, "rename": 2}.get(spec.conflict_handler, 1)
+        self.conflict_combo.setCurrentIndex(ci)
+        self.extract_zip_chk.setChecked(spec.extract_zips)
+        self.export_mhl_chk.setChecked(spec.export_mhl)
+
+    def _remove_queued_job(self, index: int):
+        if 0 <= index < len(self._job_queue):
+            self._job_queue.pop(index)
+            self._queue_panel.remove_row(index)
+            if not self._queue_panel._rows:
+                self._queue_panel.setVisible(False)
+
+    def _clear_all_jobs(self):
+        self._job_queue = []
+        self._queue_counter = 0
+        self._current_queue_index = -1
+        self._queue_panel.clear_all()
+        self._queue_panel.setVisible(False)
+        self._clear_btn.setVisible(False)
+        # Reset tab state
+        self.src_input.setText("")
+        self.dst_input.setText("")
+        self.job_name_input.setText("")
+        self._banner.dismiss()
+        self._reveal_btn.setVisible(False)
+        self._status_label.setText("Ready")
+        self.log.clear_log()
 
     def _conflict_handler_str(self):
         return {0: "skip", 1: "overwrite", 2: "rename"}[self.conflict_combo.currentIndex()]
@@ -363,6 +530,19 @@ class TransferTab(QWidget):
             model_item.setEnabled(not gdrive)
         if gdrive and self.conflict_combo.currentIndex() == rename_item_idx:
             self.conflict_combo.setCurrentIndex(1)
+        # Paranoid checkbox only matters for Drive transfers — local↔local is always verified
+        self.paranoid_chk.setEnabled(gdrive)
+        if gdrive:
+            self.paranoid_chk.setToolTip(
+                "Compute SHA-256 locally on the non-Drive side and compare to Drive's hash.\n"
+                "Slower but doesn't trust rclone's --checksum."
+            )
+        else:
+            self.paranoid_chk.setChecked(False)
+            self.paranoid_chk.setToolTip(
+                "Not applicable — local-to-local transfers already compute independent\n"
+                "SHA-256 on both sides as part of every copy."
+            )
 
     def _update_preflight(self):
         src = self.src_input.text()
@@ -516,6 +696,7 @@ class TransferTab(QWidget):
             src, dst,
             gdrive_mode=gdrive_mode,
             mirror_mode=mirror_mode,
+            paranoid_mode=self.paranoid_chk.isChecked(),
             conflict_handler=self._conflict_handler_str(),
             extract_zips=self.extract_zip_chk.isChecked(),
             export_mhl=self.export_mhl_chk.isChecked(),
@@ -594,8 +775,14 @@ class TransferTab(QWidget):
         else:
             self.log.log(f"Transfer complete  {result.get('actual_dest', '')}", "success")
             show_toast(self, "Transfer complete.", "success")
+            fallback_count = (result.get("manifest", {})
+                              .get("checksum_context", {})
+                              .get("paranoid_fallback_count", 0))
+            subtitle = (f"{fallback_count} file(s) verified via rclone-checksum, not independent SHA-256."
+                        if fallback_count else "")
             self._banner.show_result(
-                "✓  TRANSFER COMPLETE — all files copied and verified.", ok=True)
+                "✓  TRANSFER COMPLETE — all files copied and verified.", ok=True,
+                subtitle=subtitle)
         # Offer a one-click jump to the output for local destinations.
         dest = result.get("actual_dest") or self.dst_input.text()
         self._last_dest = dest
@@ -608,6 +795,12 @@ class TransferTab(QWidget):
             local = dest if not is_gdrive_url(dest) else src
             remote = src if not is_gdrive_url(dest) else dest
             self._register_project(result, src=remote, dest=local)
+        # Queue: mark current item done or failed and advance.
+        if self._current_queue_index >= 0:
+            status = "Failed" if errors else "Done"
+            self._queue_panel.set_status(self._current_queue_index, status)
+            self._current_queue_index = -1
+        self._run_next()
 
     def _reveal_destination(self):
         dest = getattr(self, "_last_dest", "")
@@ -622,6 +815,10 @@ class TransferTab(QWidget):
         self.log.log(f"FATAL: {msg}", "error")
         self._banner.show_result("✕  TRANSFER FAILED — see the log.", ok=False)
         QMessageBox.critical(self, "Transfer Failed", msg)
+        if self._current_queue_index >= 0:
+            self._queue_panel.set_status(self._current_queue_index, "Failed")
+            self._current_queue_index = -1
+        self._run_next()
 
     def _reset_controls(self):
         self.start_btn.setEnabled(True)
@@ -690,10 +887,10 @@ class TransferTab(QWidget):
         vfailures = manifest.get("verify_failures", [])
         if counts or vmethod:
             lines += ["", "SUMMARY:"]
-            if vmethod == "rclone-checksum":
+            if vmethod == "paranoid":
+                lines.append("  Verification: Paranoid (independent SHA-256 on source and destination)")
+            elif vmethod == "rclone-checksum":
                 lines.append("  Verification: rclone --checksum (source vs destination compared at transfer time)")
-            elif vmethod == "local-copy" or vmethod == "local":
-                lines.append("  Verification: independent xxh128 on source and destination (pre/post copy)")
             if vfailures:
                 lines.append(f"  VERIFICATION FAILURES: {len(vfailures)}")
             if counts:

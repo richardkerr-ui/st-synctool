@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
@@ -11,11 +12,21 @@ from gui.completion_banner import CompletionBanner
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
 from gui.toast import show_toast
+from gui.widgets.queue_panel import QueuePanel
 from core.manifest import load_manifest
 from gui import theme
 from core import rclone_bridge
 from core import verify as _verify
 from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
+
+
+@dataclass
+class VerifyJobSpec:
+    folder_str: str
+    manifest_str: str
+    deep: bool
+    label: str
+    job_name: str
 
 
 class VerifyWorker(QObject):
@@ -89,6 +100,9 @@ class VerifyTab(QWidget):
         super().__init__(parent)
         self._manifest = None
         self._thread   = None
+        self._job_queue: list[VerifyJobSpec] = []
+        self._queue_counter = 0
+        self._current_queue_index: int = -1
         self._build_ui()
         self._install_shortcuts()
 
@@ -189,18 +203,47 @@ class VerifyTab(QWidget):
         self.cancel_btn.clicked.connect(self._cancel_verify)
         btn_row.addWidget(self.cancel_btn)
 
+        self._queue_btn = QPushButton("+ Queue")
+        self._queue_btn.setFixedHeight(36)
+        make_interactive(self._queue_btn, tooltip="Add these settings as a pending verification job.")
+        self._queue_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.ACCENT_GOLD};"
+            f"  border:1px solid {theme.ACCENT_GOLD}; border-radius:4px;"
+            f"  padding:4px 10px; font-size:12px; }}"
+            f"QPushButton:hover {{ background:#3a2a00; }}"
+        )
+        self._queue_btn.clicked.connect(self._queue_job)
+        btn_row.addWidget(self._queue_btn)
+
+        self._clear_btn = QPushButton("Clear")
+        self._clear_btn.setFixedHeight(36)
+        self._clear_btn.setVisible(False)
+        make_interactive(self._clear_btn, tooltip="Clear queue and reset the tab.")
+        self._clear_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.TEXT_MUTED};"
+            f"  border:1px solid {theme.BORDER}; border-radius:4px; padding:4px 10px; font-size:12px; }}"
+            f"QPushButton:hover {{ color:#fff; border-color:#888; }}"
+        )
+        self._clear_btn.clicked.connect(self._clear_all_jobs)
+        btn_row.addWidget(self._clear_btn)
+
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px; margin-left:auto;")
         btn_row.addStretch()
         btn_row.addWidget(self.status_label)
         root.addLayout(btn_row)
 
+        # Queue panel
+        self._queue_panel = QueuePanel()
+        self._queue_panel.setVisible(False)
+        self._queue_panel.run_requested.connect(self._run_next)
+        self._queue_panel.clear_requested.connect(self._clear_all_jobs)
+        self._queue_panel.edit_requested.connect(self._edit_queued_job)
+        self._queue_panel.remove_requested.connect(self._remove_queued_job)
+        root.addWidget(self._queue_panel)
+
         # ── Summary cards ────────────────────────────────────────
         summary_group = QGroupBox("RESULTS")
-        # M15.1: make the verification scope explicit — "verified" is the data
-        # fork (file contents) only; xattrs/resource forks are not hashed.
-        from core.verify import VERIFY_SCOPE_NOTE
-        summary_group.setToolTip(VERIFY_SCOPE_NOTE)
         sg = QHBoxLayout(summary_group)
         sg.setSpacing(10)
 
@@ -246,20 +289,6 @@ class VerifyTab(QWidget):
 
         root.addWidget(summary_group)
 
-        # M13.5: folder root (corruption fingerprint) — one truncated line under
-        # the tiles, full value in the tooltip. Deliberately NOT labelled
-        # "tamper-evident": it is a bit-rot fingerprint bounded by xxh128, not a
-        # security guarantee.
-        self._folder_root_lbl = QLabel("")
-        self._folder_root_lbl.setStyleSheet(
-            f"font-size:11px; color:{theme.TEXT_MUTED}; background:transparent;"
-        )
-        self._folder_root_lbl.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        self._folder_root_lbl.setVisible(False)
-        root.addWidget(self._folder_root_lbl)
-
         # ── Progress bar ─────────────────────────────────────────
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -275,6 +304,85 @@ class VerifyTab(QWidget):
 
         scroll.setWidget(content)
         outer.addWidget(scroll)
+
+    # ── Queue helpers ─────────────────────────────────────────────────────────
+
+    def _capture_job_spec(self) -> VerifyJobSpec:
+        folder_str = self.folder_input.text()
+        manifest_str = self.manifest_input.text()
+        deep = is_gdrive_url(folder_str) and self.deep_chk.isChecked()
+        return VerifyJobSpec(
+            folder_str=folder_str,
+            manifest_str=manifest_str,
+            deep=deep,
+            label=Path(folder_str).name if folder_str else "",
+            job_name="",
+        )
+
+    def _queue_job(self):
+        if not self.folder_input.text():
+            show_toast(self, "Enter a folder before queuing.", "info")
+            return
+        self._queue_counter += 1
+        spec = self._capture_job_spec()
+        spec.job_name = f"Verify {self._queue_counter}"
+        path_summary = spec.folder_str
+        idx = self._queue_panel.add_item(self._queue_counter, spec.job_name, path_summary)
+        self._job_queue.append(spec)
+        self._queue_panel.setVisible(True)
+        self.folder_input.setText("")
+        self.manifest_input.setText("")
+
+    def _run_next(self):
+        if not self._job_queue:
+            self._queue_panel.show_clear_button(True)
+            self._clear_btn.setVisible(True)
+            return
+        spec = self._job_queue.pop(0)
+        panel_idx = next(
+            (i for i, r in enumerate(self._queue_panel._rows) if r._status == "Pending"),
+            0,
+        )
+        self._current_queue_index = panel_idx
+        self._queue_panel.set_status(panel_idx, "Running")
+        self.folder_input.setText(spec.folder_str)
+        self.manifest_input.setText(spec.manifest_str)
+        self.deep_chk.setChecked(spec.deep)
+        self._run_verify()
+
+    def _edit_queued_job(self, index: int):
+        if index < 0 or index >= len(self._job_queue):
+            return
+        spec = self._job_queue.pop(index)
+        self._queue_panel.remove_row(index)
+        if not self._queue_panel._rows:
+            self._queue_panel.setVisible(False)
+        self.folder_input.setText(spec.folder_str)
+        self.manifest_input.setText(spec.manifest_str)
+        self.deep_chk.setChecked(spec.deep)
+
+    def _remove_queued_job(self, index: int):
+        if 0 <= index < len(self._job_queue):
+            self._job_queue.pop(index)
+            self._queue_panel.remove_row(index)
+            if not self._queue_panel._rows:
+                self._queue_panel.setVisible(False)
+
+    def _clear_all_jobs(self):
+        self._job_queue = []
+        self._queue_counter = 0
+        self._current_queue_index = -1
+        self._queue_panel.clear_all()
+        self._queue_panel.setVisible(False)
+        self._clear_btn.setVisible(False)
+        self.folder_input.setText("")
+        self.manifest_input.setText("")
+        self._banner.dismiss()
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Ready")
+        self.log.clear_log()
+        for attr in ("_card_ok", "_card_extra", "_card_missing", "_card_mismatch"):
+            getattr(self, attr).setText("—")
 
     def _browse_manifest(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -467,17 +575,6 @@ class VerifyTab(QWidget):
             level,
         )
         self.status_label.setText(f"{ok}/{total} files OK")
-
-        # M13.5: surface the folder root (computed in core/verify) for local verifies.
-        from core import verify as _verify
-        folder_root = _verify.folder_root_from_results(results)
-        if folder_root:
-            self._folder_root_lbl.setText(f"Folder root: {folder_root[:24]}…")
-            self._folder_root_lbl.setToolTip(folder_root)
-            self._folder_root_lbl.setVisible(True)
-        else:
-            self._folder_root_lbl.setVisible(False)
-
         if clean:
             show_toast(self, f"Verification passed — {ok}/{total} files OK.", "success")
             self._banner.show_result(
@@ -488,6 +585,10 @@ class VerifyTab(QWidget):
                 f"✕  VERIFICATION FAILED — {mismatch} mismatched, {missing} missing. "
                 "Do not trust this copy.", ok=False)
         self._write_verify_report(results)
+        if self._current_queue_index >= 0:
+            self._queue_panel.set_status(self._current_queue_index, "Done")
+            self._current_queue_index = -1
+        self._run_next()
 
     def _on_verify_error(self, msg):
         self.verify_btn.setEnabled(True)
@@ -497,6 +598,10 @@ class VerifyTab(QWidget):
         self.status_label.setText("Error")
         self.log.log(f"Verify error: {msg}", "error")
         QMessageBox.critical(self, "Verify Error", msg)
+        if self._current_queue_index >= 0:
+            self._queue_panel.set_status(self._current_queue_index, "Failed")
+            self._current_queue_index = -1
+        self._run_next()
 
     def _write_verify_report(self, results):
         import getpass, socket

@@ -1,5 +1,6 @@
 import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,6 +14,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QObject
 
 from gui.ui_helpers import make_interactive, awake_indicator, start_dir_for
+from gui.widgets.queue_panel import QueuePanel
+
+
+@dataclass
+class MergeJobSpec:
+    base_input: str
+    local_input: str
+    server_input: str
+    job_name: str
 from gui.completion_banner import CompletionBanner
 from gui.path_input_widget import PathInputWidget
 from gui.log_widget import LogWidget
@@ -165,7 +175,8 @@ class ApplyWorker(QObject):
 
     def __init__(self, actions, local_path, server_path, base_manifest,
                  yours_manifest, server_manifest,
-                 preserve_on_overwrite, rescan_before_apply, conflict_count=0):
+                 preserve_on_overwrite, rescan_before_apply, conflict_count=0,
+                 job_name=""):
         super().__init__()
         self.actions        = actions
         self.local_path     = Path(local_path)
@@ -176,6 +187,7 @@ class ApplyWorker(QObject):
         self.preserve       = preserve_on_overwrite
         self.rescan         = rescan_before_apply
         self.conflict_count = conflict_count
+        self.job_name       = job_name
 
     def run(self):
         try:
@@ -350,13 +362,12 @@ class ApplyWorker(QObject):
                         manifest_path=archive_path,
                     )
                     if archive_path:
-                        _job_name = self.job_name_input.text().strip()
                         project_registry.upsert_project(
                             project_id,
                             local_path=str(self.local_path),
                             server_path=self.server_path,
                             latest_manifest=archive_path,
-                            display_name=_job_name or "",
+                            display_name=self.job_name or "",
                         )
                 except Exception as e:
                     log(f"  Could not update project registry: {e}", "warning")
@@ -469,6 +480,9 @@ class MergeTab(QWidget):
         self._apply_thread     = None
         self._current_project_id = None
         self._detect_timer     = None
+        self._job_queue: list[MergeJobSpec] = []
+        self._queue_counter = 0
+        self._current_queue_index: int = -1
         self._build_ui()
 
     def _build_ui(self):
@@ -654,6 +668,23 @@ class MergeTab(QWidget):
         )
         self.newer_wins_btn.clicked.connect(self._on_newer_wins)
 
+        self._btn_skip_server_only = QPushButton("Skip Server-Only")
+        self._btn_skip_server_only.setFixedHeight(36)
+        self._btn_skip_server_only.setEnabled(False)
+        make_interactive(
+            self._btn_skip_server_only,
+            tooltip="Set all Server-Only rows to Skip so they are not pulled.",
+        )
+        self._btn_skip_server_only.setStyleSheet(
+            f"QPushButton {{ background:#3a2a00; color:{theme.ACCENT_GOLD};"
+            f"  border:1px solid {theme.ACCENT_GOLD}; border-radius:4px;"
+            f"  padding:8px 14px; font-weight:bold; }}"
+            f"QPushButton:hover {{ background:#4a3800; }}"
+            f"QPushButton:pressed {{ background:#2a1e00; }}"
+            f"QPushButton:disabled {{ background:#1a1a1a; color:#555; border-color:#333; }}"
+        )
+        self._btn_skip_server_only.clicked.connect(self._batch_skip_server_only)
+
         self.status_label = QLabel("Scan first to enable apply")
         self.status_label.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px;")
 
@@ -666,8 +697,33 @@ class MergeTab(QWidget):
         self._awake_lbl = awake_indicator()   # M12.5 — shown only while a job runs
 
         btn_row.addWidget(self.scan_btn)
+        self._queue_btn = QPushButton("+ Queue")
+        self._queue_btn.setFixedHeight(36)
+        make_interactive(self._queue_btn, tooltip="Add current paths as a pending scan job.")
+        self._queue_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.ACCENT_GOLD};"
+            f"  border:1px solid {theme.ACCENT_GOLD}; border-radius:4px;"
+            f"  padding:4px 10px; font-size:12px; }}"
+            f"QPushButton:hover {{ background:#3a2a00; }}"
+        )
+        self._queue_btn.clicked.connect(self._queue_job)
+
+        self._clear_btn_queue = QPushButton("Clear")
+        self._clear_btn_queue.setFixedHeight(36)
+        self._clear_btn_queue.setVisible(False)
+        make_interactive(self._clear_btn_queue, tooltip="Clear queue and reset the tab.")
+        self._clear_btn_queue.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.TEXT_MUTED};"
+            f"  border:1px solid {theme.BORDER}; border-radius:4px; padding:4px 10px; font-size:12px; }}"
+            f"QPushButton:hover {{ color:#fff; border-color:#888; }}"
+        )
+        self._clear_btn_queue.clicked.connect(self._clear_all_jobs)
+
         btn_row.addWidget(self.apply_btn)
         btn_row.addWidget(self.newer_wins_btn)
+        btn_row.addWidget(self._btn_skip_server_only)
+        btn_row.addWidget(self._queue_btn)
+        btn_row.addWidget(self._clear_btn_queue)
         btn_row.addWidget(self._unresolved_lbl)
         btn_row.addWidget(self.status_label)
         btn_row.addWidget(self._awake_lbl)
@@ -676,8 +732,18 @@ class MergeTab(QWidget):
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
+        self.progress_bar.setFixedHeight(16)
         self.progress_bar.setVisible(False)
         root.addWidget(self.progress_bar)
+
+        # Queue panel (added after progress_bar so it sits below the action row)
+        self._queue_panel = QueuePanel()
+        self._queue_panel.setVisible(False)
+        self._queue_panel.run_requested.connect(self._run_next)
+        self._queue_panel.clear_requested.connect(self._clear_all_jobs)
+        self._queue_panel.edit_requested.connect(self._edit_queued_job)
+        self._queue_panel.remove_requested.connect(self._remove_queued_job)
+        root.addWidget(self._queue_panel)
 
     def _build_diff_group(self) -> QGroupBox:
         """Changes group box containing the summary header and the diff table."""
@@ -997,6 +1063,86 @@ class MergeTab(QWidget):
 
     # ── Scan ──────────────────────────────────────────────────────────────────
 
+    # ── Queue helpers ─────────────────────────────────────────────────────────
+
+    def _queue_job(self):
+        local = self.local_input.text()
+        server = self.server_input.text()
+        if not local or not server:
+            show_toast(self, "Enter both Local and Server paths before queuing.", "info")
+            return
+        self._queue_counter += 1
+        spec = MergeJobSpec(
+            base_input=self.base_input.text(),
+            local_input=local,
+            server_input=server,
+            job_name=self.job_name_input.text().strip() or f"Merge {self._queue_counter}",
+        )
+        path_summary = f"{local} ↔ {server}"
+        idx = self._queue_panel.add_item(self._queue_counter, spec.job_name, path_summary)
+        self._job_queue.append(spec)
+        self._queue_panel.setVisible(True)
+        # Reset inputs for next job
+        self.local_input.setText("")
+        self.server_input.setText("")
+        self.base_input.setText("")
+        self.job_name_input.setText("")
+
+    def _run_next(self):
+        if not self._job_queue:
+            self._queue_panel.show_clear_button(True)
+            self._clear_btn_queue.setVisible(True)
+            return
+        spec = self._job_queue.pop(0)
+        panel_idx = next(
+            (i for i, r in enumerate(self._queue_panel._rows) if r._status == "Pending"),
+            0,
+        )
+        self._current_queue_index = panel_idx
+        self._queue_panel.set_status(panel_idx, "Running")
+        self.local_input.setText(spec.local_input)
+        self.server_input.setText(spec.server_input)
+        self.base_input.setText(spec.base_input)
+        self.job_name_input.setText(spec.job_name)
+        self._run_scan()
+
+    def _edit_queued_job(self, index: int):
+        if index < 0 or index >= len(self._job_queue):
+            return
+        spec = self._job_queue.pop(index)
+        self._queue_panel.remove_row(index)
+        if not self._queue_panel._rows:
+            self._queue_panel.setVisible(False)
+        self.local_input.setText(spec.local_input)
+        self.server_input.setText(spec.server_input)
+        self.base_input.setText(spec.base_input)
+        self.job_name_input.setText(spec.job_name)
+
+    def _remove_queued_job(self, index: int):
+        if 0 <= index < len(self._job_queue):
+            self._job_queue.pop(index)
+            self._queue_panel.remove_row(index)
+            if not self._queue_panel._rows:
+                self._queue_panel.setVisible(False)
+
+    def _clear_all_jobs(self):
+        self._job_queue = []
+        self._queue_counter = 0
+        self._current_queue_index = -1
+        self._queue_panel.clear_all()
+        self._queue_panel.setVisible(False)
+        self._clear_btn_queue.setVisible(False)
+        self.local_input.setText("")
+        self.server_input.setText("")
+        self.base_input.setText("")
+        self.job_name_input.setText("")
+        self._banner.dismiss()
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Scan first to enable apply")
+        self.diff_table.setRowCount(0)
+        self.summary_label.setVisible(False)
+        self.log.clear_log()
+
     def _run_scan(self):
         local  = self.local_input.text()
         server = self.server_input.text()
@@ -1009,6 +1155,7 @@ class MergeTab(QWidget):
 
         self.scan_btn.setEnabled(False)
         self.apply_btn.setEnabled(False)
+        self._btn_skip_server_only.setEnabled(False)
         self._apply_opacity.setOpacity(0.4)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
@@ -1056,6 +1203,8 @@ class MergeTab(QWidget):
         self.progress_bar.setValue(100)
         self.progress_bar.setVisible(False)
         self.scan_btn.setEnabled(True)
+        has_server_only = any(r.state.name == "SERVER_ONLY" for r in results)
+        self._btn_skip_server_only.setEnabled(has_server_only)
         if changed > 0:
             self.apply_btn.setEnabled(True)
             self._apply_opacity.setOpacity(1.0)
@@ -1143,6 +1292,7 @@ class MergeTab(QWidget):
             preserve_on_overwrite=self.preserve_chk.isChecked(),
             rescan_before_apply=self.rescan_chk.isChecked(),
             conflict_count=conflicts,
+            job_name=self.job_name_input.text().strip(),
         )
         self._apply_worker.moveToThread(self._apply_thread)
         self._apply_thread.started.connect(self._apply_worker.run)
@@ -1194,6 +1344,11 @@ class MergeTab(QWidget):
             self._banner.show_result(
                 f"⚠  MERGE FINISHED WITH {f} FAILURE(S) — {s} applied, "
                 f"{f} failed. Review the log.", ok=False)
+        if self._current_queue_index >= 0:
+            status = "Failed" if f else "Done"
+            self._queue_panel.set_status(self._current_queue_index, status)
+            self._current_queue_index = -1
+        self._run_next()
 
     def _on_apply_error(self, msg: str):
         end_session()
@@ -1206,6 +1361,10 @@ class MergeTab(QWidget):
         self.log.log(f"Apply error: {msg}", "error")
         self._banner.show_result("✕  MERGE FAILED — see the log.", ok=False)
         QMessageBox.critical(self, "Apply Error", msg)
+        if self._current_queue_index >= 0:
+            self._queue_panel.set_status(self._current_queue_index, "Failed")
+            self._current_queue_index = -1
+        self._run_next()
 
     # ── Conflict detail panel ─────────────────────────────────────────────────
 
@@ -1221,7 +1380,7 @@ class MergeTab(QWidget):
 
         def _short_hash(entry):
             cs = entry.get("checksums", {})
-            h = cs.get("xxh128") or cs.get("md5")
+            h = cs.get("xxh128") or cs.get("sha256") or cs.get("md5") or cs.get("xxhash3_64")
             return h[:8] if h else "n/a"
 
         local_size  = _fmt_size(local_e.get("size"))
@@ -1320,6 +1479,13 @@ class MergeTab(QWidget):
             )
         else:
             self.log.log("Newer Wins: no conflict rows found.", "info")
+
+    def _batch_skip_server_only(self):
+        """Set all SERVER_ONLY rows to Skip and show a count toast."""
+        count = self.diff_table.skip_server_only()
+        msg = f"Skipped {count} server-only row{'s' if count != 1 else ''}."
+        show_toast(self, msg, "info")
+        self.log.log(msg, "info")
 
     def _on_rescan_conflict(self, paths):
         end_session()

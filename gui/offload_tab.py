@@ -6,6 +6,8 @@ Phase 5 items 22–40 (SYNCTOOL_CONTEXT.md).
 
 from __future__ import annotations
 
+import copy
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +28,7 @@ from gui.ui_helpers import (
     make_interactive, awake_indicator, open_path, reveal_in_finder, start_dir_for,
 )
 from gui.log_widget import LogWidget
+from gui.widgets.queue_panel import QueuePanel
 from core.amphetamine import start_session, end_session
 from core.throughput import ThroughputMeter, format_rate, format_eta
 from utils.file_utils import format_bytes
@@ -37,6 +40,14 @@ from core.offload import (
 from core.thumbnail import ffmpeg_available, pillow_available
 import core.projects as projects
 from utils.volume_watcher import VolumeWatcher
+
+
+@dataclass
+class OffloadJobSpec:
+    sources: list  # deep copy of list[OffloadSource]
+    dests: list    # deep copy of list[OffloadDest]
+    config: object  # OffloadConfig
+    job_name: str
 
 # ---------------------------------------------------------------------------
 # Cell state styling
@@ -355,18 +366,7 @@ class SummaryDialog(QDialog):
         summary_lbl.setStyleSheet("font-size:14px;margin-bottom:8px;")
         layout.addWidget(summary_lbl)
 
-        # Per-source eject indicators.
-        #
-        # M14.1 audit (advises-only model): ST SyncTool NEVER issues a destructive
-        # card operation — there is no diskutil/eraseDisk/erase/eject call anywhere
-        # in the codebase (the only rmtree calls target the app's own staging dir).
-        # The user formats the card manually in Finder/Disk Utility. Therefore the
-        # clearance TEXT below IS the gate: it must never display the "safe to
-        # format" phrase unless the verdict actually cleared. ClearanceVerdict.to_text()
-        # guarantees this — the safe-to-format wording lives only on the cleared
-        # branch; a not-cleared verdict renders "Not cleared: <reason>". Because the
-        # app does not format, there is no destructive control to disable and no
-        # one-shot override to manage (Gap 2/3 are N/A for the advises-only model).
+        # Per-source eject indicators
         from core.clearance import compute_clearance
         src_labels = list(dict.fromkeys(r.source_label for r in results))
         for src_label in src_labels:
@@ -660,6 +660,9 @@ class OffloadTab(QWidget):
         self._dismissed: set[str] = set()
         # mount_paths already offered (banner shown or accepted) this session
         self._offered: set[str] = set()
+        self._job_queue: list[OffloadJobSpec] = []
+        self._queue_counter = 0
+        self._current_queue_index: int = -1
         self._build_ui()
         self._start_volume_watcher()
         self._install_shortcuts()
@@ -960,11 +963,44 @@ class OffloadTab(QWidget):
         self._awake_lbl = awake_indicator()
         btn_row.addWidget(self._awake_lbl)
 
+        self._queue_btn = QPushButton("+ Queue")
+        self._queue_btn.setMinimumHeight(36)
+        make_interactive(self._queue_btn, tooltip="Add current sources/destinations as a pending offload job.")
+        self._queue_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.ACCENT_GOLD};"
+            f"  border:1px solid {theme.ACCENT_GOLD}; border-radius:4px;"
+            f"  padding:4px 10px; font-size:12px; }}"
+            f"QPushButton:hover {{ background:#3a2a00; }}"
+        )
+        self._queue_btn.clicked.connect(self._queue_job)
+        btn_row.addWidget(self._queue_btn)
+
+        self._clear_btn = QPushButton("Clear")
+        self._clear_btn.setMinimumHeight(36)
+        self._clear_btn.setVisible(False)
+        make_interactive(self._clear_btn, tooltip="Clear queue and reset the tab.")
+        self._clear_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{theme.TEXT_MUTED};"
+            f"  border:1px solid {theme.BORDER}; border-radius:4px; padding:4px 10px; font-size:12px; }}"
+            f"QPushButton:hover {{ color:#fff; border-color:#888; }}"
+        )
+        self._clear_btn.clicked.connect(self._clear_all_jobs)
+        btn_row.addWidget(self._clear_btn)
+
         self._offload_status_lbl = QLabel("Ready")
         self._offload_status_lbl.setStyleSheet(f"color:{theme.TEXT_MUTED}; font-size:12px;")
         btn_row.addStretch()
         btn_row.addWidget(self._offload_status_lbl)
         layout.addLayout(btn_row)
+
+        # Queue panel
+        self._queue_panel = QueuePanel()
+        self._queue_panel.setVisible(False)
+        self._queue_panel.run_requested.connect(self._run_next)
+        self._queue_panel.clear_requested.connect(self._clear_all_jobs)
+        self._queue_panel.edit_requested.connect(self._edit_queued_job)
+        self._queue_panel.remove_requested.connect(self._remove_queued_job)
+        layout.addWidget(self._queue_panel)
 
         self._log = LogWidget(
             "Offload log",
@@ -1283,6 +1319,109 @@ class OffloadTab(QWidget):
             return "proceed"   # never let the guard get in the way of an offload
         return "proceed"
 
+    # ── Queue helpers ─────────────────────────────────────────────────────────
+
+    def _capture_job_spec(self) -> OffloadJobSpec:
+        sources, dests = self._collect_inputs()
+        config = OffloadConfig(
+            max_retries=self._retries_spin.value(),
+            stop_on_first_failure=self._stop_on_fail.isChecked(),
+            generate_thumbnails=self._thumb_check.isChecked() and self._thumb_check.isEnabled(),
+            thumbnail_max_frames=self._max_frames_spin.value(),
+            normalize_filenames=False,
+            resume_staging=False,
+            export_mhl=self._export_mhl_chk.isChecked(),
+            job_name="",
+        )
+        return OffloadJobSpec(
+            sources=copy.deepcopy(sources),
+            dests=copy.deepcopy(dests),
+            config=config,
+            job_name="",
+        )
+
+    def _queue_job(self):
+        sources, dests = self._collect_inputs()
+        active_src = [s for s in sources if s.enabled]
+        active_dst = [d for d in dests if d.enabled]
+        if not active_src or not active_dst:
+            from gui.toast import show_toast
+            show_toast(self, "Add at least one source and destination before queuing.", "info")
+            return
+        self._queue_counter += 1
+        spec = self._capture_job_spec()
+        spec.job_name = f"Offload {self._queue_counter}"
+        spec.config.job_name = spec.job_name
+        src_labels = ", ".join(s.label for s in active_src)
+        dst_labels = ", ".join(d.label for d in active_dst)
+        path_summary = f"{src_labels} → {dst_labels}"
+        idx = self._queue_panel.add_item(self._queue_counter, spec.job_name, path_summary)
+        self._job_queue.append(spec)
+        self._queue_panel.setVisible(True)
+
+    def _run_next(self):
+        if not self._job_queue:
+            self._queue_panel.show_clear_button(True)
+            self._clear_btn.setVisible(True)
+            return
+        spec = self._job_queue.pop(0)
+        panel_idx = next(
+            (i for i, r in enumerate(self._queue_panel._rows) if r._status == "Pending"),
+            0,
+        )
+        self._current_queue_index = panel_idx
+        self._queue_panel.set_status(panel_idx, "Running")
+        # Load spec back into the worker directly — offload doesn't read from widgets
+        self._completion_banner.setVisible(False)
+        src_labels = [s.label for s in spec.sources if s.enabled]
+        dst_labels = [d.label for d in spec.dests if d.enabled]
+        self._matrix.configure(src_labels, dst_labels)
+        config = spec.config
+        self._worker = OffloadWorker(spec.sources, spec.dests, config)
+        self._thread = QThread()
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.status_changed.connect(self._on_status_changed)
+        self._worker.log.connect(self._log.log)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.error.connect(self._on_error)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.error.connect(self._thread.quit)
+        self._thread.finished.connect(self._on_thread_done)
+        self._start_btn.setEnabled(False)
+        self._cancel_btn.setEnabled(True)
+        self._offload_status_lbl.setText("Running…")
+        start_session()
+        self._awake_lbl.setVisible(True)
+        self._thread.start()
+
+    def _edit_queued_job(self, index: int):
+        if index < 0 or index >= len(self._job_queue):
+            return
+        self._job_queue.pop(index)
+        self._queue_panel.remove_row(index)
+        if not self._queue_panel._rows:
+            self._queue_panel.setVisible(False)
+
+    def _remove_queued_job(self, index: int):
+        if 0 <= index < len(self._job_queue):
+            self._job_queue.pop(index)
+            self._queue_panel.remove_row(index)
+            if not self._queue_panel._rows:
+                self._queue_panel.setVisible(False)
+
+    def _clear_all_jobs(self):
+        self._job_queue = []
+        self._queue_counter = 0
+        self._current_queue_index = -1
+        self._queue_panel.clear_all()
+        self._queue_panel.setVisible(False)
+        self._clear_btn.setVisible(False)
+        self._completion_banner.setVisible(False)
+        self._offload_status_lbl.setText("Ready")
+        self._log.clear_log()
+
     def _start_offload(self):
         sources, dests = self._collect_inputs()
 
@@ -1596,6 +1735,10 @@ class OffloadTab(QWidget):
         self._awake_lbl.setVisible(False)
         self._thread = None
         self._worker = None
+        if self._current_queue_index >= 0:
+            self._queue_panel.set_status(self._current_queue_index, "Done")
+            self._current_queue_index = -1
+        self._run_next()
 
     def load_demo_data(self):
         """

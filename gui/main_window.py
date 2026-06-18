@@ -101,6 +101,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ST SyncTool -- Signal Theory")
         self.setMinimumSize(1100, 780)
+        self.setFixedWidth(1100)
         self._force_setup = force_setup
         self._build_ui()
         self._restore_window_state()
@@ -730,7 +731,7 @@ class MainWindow(QMainWindow):
                 "title":  "Start Offload",
                 "body":   (
                     "Copies all sources to all destinations simultaneously with "
-                    "independent xxh128 checksum verification. Designed for end-of-day "
+                    "paranoid checksum verification. Designed for end-of-day "
                     "camera card offloads to two drives at once."
                 ),
             },

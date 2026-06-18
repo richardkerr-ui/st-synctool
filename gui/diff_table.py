@@ -188,6 +188,21 @@ class DiffTable(QTableWidget):
             if suggested in options:
                 combo.setCurrentIndex(options.index(suggested))
 
+    def skip_server_only(self) -> int:
+        """For every SERVER_ONLY row, set the action dropdown to Skip.
+        All other rows are left unchanged. Returns the count of rows changed."""
+        changed = 0
+        for path_str, combo in self._action_combos.items():
+            if self._row_states.get(path_str) != "SERVER_ONLY":
+                continue
+            options = [combo.itemText(i) for i in range(combo.count())]
+            if ACT_SKIP in options:
+                idx = options.index(ACT_SKIP)
+                if combo.currentIndex() != idx:
+                    combo.setCurrentIndex(idx)
+                    changed += 1
+        return changed
+
     def _on_selection_changed(self):
         """Emit conflict_selected with the DiffResult when a BOTH_CHANGED row is
         selected, or None for any other selection state."""
