@@ -21,10 +21,18 @@ class FakeCell:
     state: str = "done"
     verified: Optional[bool] = True
     media_verify_log: list = field(default_factory=list)
+    # M14.1: a clean cell is integrity-verified by default (a real content-hash
+    # compare). Set False to model an rclone size+modtime-only "pass".
+    integrity_verified: bool = True
 
 
 def _clean(src, dest):
-    return FakeCell(src, dest, state="done", verified=True)
+    return FakeCell(src, dest, state="done", verified=True, integrity_verified=True)
+
+
+def _size_modtime_only(src, dest):
+    # Committed and "passed", but only by size+modtime — no confirmed hash compare.
+    return FakeCell(src, dest, state="done", verified=True, integrity_verified=False)
 
 
 # ── Cleared (green) ────────────────────────────────────────────────────────
@@ -49,6 +57,61 @@ def test_three_clean_dests_is_cleared():
 
 def test_min_clean_dests_is_two():
     assert MIN_CLEAN_DESTS == 2
+
+
+# ── M14.1 integrity-verified gate ─────────────────────────────────────────────
+
+def test_a_one_clean_integrity_dest_not_cleared():
+    # (a) 1 clean integrity-verified destination → cleared=False.
+    v = compute_clearance("A001", [_clean("A001", "NAS")])
+    assert v.cleared is False
+    assert v.clean_dest_count == 1
+
+
+def test_b_two_dests_one_size_modtime_only_not_cleared():
+    # (b) 2 destinations, one verified by size+modtime only → cleared=False.
+    results = [_clean("A001", "NAS"), _size_modtime_only("A001", "Shuttle")]
+    v = compute_clearance("A001", results)
+    assert v.cleared is False
+    assert v.clean_dest_count == 1   # the size+modtime dest does not count
+    assert "do not count" in v.reason
+
+
+def test_c_two_integrity_verified_dests_cleared():
+    # (c) 2 integrity-verified destinations → cleared=True.
+    results = [_clean("A001", "NAS"), _clean("A001", "Shuttle")]
+    v = compute_clearance("A001", results)
+    assert v.cleared is True
+    assert v.clean_dest_count == 2
+
+
+def test_d_two_dests_one_never_verified_not_cleared():
+    # (d) 2 destinations where one never reached the verify step → cleared=False.
+    unverified = FakeCell("A001", "Shuttle", state="done", verified=None)
+    results = [_clean("A001", "NAS"), unverified]
+    v = compute_clearance("A001", results)
+    assert v.cleared is False
+
+
+def test_size_modtime_only_does_not_block_when_enough_integrity_dests():
+    # The common 2-local-disks + Drive case: two integrity-verified local disks
+    # clear even when a third (Drive, pre-M15.2) is integrity-unconfirmed.
+    results = [
+        _clean("A001", "Disk1"),
+        _clean("A001", "Disk2"),
+        _size_modtime_only("A001", "Drive"),
+    ]
+    v = compute_clearance("A001", results)
+    assert v.cleared is True
+    assert v.clean_dest_count == 2
+
+
+def test_default_integrity_verified_is_false_on_real_cellresult():
+    # Absence of a confirmed hash compare is not a hash compare: the real
+    # CellResult defaults integrity_verified to False.
+    from core.offload import CellResult
+    cell = CellResult(source_label="A001", dest_label="NAS")
+    assert cell.integrity_verified is False
 
 
 # ── Insufficient redundancy ──────────────────────────────────────────────────

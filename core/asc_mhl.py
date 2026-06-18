@@ -12,9 +12,10 @@ a single `<hashlist version="2.0">` with `<creatorinfo>`, `<processinfo>` and a
 
 Hash mapping (manifest key to MHL element). The ASC MHL schema defines exactly
 six hash elements: c4, md5, sha1, xxh128, xxh3, xxh64. There is **no sha256
-element**, so the manifest's primary sha256 is intentionally not exported; every
-manifest we write also carries an MHL-compatible hash (xxhash3_64 for local,
-md5 for Drive), so each file still gets a verifiable hash.
+element** (and M13 removed sha256 as a writer key anyway); every manifest we
+write carries an MHL-compatible hash — xxh128 for local entries, md5 for Drive,
+plus xxh128 on Drive entries where local bytes were available — so each file
+still gets a verifiable hash element.
 
 Pure logic, no PyQt6. The current time, hostname and tool version are injectable.
 """
@@ -40,7 +41,6 @@ MANIFEST_TO_MHL = (
     ("md5", "md5"),
     ("sha1", "sha1"),
     ("xxh128", "xxh128"),
-    ("xxhash3_64", "xxh3"),
     ("xxh64", "xxh64"),
 )
 
@@ -52,7 +52,7 @@ class MhlExportResult:
     """Outcome of an MHL export."""
     path: Path
     hashed_count: int       # files that got at least one MHL hash element
-    unhashed: list          # rel paths with no MHL-compatible hash (sha256-only)
+    unhashed: list          # rel paths with no MHL-compatible hash element
 
 
 def _q(tag: str) -> str:
@@ -115,6 +115,13 @@ def build_mhl_tree(
         if entry.get("modtime"):
             path_attrs["lastmodificationdate"] = entry["modtime"]
         path_el = ET.SubElement(hash_el, _q("path"), path_attrs)
+        # M15.1 normalisation pin (external contract): the MHL path is the TRUE
+        # on-disk name, written verbatim — case and Unicode form (NFC/NFD)
+        # preserved exactly. Post houses match files by the real on-disk name, so
+        # this MUST NOT be normalised. The lowercase+NFC normalisation in
+        # core/merkle.normalise_path is for the internal folder-root fingerprint
+        # ONLY and must never leak here (it would record Shot_01A.mov as
+        # shot_01a.mov and the post house could not locate the file).
         path_el.text = rel
         for mhl_el, digest in pairs:
             el = ET.SubElement(hash_el, _q(mhl_el), {"action": "original", "hashdate": created})

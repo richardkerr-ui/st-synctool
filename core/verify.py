@@ -30,8 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-import hashlib as _hashlib
 from core.checksum import compute_all
+from core import cold_read as _cold_read
 import core.media_verify as _media_verify
 from core import rclone_bridge
 from utils.gdrive_utils import is_gdrive_url, gdrive_url_to_rclone
@@ -42,6 +42,17 @@ LogCallback = Callable[[str, str], None]
 # M5.4 — where persisted verify reports land.
 from core import paths as _paths
 VERIFY_LOGS_DIR = _paths.verify_reports_dir()
+
+# M15.1: what "verified" actually covers. Plain "verified" means the DATA FORK
+# only — the file's byte content, which is what the xxh128/md5 hash digests. macOS
+# extended attributes (incl. com.apple.ResourceFork, com.apple.FinderInfo) and
+# resource forks are NOT part of the hash and may not survive every copy path; see
+# docs/filesystem_scope.md. State this single-sourced note wherever a verdict is
+# surfaced (verify report, Verify tab tooltip, offload custody log).
+VERIFY_SCOPE_NOTE = (
+    "Verified = data fork (file contents) only. Extended attributes, resource "
+    "forks and Finder metadata are not part of the hash and are not verified."
+)
 
 # Files that legitimately live in a Drive folder without being in the manifest.
 _IGNORED_EXTRAS = frozenset(
@@ -57,6 +68,12 @@ def _noop_log(message: str, level: str) -> None:  # pragma: no cover - trivial
     pass
 
 
+def _cold_opener(path):
+    """M14.2 destination opener. Indirection so tests can inject a fake; defaults
+    to cold_read.cold_open (cache-bypass where the platform allows)."""
+    return _cold_read.cold_open(path)
+
+
 def expected_checksums(entry: dict) -> dict:
     """Pull the most authoritative checksum block out of a manifest entry."""
     return (
@@ -67,12 +84,14 @@ def expected_checksums(entry: dict) -> dict:
 
 
 def _select_algo(checksums: dict) -> str:
-    """Local algo preference: xxhash128 > md5 > sha256 (sha256 retained for legacy manifests)."""
-    if "xxhash128" in checksums:
-        return "xxhash128"
+    """Local algo preference: xxh128 > md5 (M13: sha256 dropped — no pre-launch
+    sha256 corpus exists). Defaults to xxh128 when neither key is present, which
+    surfaces as a MISMATCH against an absent expected value (honest, not a crash)."""
+    if "xxh128" in checksums:
+        return "xxh128"
     if "md5" in checksums:
         return "md5"
-    return "sha256"
+    return "xxh128"
 
 
 def verify_local(
@@ -103,22 +122,26 @@ def verify_local(
 
         expected_cs = expected_checksums(entry)
         algo = _select_algo(expected_cs)
-        if algo == "sha256":
-            # Legacy manifest — compute sha256 inline; not in the main checksum module
-            actual = {"sha256": _hashlib.sha256(abs_path.read_bytes()).hexdigest()}
-        else:
-            actual = compute_all(
-                abs_path,
-                include_xxh128=(algo == "xxhash128"),
-                include_md5=(algo == "md5"),
-            )
+        # M14.2: read the destination cold (cache-bypass where the platform
+        # allows) so a post-copy verify hashes bytes off the device, not the page
+        # cache that still holds the just-written copy. Source files (the merge
+        # reference) read warm elsewhere; verify_local only reads the destination.
+        actual = compute_all(
+            abs_path,
+            include_xxh128=(algo == "xxh128"),
+            include_md5=(algo == "md5"),
+            opener=_cold_opener,
+        )
         expected_val = (expected_cs.get(algo) or "").lower()
         actual_val = (actual.get(algo) or "").lower()
 
         hash_ok = expected_val == actual_val and bool(expected_val)
         if hash_ok:
             result = {"path": rel_path, "status": "OK",
-                      "detail": f"{algo}: {actual_val[:16]}..."}
+                      "detail": f"{algo}: {actual_val[:16]}...",
+                      # M13.5: carry the full digest + algo so build_verify_report
+                      # can compute the folder root over OK xxh128 files.
+                      "algo": algo, "digest": actual_val}
             log(f"  OK: {rel_path}", "success")
         else:
             result = {"path": rel_path, "status": "MISMATCH",
@@ -202,9 +225,11 @@ def verify_gdrive(
         expected_cs = expected_checksums(entry)
         drive_hashes = drive_files[rel_path]
 
-        # Pick the strongest shared hash — prefer md5 (Drive's native algo)
+        # M13: md5 is Drive's universal native hash and the only key a Drive
+        # listing exposes for comparison; xxh128 is never present in lsjson output
+        # (Drive does not compute it). So the metadata compare is md5-on-md5.
         algo = None
-        for candidate in ("md5", "sha256", "sha1"):
+        for candidate in ("md5",):
             if candidate in expected_cs and candidate in drive_hashes:
                 algo = candidate
                 break
@@ -277,21 +302,26 @@ def verify_gdrive_deep(
     manifest: dict,
     progress_cb: Optional[ProgressCallback] = None,
     log_cb: Optional[LogCallback] = None,
-    cat_fn: Optional[Callable] = None,
+    cat_xxh128_fn: Optional[Callable] = None,
     cat_md5_fn: Optional[Callable] = None,
 ) -> list:
     """
     Deep-verify a Drive folder by streaming every file through `rclone cat` and
-    comparing to the manifest (M5.1). No file is retained locally.
+    comparing to the manifest (M5.1, rewritten for M13). No file is retained.
 
-    Prefers SHA-256 per entry; falls back to MD5 for Drive-origin manifests that
-    only carry MD5. Marks MISMATCH only when neither hash is present.
+    Algorithm asymmetry (M13.1 — the DIT must know which hash was used):
+      • Prefers xxh128: downloads the bytes and re-hashes with the same
+        content-identity algorithm the manifest stores, comparing like-for-like.
+      • Falls back to md5 for Drive-to-Drive manifests, which carry md5 only
+        (no local bytes existed at transfer time to compute xxh128).
+      • A manifest entry with neither xxh128 nor md5 → MISMATCH (cannot deep-compare).
+    The per-file `detail` records which algorithm was used.
 
-    cat_fn / cat_md5_fn are injectable for testing.
+    cat_xxh128_fn / cat_md5_fn are injectable for testing.
     """
     progress = progress_cb or _noop_progress
     log = log_cb or _noop_log
-    cat = cat_fn or rclone_bridge.cat_sha256
+    cat_xxh128 = cat_xxh128_fn or rclone_bridge.cat_xxh128
     cat_md5 = cat_md5_fn or rclone_bridge.cat_md5
 
     remote, flags = gdrive_url_to_rclone(str(folder))
@@ -311,17 +341,17 @@ def verify_gdrive_deep(
     for i, (rel_path, entry) in enumerate(files.items()):
         progress(int(i / total * 100), rel_path)
         cs = expected_checksums(entry)
-        if cs.get("md5"):
+        if cs.get("xxh128"):
+            algo = "xxh128"
+            expected_val = cs["xxh128"].lower()
+            _cat = cat_xxh128
+        elif cs.get("md5"):
             algo = "md5"
             expected_val = cs["md5"].lower()
             _cat = cat_md5
-        elif cs.get("sha256"):
-            algo = "sha256"
-            expected_val = cs["sha256"].lower()
-            _cat = cat
         else:
             results.append({"path": rel_path, "status": "MISMATCH",
-                            "detail": "No md5 or sha256 in manifest for deep comparison"})
+                            "detail": "No xxh128 or md5 in manifest for deep comparison"})
             log(f"  MISMATCH (no hash in manifest): {rel_path}", "error")
             continue
 
@@ -615,6 +645,22 @@ def persist_media_verify_to_manifest(
     return manifest
 
 
+def folder_root_from_results(results: list) -> Optional[str]:
+    """M13.5: compute the folder root (corruption fingerprint) over OK files that
+    carry an xxh128 digest. Returns None when no result carries one — e.g. a Drive
+    metadata/deep verify, which has no local folder to fingerprint. Not
+    tamper-evident; bounded by xxh128 collision resistance."""
+    from core import merkle
+    leaves = {
+        r["path"]: r["digest"]
+        for r in results
+        if r.get("status") == "OK" and r.get("algo") == "xxh128" and r.get("digest")
+    }
+    if not leaves:
+        return None
+    return merkle.merkle_root(leaves)
+
+
 def build_verify_report(
     folder,
     results: list,
@@ -640,6 +686,12 @@ def build_verify_report(
             "format_fail": summary.format_fail,
         },
         "verdict": summary.verdict,
+        # M15.1: state the verification scope explicitly in the persisted report.
+        "scope": VERIFY_SCOPE_NOTE,
+        # M13.5: corruption fingerprint over OK xxh128 files (None for Drive verify).
+        # "folder_root" deliberately, NOT "merkle_root" — see core/merkle.py: the
+        # name must not imply a tamper-evident guarantee the construction lacks.
+        "folder_root": folder_root_from_results(results),
         # Per-file rows carry the format_status / format_detail fields verbatim,
         # so the media-verify evidence survives the window closing.
         "files": [dict(r) for r in results],

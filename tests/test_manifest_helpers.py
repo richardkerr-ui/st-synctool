@@ -6,20 +6,37 @@ collision or instability would break project history lookup.
 """
 
 import pytest
-from core.manifest import _primary_algorithm, _project_id
+from core.manifest import _primary_algorithm, _project_id, preferred_algorithm
 from core.transfer import estimate_time_seconds
 
 
 # ---------------------------------------------------------------------------
-# _primary_algorithm
+# _primary_algorithm  (M13.3: xxh128 is the content-identity key on both paths;
+# the gdrive path stores md5 alongside as rclone's transport key)
 # ---------------------------------------------------------------------------
 
 class TestPrimaryAlgorithm:
-    def test_returns_md5_for_gdrive(self):
-        assert _primary_algorithm(gdrive=True) == "md5"
+    def test_returns_xxh128_for_gdrive(self):
+        assert _primary_algorithm(gdrive=True) == "xxh128"
 
-    def test_returns_xxhash128_for_local(self):
-        assert _primary_algorithm(gdrive=False) == "xxhash128"
+    def test_returns_xxh128_for_local(self):
+        assert _primary_algorithm(gdrive=False) == "xxh128"
+
+
+# ---------------------------------------------------------------------------
+# preferred_algorithm — xxh128 > md5 > "" (M13.3)
+# ---------------------------------------------------------------------------
+
+class TestPreferredAlgorithm:
+    def test_prefers_xxh128(self):
+        assert preferred_algorithm({"xxh128": "a", "md5": "b"}) == "xxh128"
+
+    def test_falls_back_to_md5(self):
+        assert preferred_algorithm({"md5": "b"}) == "md5"
+
+    def test_empty_when_neither_present(self):
+        assert preferred_algorithm({}) == ""
+        assert preferred_algorithm(None) == ""
 
 
 # ---------------------------------------------------------------------------

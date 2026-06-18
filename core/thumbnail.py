@@ -1001,11 +1001,12 @@ def build_contact_sheet(
         except Exception:
             pass
 
-    # SHA-256 of the contact sheet for generated_artifacts block
+    # M13.2: xxh128 of the contact sheet for the generated_artifacts block
+    # (was a broken sha256 call against the removed include_xxhash param).
     sheet_checksum = ""
     if sheet_path.exists():
         try:
-            sheet_checksum = compute_all(sheet_path, include_xxhash=False)["sha256"]
+            sheet_checksum = compute_all(sheet_path, include_xxh128=True)["xxh128"]
         except Exception:
             pass
 
@@ -1017,7 +1018,7 @@ def build_contact_sheet(
             for c in (list(rdc_clips) + list(media))
             if c.exists()
         ],
-        "checksums": {"sha256": sheet_checksum},
+        "checksums": {"xxh128": sheet_checksum},
     }
 
     return {

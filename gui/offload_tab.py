@@ -355,7 +355,18 @@ class SummaryDialog(QDialog):
         summary_lbl.setStyleSheet("font-size:14px;margin-bottom:8px;")
         layout.addWidget(summary_lbl)
 
-        # Per-source eject indicators
+        # Per-source eject indicators.
+        #
+        # M14.1 audit (advises-only model): ST SyncTool NEVER issues a destructive
+        # card operation — there is no diskutil/eraseDisk/erase/eject call anywhere
+        # in the codebase (the only rmtree calls target the app's own staging dir).
+        # The user formats the card manually in Finder/Disk Utility. Therefore the
+        # clearance TEXT below IS the gate: it must never display the "safe to
+        # format" phrase unless the verdict actually cleared. ClearanceVerdict.to_text()
+        # guarantees this — the safe-to-format wording lives only on the cleared
+        # branch; a not-cleared verdict renders "Not cleared: <reason>". Because the
+        # app does not format, there is no destructive control to disable and no
+        # one-shot override to manage (Gap 2/3 are N/A for the advises-only model).
         from core.clearance import compute_clearance
         src_labels = list(dict.fromkeys(r.source_label for r in results))
         for src_label in src_labels:

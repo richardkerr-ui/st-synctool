@@ -125,8 +125,8 @@ _README = textwrap.dedent("""\
 # verify_sample builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-# sha256 of an empty file — all zero-byte stubs share this hash.
-_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+# M13: xxh128 of an empty file — all zero-byte stubs share this hash.
+_EMPTY_XXH128 = "99aa06d3014798d86001c324468d497f"
 
 
 def _build_verify_sample(root: Path) -> None:
@@ -170,8 +170,8 @@ def _build_verify_sample(root: Path) -> None:
                 "modtime": datetime.fromtimestamp(
                     stat.st_mtime, tz=timezone.utc
                 ).isoformat(),
-                "checksums": {"sha256": _EMPTY_SHA256},
-                "hash_algorithm": "sha256",
+                "checksums": {"xxh128": _EMPTY_XXH128},
+                "hash_algorithm": "xxh128",
                 "gdrive_url": "",
             }
 
@@ -190,7 +190,7 @@ def _build_verify_sample(root: Path) -> None:
             "total_size_bytes": total_size,
             "renames": [],
             "checksum_context": {
-                "algorithm": "sha256",
+                "algorithm": "xxh128",
                 "gdrive_mode": False,
             },
             "files": files,
@@ -305,9 +305,9 @@ _MERGE_SERVER_ONLY: list[tuple[str, bytes]] = [
 ]
 
 
-def _sha256_of(data: bytes) -> str:
-    import hashlib
-    return hashlib.sha256(data).hexdigest()
+def _xxh128_of(data: bytes) -> str:
+    import xxhash
+    return xxhash.xxh128(data).hexdigest()
 
 
 def _write_if_missing(path: Path, content: bytes) -> None:
@@ -369,8 +369,8 @@ def ensure_demo_merge_folders() -> tuple[Path, Path, Path]:
                 "type": "file",
                 "size": size,
                 "modtime": now,
-                "checksums": {"sha256": _sha256_of(base_bytes)},
-                "hash_algorithm": "sha256",
+                "checksums": {"xxh128": _xxh128_of(base_bytes)},
+                "hash_algorithm": "xxh128",
                 "gdrive_url": "",
             }
 
@@ -389,7 +389,7 @@ def ensure_demo_merge_folders() -> tuple[Path, Path, Path]:
             "total_size_bytes": total_size,
             "renames": [],
             "checksum_context": {
-                "algorithm": "sha256",
+                "algorithm": "xxh128",
                 "gdrive_mode": False,
             },
             "files": files,

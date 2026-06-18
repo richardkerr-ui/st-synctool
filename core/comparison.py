@@ -7,9 +7,9 @@ class DiffState(Enum):
     LOCAL_CHANGED=auto(); SERVER_CHANGED=auto(); BOTH_CHANGED=auto()
     DELETED_LOCAL=auto(); DELETED_SERVER=auto(); DELETED_BOTH=auto()
     RENAMED=auto()
-    # Two sides carry no checksum algorithm in common (e.g. local SHA-256 vs a
-    # Drive manifest that only has MD5), so equality is unprovable. We refuse to
-    # guess "unchanged" or "conflict" and surface it honestly for review.
+    # Two sides carry no checksum algorithm in common (e.g. a local xxh128 scan
+    # vs a Drive-to-Drive manifest that only has MD5), so equality is unprovable.
+    # We refuse to guess "unchanged" or "conflict" and surface it for review.
     INDETERMINATE=auto()
 
 STATE_LABELS = {
@@ -111,14 +111,18 @@ def conflict_suggested_action(result: "DiffResult") -> str:
 def _cs(entry):
     if not entry: return None
     c = entry.get("checksums", {})
-    return c.get("xxhash128") or c.get("md5") or c.get("sha256")
+    return c.get("xxh128") or c.get("md5")
 
 
 def _checksums(entry):
     return (entry or {}).get("checksums", {}) or {}
 
 
-_ALGO_PRIORITY = ("xxhash128", "md5", "sha256")  # sha256 retained for legacy manifest compat
+# M13.1: sha256 dropped from the ladder entirely (not reader-only). Pre-launch
+# there is no sha256 manifest corpus to read — local entries carry xxh128, Drive
+# entries md5 (plus xxh128 when local bytes were available). Keeping sha256 here
+# would also break M13.4's "sha256 nowhere in core/ except comments" grep-clean.
+_ALGO_PRIORITY = ("xxh128", "md5")
 
 
 def _same(a, b):
@@ -128,13 +132,13 @@ def _same(a, b):
       True  — the strongest algorithm both entries carry agrees (same file),
       False — that algorithm disagrees (different file),
       None  — the two entries share no algorithm, so equality is unprovable
-              (e.g. local SHA-256 vs a Drive entry that only has MD5).
+              (e.g. local xxh128 vs a Drive-to-Drive entry that only has MD5).
 
     Picking the strongest *shared* algorithm (rather than each side independently
     choosing a representative hash) is the fix for the cross-algorithm
-    false-conflict bug: we never compare a SHA-256 hex against an MD5 hex and call
-    identical files "changed". It also preserves the long-standing rule that a
-    matching SHA-256 wins over MD5 drift, since SHA-256 is highest priority.
+    false-conflict bug: we never compare an xxh128 hex against an MD5 hex and call
+    identical files "changed". xxh128 is highest priority, so a matching xxh128
+    wins over MD5 drift when both algorithms are present on both sides.
     """
     ca, cb = _checksums(a), _checksums(b)
     for algo in _ALGO_PRIORITY:

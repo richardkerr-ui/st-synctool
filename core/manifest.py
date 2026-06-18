@@ -1,4 +1,5 @@
-import hashlib, json, socket, getpass
+import json, socket, getpass
+import xxhash
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Callable
@@ -26,8 +27,23 @@ _FILE_ENTRY_DEFAULTS = {
 
 # OVERNIGHT-FIX: each manifest entry must record which algorithm produced its
 # primary hash (spec: hash_algorithm per entry, not just the hash value).
+# M13.3: xxh128 is the preferred content-identity algorithm everywhere local
+# bytes are available — including local-to-Drive (gdrive=True), where we ALSO
+# compute md5 (rclone's transport key) and store both. Only Drive-to-Drive
+# rclone paths (no local bytes, built via lsjson_to_manifest) stay md5-only.
 def _primary_algorithm(gdrive: bool) -> str:
-    return "md5" if gdrive else "xxhash128"
+    return "xxh128"
+
+
+def preferred_algorithm(checksums: dict) -> str:
+    """The preferred content-identity algorithm present in a checksums block:
+    xxh128 (M13 primary) over md5 (the Drive-to-Drive fallback). Returns "" when
+    neither is present so callers can treat it as "no comparable hash"."""
+    if "xxh128" in (checksums or {}):
+        return "xxh128"
+    if "md5" in (checksums or {}):
+        return "md5"
+    return ""
 
 
 def _project_id(local_path: str, counterpart_path: str) -> str:
@@ -40,7 +56,14 @@ def _project_id(local_path: str, counterpart_path: str) -> str:
     if not local_path:
         return ""
     key = f"{local_path}|{counterpart_path or ''}"
-    return hashlib.sha256(key.encode()).hexdigest()[:12]
+    # M13.4: keying function switched sha256 → xxh3_128. This is a deterministic
+    # ID (same paths → same ID), so uuid4 would be wrong here — it would break
+    # idempotency and create duplicate project entries. The [:12] truncation
+    # keeps 48 bits, so collision probability reaches ~50% at ~16M distinct path
+    # pairs; acceptable for an internal registry. Switching the algorithm changes
+    # the actual ID values produced — any fixture with a hardcoded project_id from
+    # the old function is regenerated (free pre-launch; no live registry exists).
+    return xxhash.xxh3_128(key.encode()).hexdigest()[:12]
 
 def generate_manifest(folder: Path, label="source", dest_path=None,
                       gdrive=False, progress_cb=None,
@@ -66,7 +89,9 @@ def generate_manifest(folder: Path, label="source", dest_path=None,
         "file_count": total,
         "renames": [],
         "checksum_context": {
-            "algorithm": "md5" if gdrive else "xxhash128",
+            # M13.3: xxh128 is the content-identity algorithm; gdrive adds md5
+            # alongside (stored per file) as rclone's transport key.
+            "algorithm": "xxh128",
             "gdrive_mode": gdrive,
         },
         "files": {},
@@ -75,7 +100,7 @@ def generate_manifest(folder: Path, label="source", dest_path=None,
         if progress_cb: progress_cb(int((i / total) * 100), path.name)
         rel = path.relative_to(folder).as_posix()
         stat = path.stat()
-        hashes = compute_all(path, include_xxh128=not gdrive, include_md5=gdrive)
+        hashes = compute_all(path, include_xxh128=True, include_md5=gdrive)
         manifest["files"][rel] = {
             "type": "file", "size": stat.st_size,
             "modtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
@@ -135,7 +160,8 @@ def _migrate(manifest: dict) -> None:
         manifest.setdefault(key, default)
     # OVERNIGHT-FIX: backfill hash_algorithm for pre-1.1 file entries. Prefer the
     # manifest-wide checksum_context.algorithm; otherwise infer from the checksum
-    # keys that are actually present (xxhash128 > md5 > sha256 legacy).
+    # keys actually present (xxh128 > md5). M13: sha256 dropped — no pre-launch
+    # sha256 corpus exists, and keeping it would break M13.4's grep-clean.
     ctx_algo = (manifest.get("checksum_context") or {}).get("algorithm")
     for entry in manifest.get("files", {}).values():
         for key, default in _FILE_ENTRY_DEFAULTS.items():
@@ -144,14 +170,12 @@ def _migrate(manifest: dict) -> None:
             cs = entry.get("checksums", {}) or {}
             if ctx_algo and ctx_algo in cs:
                 entry["hash_algorithm"] = ctx_algo
-            elif "xxhash128" in cs:
-                entry["hash_algorithm"] = "xxhash128"
+            elif "xxh128" in cs:
+                entry["hash_algorithm"] = "xxh128"
             elif "md5" in cs:
                 entry["hash_algorithm"] = "md5"
-            elif "sha256" in cs:
-                entry["hash_algorithm"] = "sha256"  # legacy
             else:
-                entry["hash_algorithm"] = ctx_algo or "xxhash128"
+                entry["hash_algorithm"] = ctx_algo or "xxh128"
     manifest["schema_version"] = SCHEMA_VERSION
 
 
@@ -264,7 +288,9 @@ def generate_manifest_fast(folder: Path, base_manifest=None, label="source",
         "file_count": len(files_list),
         "renames": [],
         "checksum_context": {
-            "algorithm": "md5" if gdrive else "xxhash128",
+            # M13.3: xxh128 is the content-identity algorithm; gdrive adds md5
+            # alongside (stored per file) as rclone's transport key.
+            "algorithm": "xxh128",
             "gdrive_mode": gdrive,
         },
         "files": {},
@@ -289,7 +315,7 @@ def generate_manifest_fast(folder: Path, base_manifest=None, label="source",
             hashes = base_entry["checksums"]
             reused += 1
         else:
-            hashes = compute_all(path, include_xxh128=not gdrive, include_md5=gdrive)
+            hashes = compute_all(path, include_xxh128=True, include_md5=gdrive)
             rehashed += 1
 
         manifest["files"][rel] = {

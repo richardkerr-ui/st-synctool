@@ -36,14 +36,13 @@ class TransferWorker(QObject):
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
-    def __init__(self, src, dst, gdrive_mode, mirror_mode, paranoid_mode, conflict_handler,
+    def __init__(self, src, dst, gdrive_mode, mirror_mode, conflict_handler,
                  extract_zips, export_mhl=False, job_name=""):
         super().__init__()
         self.src              = src
         self.dst              = dst
         self.gdrive_mode      = gdrive_mode
         self.mirror_mode      = mirror_mode
-        self.paranoid_mode    = paranoid_mode
         self.conflict_handler = conflict_handler
         self.extract_zips     = extract_zips
         self.export_mhl       = export_mhl
@@ -55,7 +54,6 @@ class TransferWorker(QObject):
                 self.src, self.dst,
                 gdrive_mode=self.gdrive_mode,
                 mirror_mode=self.mirror_mode,
-                paranoid_verify=self.paranoid_mode,
                 log_cb=lambda m, l: self.log.emit(m, l),
                 progress_cb=lambda p, f: self.progress.emit(p, f),
                 conflict_handler=self.conflict_handler,
@@ -221,14 +219,6 @@ class TransferTab(QWidget):
         )
         opts_row1.addWidget(self.extract_zip_chk)
         opts_row1.addSpacing(20)
-        self.paranoid_chk = QCheckBox("Paranoid verification")
-        self.paranoid_chk.setStyleSheet(f"color:{theme.TEXT_MUTED};")
-        make_interactive(
-            self.paranoid_chk,
-            tooltip="Re-hash every file after copying and compare against the "
-                    "source. Slower, but the strongest integrity guarantee.",
-        )
-        opts_row1.addWidget(self.paranoid_chk)
 
         # M10.3: optional ASC MHL v2.0 sidecar for post-house interoperability.
         self.export_mhl_chk = QCheckBox("Export ASC MHL (.mhl)")
@@ -373,19 +363,6 @@ class TransferTab(QWidget):
             model_item.setEnabled(not gdrive)
         if gdrive and self.conflict_combo.currentIndex() == rename_item_idx:
             self.conflict_combo.setCurrentIndex(1)
-        # Paranoid checkbox only matters for Drive transfers — local↔local is always verified
-        self.paranoid_chk.setEnabled(gdrive)
-        if gdrive:
-            self.paranoid_chk.setToolTip(
-                "Compute SHA-256 locally on the non-Drive side and compare to Drive's hash.\n"
-                "Slower but doesn't trust rclone's --checksum."
-            )
-        else:
-            self.paranoid_chk.setChecked(False)
-            self.paranoid_chk.setToolTip(
-                "Not applicable — local-to-local transfers already compute independent\n"
-                "SHA-256 on both sides as part of every copy."
-            )
 
     def _update_preflight(self):
         src = self.src_input.text()
@@ -539,7 +516,6 @@ class TransferTab(QWidget):
             src, dst,
             gdrive_mode=gdrive_mode,
             mirror_mode=mirror_mode,
-            paranoid_mode=self.paranoid_chk.isChecked(),
             conflict_handler=self._conflict_handler_str(),
             extract_zips=self.extract_zip_chk.isChecked(),
             export_mhl=self.export_mhl_chk.isChecked(),
@@ -618,14 +594,8 @@ class TransferTab(QWidget):
         else:
             self.log.log(f"Transfer complete  {result.get('actual_dest', '')}", "success")
             show_toast(self, "Transfer complete.", "success")
-            fallback_count = (result.get("manifest", {})
-                              .get("checksum_context", {})
-                              .get("paranoid_fallback_count", 0))
-            subtitle = (f"{fallback_count} file(s) verified via rclone-checksum, not independent SHA-256."
-                        if fallback_count else "")
             self._banner.show_result(
-                "✓  TRANSFER COMPLETE — all files copied and verified.", ok=True,
-                subtitle=subtitle)
+                "✓  TRANSFER COMPLETE — all files copied and verified.", ok=True)
         # Offer a one-click jump to the output for local destinations.
         dest = result.get("actual_dest") or self.dst_input.text()
         self._last_dest = dest
@@ -720,10 +690,10 @@ class TransferTab(QWidget):
         vfailures = manifest.get("verify_failures", [])
         if counts or vmethod:
             lines += ["", "SUMMARY:"]
-            if vmethod == "paranoid":
-                lines.append("  Verification: Paranoid (independent SHA-256 on source and destination)")
-            elif vmethod == "rclone-checksum":
+            if vmethod == "rclone-checksum":
                 lines.append("  Verification: rclone --checksum (source vs destination compared at transfer time)")
+            elif vmethod == "local-copy" or vmethod == "local":
+                lines.append("  Verification: independent xxh128 on source and destination (pre/post copy)")
             if vfailures:
                 lines.append(f"  VERIFICATION FAILURES: {len(vfailures)}")
             if counts:

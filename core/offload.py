@@ -169,6 +169,12 @@ class CellResult:
     # verified is True only when every file's hash matched the source ground-truth.
     # per_file_verify maps relative path -> True (PASS) / False (FAIL) for the COC log.
     verified: Optional[bool] = None
+    # M14.1: True only when the pass was confirmed by an actual content-hash
+    # compare (not size+modtime). verify_staging re-hashes with xxh128, so offload
+    # destinations set this True on a clean pass. Defaults False — absence of a
+    # confirmed hash compare is not a hash compare. The clearance gate counts a
+    # destination only when this is True.
+    integrity_verified: bool = False
     per_file_verify: dict = field(default_factory=dict)
     # Format-specific media verification log lines written to the COC log.
     # Each entry is a string like "MEDIA VERIFY OK: ..." or "MEDIA VERIFY ADVISORY: ..."
@@ -266,9 +272,9 @@ def detect_cross_source_duplicates(source_manifests: dict) -> set:
 
 def build_normalization_plan(source_manifest: dict) -> dict:
     """
-    Items 57, 59. Build {original_rel: normalized_rel} using sha256 already in source_manifest.
+    Items 57, 59. Build {original_rel: normalized_rel} using the xxh128 already in source_manifest.
 
-    Video files whose stem matches a sequential pattern get _{sha256[:8]} appended before
+    Video files whose stem matches a sequential pattern get _{xxh128[:8]} appended before
     the extension.  Sidecar files (.srt, .thm, .xml, .lut, .xmp, .edl) with the same stem
     carry the same hash suffix (co-rename).  Files that do not match are omitted (identity).
     R3D files are never included.
@@ -361,7 +367,7 @@ def build_normalized_manifest(source_manifest: dict, norm_plan: dict) -> tuple:
         if normalized != rel:
             entry["original_filename"]    = Path(rel).name
             entry["filename_hash_suffix"] = info.get("checksum", "")[:8]
-            entry["hash_method"]          = "sha256_prefix8"
+            entry["hash_method"]          = "xxh128_prefix8"
             renames_list.append({
                 "original":   Path(rel).name,
                 "normalized": Path(normalized).name,
@@ -376,7 +382,7 @@ def build_normalized_manifest(source_manifest: dict, norm_plan: dict) -> tuple:
     pattern_scan = scan_naming_patterns(source_manifest)
     norm_block = {
         "applied":          True,
-        "method":           "sha256_prefix8",
+        "method":           "xxh128_prefix8",
         "detected_pattern": pattern_scan.get("pattern_name", ""),
         "renames":          renames_list,
     }
@@ -388,7 +394,7 @@ def build_normalized_manifest(source_manifest: dict, norm_plan: dict) -> tuple:
 # ---------------------------------------------------------------------------
 
 def _xxh128(path: Path) -> str:
-    return compute_all(path, include_xxh128=True)["xxhash128"]
+    return compute_all(path, include_xxh128=True)["xxh128"]
 
 
 def _retryable(exc: Exception) -> bool:
@@ -437,10 +443,10 @@ def prehash_source(
     file_progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> dict:
     """
-    SHA-256 every file in the source directory.
+    xxh128 every file in the source directory.
 
     Returns ground-truth manifest:
-      { relative_path_str: {"size": int, "checksum": str, "algorithm": "sha256"} }
+      { relative_path_str: {"size": int, "checksum": str, "algorithm": "xxh128"} }
     """
     log_cb(f"[Offload] Pre-hashing: {source.label} ({source.path})", "info")
     # MANIFEST-FIX: filter OS junk (.DS_Store, Thumbs.db, desktop.ini) so it
@@ -455,7 +461,7 @@ def prehash_source(
         manifest[rel] = {
             "size":      f.stat().st_size,
             "checksum":  _xxh128(f),
-            "algorithm": "xxhash128",
+            "algorithm": "xxh128",
         }
         if file_progress_cb:
             file_progress_cb(i + 1, len(files))
@@ -723,8 +729,8 @@ def build_offload_manifest(
             "type": "file",
             "size": info["size"],
             "modtime": modtime,
-            "checksums": {"xxhash128": checksum} if checksum else {},
-            "hash_algorithm": info.get("algorithm", "xxhash128"),
+            "checksums": {"xxh128": checksum} if checksum else {},
+            "hash_algorithm": info.get("algorithm", "xxh128"),
             "gdrive_url": "",
         }
         # Carry through normalisation + thumbnail metadata if present
@@ -747,10 +753,9 @@ def build_offload_manifest(
         "file_count": len(files),
         "renames": list(renames_full) if renames_full else [],
         "checksum_context": {
-            "algorithm": "xxhash128",
+            "algorithm": "xxh128",
             "gdrive_mode": False,
             "method": "local",
-            "paranoid_fallback_count": 0,
         },
         "filename_normalization": norm_block or {"applied": False},
         "files": files,
@@ -781,12 +786,12 @@ def build_offload_manifest(
                 dest_complete = r.state in (CellState.DONE, CellState.THUMBNAILS)
                 verified_files: dict = {}
                 for rel, entry in files.items():
-                    xxh = entry.get("checksums", {}).get("xxhash128", "")
+                    xxh = entry.get("checksums", {}).get("xxh128", "")
                     if r.per_file_verify:
                         is_verified = r.per_file_verify.get(rel, False)
                     else:
                         is_verified = bool(r.verified) and dest_complete
-                    verified_files[rel] = {"verified": is_verified, "xxhash128": xxh}
+                    verified_files[rel] = {"verified": is_verified, "xxh128": xxh}
                 destinations_block.append({
                     "label":          r.dest_label,
                     "final_path":     str(r.final_path) if r.final_path else "",
@@ -922,12 +927,15 @@ def write_chain_of_custody_log(
     )
     overall = "COMPLETE" if overall_complete else "PARTIAL_FAILURE"
 
+    from core.verify import VERIFY_SCOPE_NOTE
     lines: list[str] = [
         "=" * 72,
         "ST SyncTool — Offload Chain of Custody",
         f"Run: {ts}",
         f"Sources: {len(sources)}   Destinations: {len(dests)}",
         f"OVERALL RESULT: {overall}",
+        # M15.1: state the verification scope explicitly in the custody record.
+        f"SCOPE: {VERIFY_SCOPE_NOTE}",
         "=" * 72,
         "",
     ]
@@ -1173,6 +1181,10 @@ def run_offload(
                     rel: not any(rel in e for e in errors) for rel in file_rels
                 }
                 r.verified = not errors
+                # M14.1: verify_staging re-hashes every file with xxh128 against
+                # the source ground truth, so a clean pass is integrity-verified
+                # (a real content-hash compare, not size+modtime).
+                r.integrity_verified = not errors
                 if errors:
                     r.state  = CellState.FAILED
                     r.errors = errors

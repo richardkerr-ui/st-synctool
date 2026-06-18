@@ -62,11 +62,15 @@ def rclone(monkeypatch):
     m.sync.return_value = True
     m.lsjson_to_manifest.return_value = {"files": {}, "errors": []}
     m.save_manifest.return_value = []
+    # M15.2: keep the suite binary-free — stub the version probe (would otherwise
+    # shell out to a real rclone). backend_supports_checksum stays real (pure).
+    m.rclone_version.return_value = "1.74.3"
 
     monkeypatch.setattr(t.rclone_bridge, "is_rclone_installed", m.is_rclone_installed)
     monkeypatch.setattr(t.rclone_bridge, "lsjson", m.lsjson)
     monkeypatch.setattr(t.rclone_bridge, "sync", m.sync)
     monkeypatch.setattr(t.rclone_bridge, "lsjson_to_manifest", m.lsjson_to_manifest)
+    monkeypatch.setattr(t.rclone_bridge, "rclone_version", m.rclone_version)
     monkeypatch.setattr("core.transfer.save_manifest", m.save_manifest)
     monkeypatch.setattr("core.transfer.is_gdrive_url", _is_drive)
     monkeypatch.setattr("core.transfer.gdrive_url_to_rclone", _to_rclone)
@@ -235,75 +239,54 @@ class TestStatusDiff:
 # Paranoid verification
 # ---------------------------------------------------------------------------
 
-class TestParanoidVerify:
-    def _stub_hashes(self, monkeypatch, hashes):
-        monkeypatch.setattr("core.transfer._compute_local_hashes",
-                            lambda path, log_cb=None, use_md5=False: hashes)
-
-    def test_local_to_drive_verified_on_md5_match(self, tmp_path, rclone, log_cb, monkeypatch):
-        self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
-        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
-        result = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
-                                        paranoid_verify=True, log_cb=log_cb)
-        f = result["manifest"]["files"]["file.mov"]
-        assert f["verified"] is True
-        assert f["verification_method"] == "paranoid"
-
-    def test_local_to_drive_fails_on_md5_mismatch(self, tmp_path, rclone, log_cb, monkeypatch):
-        self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
-        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="DIFFERENT")
-        result = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
-                                        paranoid_verify=True, log_cb=log_cb)
-        assert "file.mov" in result["manifest"]["verify_failures"]
-        assert result["manifest"]["files"]["file.mov"]["verified"] is False
-
-    def test_paranoid_fallback_when_drive_has_no_md5(self, tmp_path, rclone, log_cb, monkeypatch):
-        self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
-        rclone.lsjson_to_manifest.return_value = {
-            "files": {"file.mov": {"size": 512, "checksums": {}}},
-            "errors": [],
-        }
-        result = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
-                                        paranoid_verify=True, log_cb=log_cb)
-        f = result["manifest"]["files"]["file.mov"]
-        assert f["verification_method"] == "rclone-checksum"
-        assert "file.mov" in result["manifest"]["checksum_context"]["paranoid_fallback_files"]
-
-    def test_drive_to_local_verified_when_xxh128_present(self, tmp_path, rclone, log_cb, monkeypatch):
-        # Drive -> Local: verified = True when local xxh128 hash is present.
-        # No cross-side comparison (Drive md5 vs local xxh128 are different algos).
-        self._stub_hashes(monkeypatch, {"file.mov": "aabbcc"})
-        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
-        result = transfer_folder_rclone(DRIVE_URL, str(tmp_path),
-                                        paranoid_verify=True, log_cb=log_cb)
-        f = result["manifest"]["files"]["file.mov"]
-        assert f["verified"] is True
-        assert f["dest_checksums"] == {"xxhash128": "aabbcc"}
-        assert f["hash_algorithm"] == "xxhash128"
-
-    def test_drive_to_local_unverified_when_hash_missing(self, tmp_path, rclone, log_cb, monkeypatch):
-        # Drive -> Local: verified = False when local hash cannot be computed.
-        self._stub_hashes(monkeypatch, {})  # empty — file.mov not hashed
-        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
-        result = transfer_folder_rclone(DRIVE_URL, str(tmp_path),
-                                        paranoid_verify=True, log_cb=log_cb)
-        assert "file.mov" in result["manifest"]["verify_failures"]
-
-    def test_checksum_context_paranoid_fields(self, tmp_path, rclone, log_cb, monkeypatch):
-        self._stub_hashes(monkeypatch, {})
-        result = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
-                                        paranoid_verify=True, log_cb=log_cb)
-        ctx = result["manifest"]["checksum_context"]
-        assert ctx["paranoid"] is True
-        assert ctx["method"] == "paranoid"
-        assert ctx["algorithm"] == "md5"
-
-    def test_checksum_context_non_paranoid_fields(self, tmp_path, rclone, log_cb):
+# TestParanoidVerify — TOMBSTONE (M13.1)
+# The paranoid download-and-rehash verify path was removed. Its guarantee is
+# superseded by xxh128 stored in the manifest before upload (copy_file) plus the
+# Verify tab's on-demand deep-verify. rclone's own --checksum is the copy-time
+# integrity guarantee for the rclone path; checksum_context no longer carries any
+# paranoid_* fields. Only the rclone-checksum context survives.
+class TestRcloneChecksumContext:
+    def test_checksum_context_rclone_fields(self, tmp_path, rclone, log_cb):
         result = transfer_folder_rclone(str(tmp_path), DRIVE_URL, log_cb=log_cb)
         ctx = result["manifest"]["checksum_context"]
-        assert ctx["paranoid"] is False
         assert ctx["method"] == "rclone"
+        assert ctx["algorithm"] == "rclone-checksum"
         assert ctx["gdrive_mode"] is True
+        assert "paranoid" not in ctx
+        assert "paranoid_fallback_count" not in ctx
+
+    def test_verification_method_is_rclone_checksum(self, tmp_path, rclone, log_cb):
+        rclone.lsjson_to_manifest.return_value = _file_manifest("file.mov", md5="aabbcc")
+        result = transfer_folder_rclone(str(tmp_path), DRIVE_URL, log_cb=log_cb)
+        f = result["manifest"]["files"]["file.mov"]
+        assert f["verified"] is True
+        assert f["verification_method"] == "rclone-checksum"
+        assert f["hash_algorithm"] == "md5"
+
+
+# M15.2: version provenance + checksum-capability gate in the custody record.
+class TestRcloneChecksumCapabilityAndVersion:
+    def test_records_rclone_version(self, tmp_path, rclone, log_cb):
+        ctx = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
+                                     log_cb=log_cb)["manifest"]["checksum_context"]
+        assert ctx["rclone_version"] == "1.74.3"
+
+    def test_local_to_drive_is_integrity_verified(self, tmp_path, rclone, log_cb):
+        # Local (rclone-computed hash) + Drive (md5) both hash-compare under --checksum.
+        ctx = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
+                                     log_cb=log_cb)["manifest"]["checksum_context"]
+        assert ctx["integrity_verified"] is True
+
+    def test_unconfirmed_backend_warns_and_not_integrity_verified(
+            self, tmp_path, rclone, log_cb, monkeypatch):
+        import core.transfer as t
+        # Force the capability check to report an unconfirmed backend.
+        monkeypatch.setattr(t.rclone_bridge, "backend_supports_checksum",
+                            lambda remote: False)
+        ctx = transfer_folder_rclone(str(tmp_path), DRIVE_URL,
+                                     log_cb=log_cb)["manifest"]["checksum_context"]
+        assert ctx["integrity_verified"] is False
+        assert _any(log_cb, "CHECKSUM FALLBACK")
 
 
 # ---------------------------------------------------------------------------
@@ -370,11 +353,8 @@ class TestDriveToDrive:
         transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)
         assert _any(log_cb, "no local disk")
 
-    def test_paranoid_downgraded_with_warning(self, d2d, log_cb):
-        result = transfer_folder_rclone(SRC_URL, DST_URL,
-                                        paranoid_verify=True, log_cb=log_cb)
-        assert _any_warning(log_cb, "Paranoid verify is unavailable")
-        assert result["manifest"]["checksum_context"]["paranoid"] is False
+    # M13.1: paranoid_verify removed; Drive-to-Drive relies on rclone's
+    # server-side --checksum (no local bytes to rehash). No downgrade warning.
 
     def test_manifest_saved_to_archive_only(self, d2d, log_cb):
         transfer_folder_rclone(SRC_URL, DST_URL, log_cb=log_cb)

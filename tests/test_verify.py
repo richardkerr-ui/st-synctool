@@ -4,20 +4,35 @@ import hashlib
 from pathlib import Path
 
 import pytest
+import xxhash
 
 import core.verify as verify
 from core.media_verify import MediaVerifyResult
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _xxh128(data: bytes) -> str:
+    return xxhash.xxh128(data).hexdigest()
+
+
+def _md5(data: bytes) -> str:
+    return hashlib.md5(data).hexdigest()
 
 
 def _manifest(files: dict) -> dict:
-    """files: {rel: bytes} -> manifest with sha256 checksums block."""
+    """files: {rel: bytes} -> local manifest with xxh128 checksums block (M13)."""
     return {
         "files": {
-            rel: {"size": len(data), "checksums": {"sha256": _sha256(data)}}
+            rel: {"size": len(data), "checksums": {"xxh128": _xxh128(data)}}
+            for rel, data in files.items()
+        }
+    }
+
+
+def _md5_manifest(files: dict) -> dict:
+    """files: {rel: bytes} -> Drive-origin manifest with md5 checksums block."""
+    return {
+        "files": {
+            rel: {"size": len(data), "checksums": {"md5": _md5(data)}}
             for rel, data in files.items()
         }
     }
@@ -57,17 +72,17 @@ def test_local_mismatch(folder):
 
 
 def test_local_empty_expected_value_is_mismatch(folder):
-    manifest = {"files": {"clips/a.mov": {"checksums": {"sha256": ""}}}}
+    manifest = {"files": {"clips/a.mov": {"checksums": {"xxh128": ""}}}}
     results = verify.verify_local(folder, manifest)
     assert results[0]["status"] == "MISMATCH"
 
 
 def test_local_uses_dest_checksums_first(folder):
     # dest_checksums should win over checksums.
-    good = _sha256(b"alpha")
+    good = _xxh128(b"alpha")
     manifest = {"files": {"clips/a.mov": {
-        "dest_checksums": {"sha256": good},
-        "checksums": {"sha256": "deadbeef"},
+        "dest_checksums": {"xxh128": good},
+        "checksums": {"xxh128": "deadbeef"},
     }}}
     results = verify.verify_local(folder, manifest)
     assert results[0]["status"] == "OK"
@@ -118,24 +133,44 @@ def test_local_media_verify_exception_is_swallowed(folder, monkeypatch):
     assert "format_status" not in r     # media result discarded
 
 
+# ── M14.2 verify_local reads the destination cold ────────────────────────────
+
+def test_verify_local_uses_cold_opener_for_dest_reads(folder, monkeypatch):
+    manifest = _manifest({"clips/a.mov": b"alpha", "clips/b.mov": b"bravo"})
+    opened = []
+
+    def fake_cold_opener(path):
+        opened.append(str(path))
+        return open(path, "rb")
+
+    monkeypatch.setattr(verify, "_cold_opener", fake_cold_opener)
+    results = verify.verify_local(folder, manifest)
+    # Every destination file was opened through the cold opener, and the hash
+    # comparison still works through it.
+    assert all(r["status"] == "OK" for r in results)
+    assert any("a.mov" in p for p in opened)
+    assert any("b.mov" in p for p in opened)
+
+
 # ── verify_gdrive (rclone mocked) ────────────────────────────────────────────
 
 def _drive_items(mapping):
-    """mapping: {path: sha256} -> rclone lsjson-style items."""
+    """mapping: {path: md5} -> rclone lsjson-style items (Drive's native hash)."""
     return [
-        {"Path": p, "IsDir": False, "Hashes": {"sha256": h}}
+        {"Path": p, "IsDir": False, "Hashes": {"md5": h}}
         for p, h in mapping.items()
     ]
 
 
 def test_gdrive_ok_missing_mismatch(monkeypatch):
-    manifest = _manifest({"a.mov": b"alpha", "b.mov": b"bravo", "c.mov": b"charlie"})
+    # Drive verify compares md5-on-md5; use a Drive-origin (md5) manifest.
+    manifest = _md5_manifest({"a.mov": b"alpha", "b.mov": b"bravo", "c.mov": b"charlie"})
     # Drive: a matches, b differs, c absent.
     monkeypatch.setattr(verify, "is_gdrive_url", lambda s: True)
     monkeypatch.setattr(verify, "gdrive_url_to_rclone", lambda s: ("remote:path", []))
     monkeypatch.setattr(verify.rclone_bridge, "lsjson", lambda *a, **k: _drive_items({
-        "a.mov": _sha256(b"alpha"),
-        "b.mov": _sha256(b"WRONG"),
+        "a.mov": _md5(b"alpha"),
+        "b.mov": _md5(b"WRONG"),
     }))
     results = {r["path"]: r["status"]
                for r in verify.verify_gdrive("https://drive...", manifest)}
@@ -143,10 +178,11 @@ def test_gdrive_ok_missing_mismatch(monkeypatch):
 
 
 def test_gdrive_no_common_hash_is_mismatch(monkeypatch):
-    manifest = {"files": {"a.mov": {"checksums": {"xxhash3_64": "abcd"}}}}
+    # A local xxh128-only manifest shares no algorithm with Drive's md5 listing.
+    manifest = {"files": {"a.mov": {"checksums": {"xxh128": "abcd"}}}}
     monkeypatch.setattr(verify, "gdrive_url_to_rclone", lambda s: ("remote:path", []))
     monkeypatch.setattr(verify.rclone_bridge, "lsjson",
-                        lambda *a, **k: _drive_items({"a.mov": _sha256(b"x")}))
+                        lambda *a, **k: _drive_items({"a.mov": _md5(b"x")}))
     r = verify.verify_gdrive("https://drive...", manifest)[0]
     assert r["status"] == "MISMATCH"
     assert "common hash" in r["detail"]
@@ -163,11 +199,11 @@ def test_gdrive_lsjson_failure_raises(monkeypatch):
 
 
 def test_gdrive_extras_logged(monkeypatch):
-    manifest = _manifest({"a.mov": b"alpha"})
+    manifest = _md5_manifest({"a.mov": b"alpha"})
     monkeypatch.setattr(verify, "gdrive_url_to_rclone", lambda s: ("remote:path", []))
     monkeypatch.setattr(verify.rclone_bridge, "lsjson", lambda *a, **k: _drive_items({
-        "a.mov": _sha256(b"alpha"),
-        "extra.mov": _sha256(b"z"),
+        "a.mov": _md5(b"alpha"),
+        "extra.mov": _md5(b"z"),
         "st_manifest.json": "ignored",
     }))
     logs = []
@@ -231,7 +267,7 @@ def test_join_remote():
 
 
 def _deep_setup(monkeypatch, cat_map):
-    """cat_map: {remote_path: sha256 or Exception}. Returns a cat_fn."""
+    """cat_map: {remote_path: digest or Exception}. Returns a cat_fn (xxh128)."""
     monkeypatch.setattr(verify, "gdrive_url_to_rclone", lambda s: ("gdrive:", []))
     def cat_fn(remote_path, extra_flags=None):
         val = cat_map[remote_path]
@@ -242,64 +278,77 @@ def _deep_setup(monkeypatch, cat_map):
 
 
 def test_deep_ok_and_mismatch(monkeypatch):
+    # M13: deep verify downloads and re-hashes with xxh128 (primary).
     manifest = _manifest({"a.mov": b"alpha", "b.mov": b"bravo"})
     cat_fn = _deep_setup(monkeypatch, {
-        "gdrive:a.mov": _sha256(b"alpha"),       # matches
-        "gdrive:b.mov": _sha256(b"WRONG"),       # mismatch
+        "gdrive:a.mov": _xxh128(b"alpha"),       # matches
+        "gdrive:b.mov": _xxh128(b"WRONG"),       # mismatch
     })
     results = {r["path"]: r["status"] for r in
-               verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn)}
+               verify.verify_gdrive_deep("https://drive...", manifest, cat_xxh128_fn=cat_fn)}
     assert results == {"a.mov": "OK", "b.mov": "MISMATCH"}
 
 
 def test_deep_missing_on_cat_error(monkeypatch):
     manifest = _manifest({"a.mov": b"alpha"})
     cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": RuntimeError("not found")})
-    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn)[0]
+    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_xxh128_fn=cat_fn)[0]
     assert r["status"] == "MISSING"
     assert "not found" in r["detail"]
 
 
-def _md5(data: bytes) -> str:
-    import hashlib
-    return hashlib.md5(data).hexdigest()
-
-
 def test_deep_md5_fallback_ok(monkeypatch):
-    """MD5-only manifest entry (Drive-origin) should verify OK via cat_md5."""
+    """MD5-only manifest entry (Drive-to-Drive) should verify OK via cat_md5."""
     data = b"frame"
     manifest = {"files": {"a.mov": {"size": len(data), "checksums": {"md5": _md5(data)}}}}
-    cat_fn = _deep_setup(monkeypatch, {})   # sha256 path never called
+    cat_fn = _deep_setup(monkeypatch, {})   # xxh128 path never called
     md5_fn = lambda remote_path, extra_flags=None: _md5(data)
-    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn,
+    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_xxh128_fn=cat_fn,
                                   cat_md5_fn=md5_fn)[0]
     assert r["status"] == "OK"
     assert "md5" in r["detail"]
 
 
+def test_deep_prefers_xxh128_over_md5(monkeypatch):
+    """An entry carrying both xxh128 and md5 deep-verifies on xxh128."""
+    data = b"dual"
+    manifest = {"files": {"a.mov": {"size": len(data),
+                "checksums": {"xxh128": _xxh128(data), "md5": _md5(data)}}}}
+    cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": _xxh128(data)})
+    md5_called = {"n": 0}
+    def md5_fn(remote_path, extra_flags=None):
+        md5_called["n"] += 1
+        return _md5(data)
+    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_xxh128_fn=cat_fn,
+                                  cat_md5_fn=md5_fn)[0]
+    assert r["status"] == "OK"
+    assert "xxh128" in r["detail"]
+    assert md5_called["n"] == 0   # md5 path not used when xxh128 is present
+
+
 def test_deep_no_hash_is_mismatch(monkeypatch):
-    """Entry with no sha256 or md5 should be MISMATCH, not a silent skip."""
+    """Entry with no xxh128 or md5 should be MISMATCH, not a silent skip."""
     manifest = {"files": {"a.mov": {"size": 5, "checksums": {}}}}
     cat_fn = _deep_setup(monkeypatch, {})
-    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn)[0]
+    r = verify.verify_gdrive_deep("https://drive...", manifest, cat_xxh128_fn=cat_fn)[0]
     assert r["status"] == "MISMATCH"
-    assert "No md5 or sha256" in r["detail"]
+    assert "No xxh128 or md5" in r["detail"]
 
 
 def test_deep_logs_estimate(monkeypatch):
     manifest = _manifest({"a.mov": b"alpha"})
-    cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": _sha256(b"alpha")})
+    cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": _xxh128(b"alpha")})
     logs = []
-    verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn,
+    verify.verify_gdrive_deep("https://drive...", manifest, cat_xxh128_fn=cat_fn,
                               log_cb=lambda m, l: logs.append(m))
     assert any("Deep verify will download" in m for m in logs)
 
 
 def test_deep_progress_completes(monkeypatch):
     manifest = _manifest({"a.mov": b"alpha"})
-    cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": _sha256(b"alpha")})
+    cat_fn = _deep_setup(monkeypatch, {"gdrive:a.mov": _xxh128(b"alpha")})
     prog = []
-    verify.verify_gdrive_deep("https://drive...", manifest, cat_fn=cat_fn,
+    verify.verify_gdrive_deep("https://drive...", manifest, cat_xxh128_fn=cat_fn,
                               progress_cb=lambda p, path: prog.append((p, path)))
     assert prog[-1] == (100, "Complete")
 
@@ -419,11 +468,11 @@ from datetime import datetime, timezone
 
 def _results_with_format():
     return [
-        {"path": "clips/a.braw", "status": "OK", "detail": "sha256: abc...",
+        {"path": "clips/a.braw", "status": "OK", "detail": "xxh128: abc...",
          "format_status": "OK", "format_detail": "BRAW structure OK"},
-        {"path": "clips/b.braw", "status": "FORMAT_FAIL", "detail": "sha256: def...",
+        {"path": "clips/b.braw", "status": "FORMAT_FAIL", "detail": "xxh128: def...",
          "format_status": "FAILED", "format_detail": "truncated stream"},
-        {"path": "docs/notes.txt", "status": "OK", "detail": "sha256: 123..."},  # no format check
+        {"path": "docs/notes.txt", "status": "OK", "detail": "xxh128: 123..."},  # no format check
     ]
 
 
@@ -441,9 +490,9 @@ def test_persist_media_verify_to_manifest_roundtrip(tmp_path):
     manifest = {
         "schema_version": "1.2",
         "files": {
-            "clips/a.braw": {"size": 1, "checksums": {"sha256": "x"}},
-            "clips/b.braw": {"size": 2, "checksums": {"sha256": "y"}},
-            "docs/notes.txt": {"size": 3, "checksums": {"sha256": "z"}},
+            "clips/a.braw": {"size": 1, "checksums": {"xxh128": "x"}},
+            "clips/b.braw": {"size": 2, "checksums": {"xxh128": "y"}},
+            "docs/notes.txt": {"size": 3, "checksums": {"xxh128": "z"}},
         },
     }
     mpath.write_text(json.dumps(manifest))
@@ -459,7 +508,7 @@ def test_persist_media_verify_to_manifest_roundtrip(tmp_path):
     assert a["verified_at"] == now.isoformat()
     # Non-media entry untouched; original checksum data preserved.
     assert "media_verify" not in reloaded["files"]["docs/notes.txt"]
-    assert reloaded["files"]["clips/a.braw"]["checksums"] == {"sha256": "x"}
+    assert reloaded["files"]["clips/a.braw"]["checksums"] == {"xxh128": "x"}
     assert returned == reloaded
     assert not mpath.with_suffix(".json.tmp").exists()
 
@@ -490,9 +539,44 @@ def test_build_verify_report_shape():
     assert report["summary"] == {"total": 3, "ok": 2, "missing": 0,
                                  "mismatch": 0, "format_fail": 1}
     assert report["verdict"] == "FAIL"   # one FORMAT_FAIL
+    # M15.1: scope is stated explicitly (data fork only).
+    assert "data fork" in report["scope"]
     # Per-file format evidence preserved verbatim.
     assert report["files"][0]["format_status"] == "OK"
     assert report["files"][1]["format_detail"] == "truncated stream"
+
+
+# ── M13.5 folder root in verify report ───────────────────────────────────────
+
+def test_verify_local_results_carry_digest_and_algo(folder):
+    manifest = _manifest({"clips/a.mov": b"alpha", "clips/b.mov": b"bravo"})
+    results = {r["path"]: r for r in verify.verify_local(folder, manifest)}
+    assert results["clips/a.mov"]["algo"] == "xxh128"
+    assert results["clips/a.mov"]["digest"] == _xxh128(b"alpha")
+    assert results["clips/b.mov"]["digest"] == _xxh128(b"bravo")
+
+
+def test_build_report_carries_folder_root_for_local(folder):
+    manifest = _manifest({"clips/a.mov": b"alpha", "clips/b.mov": b"bravo"})
+    results = verify.verify_local(folder, manifest)
+    report = verify.build_verify_report(folder, results, label="A001")
+    assert report["folder_root"] is not None
+    assert report["folder_root"].startswith("v1:")
+
+
+def test_folder_root_is_deterministic_round_trip(folder):
+    manifest = _manifest({"clips/a.mov": b"alpha", "clips/b.mov": b"bravo"})
+    r1 = verify.folder_root_from_results(verify.verify_local(folder, manifest))
+    r2 = verify.folder_root_from_results(verify.verify_local(folder, manifest))
+    assert r1 == r2 and r1 is not None
+
+
+def test_folder_root_none_when_no_xxh128_results():
+    # Drive metadata/deep verify rows carry no xxh128 digest → no folder fingerprint.
+    rows = [{"path": "a.mov", "status": "OK", "detail": "md5: ..."}]
+    assert verify.folder_root_from_results(rows) is None
+    report = verify.build_verify_report("gdrive:x", rows, label="x")
+    assert report["folder_root"] is None
 
 
 def test_write_verify_report_roundtrip(tmp_path):
@@ -521,7 +605,6 @@ def test_write_verify_report_no_label(tmp_path):
 # --------------------------------------------------------------------------- #
 
 def test_verify_folder_logs_activity(tmp_path, monkeypatch):
-    import hashlib
     from core import verify as v
     from core import activity_index as ai
     monkeypatch.setattr(ai, "ACTIVITY_DIR", tmp_path / "activity")
@@ -529,12 +612,12 @@ def test_verify_folder_logs_activity(tmp_path, monkeypatch):
     folder = tmp_path / "A001"; folder.mkdir()
     data = b"clip-bytes"
     (folder / "clip.mov").write_bytes(data)
-    sha = hashlib.sha256(data).hexdigest()
+    digest = _xxh128(data)
     manifest = {
         "label": "ProjX", "workstation": "Cart 1", "user": "dit",
         "file_count": 1, "total_size_bytes": len(data),
         "files": {"clip.mov": {"type": "file", "size": len(data),
-                               "checksums": {"sha256": sha}}},
+                               "checksums": {"xxh128": digest}}},
     }
     results = v.verify_folder(folder, manifest)
     assert all(r["status"] == "OK" for r in results)

@@ -1,6 +1,6 @@
 # ST SyncTool — Offload Manifest + Rename Contract Spec
 
-> **Status:** Fully implemented. Schema 1.2, `counterpart_path`, `build_offload_manifest`, `checksums` dict, `modtime`, `renames[]`, the `offload` custody block (including `overall_result`, per-destination `verified_files`, and all 6 acceptance tests), and the `reason` field on merge preserve-rename entries (Part 2) are all done. See ROADMAP for M13 hash-algorithm changes that will require updating the `checksum_context` algorithm field and MHL mapping (Part 4).
+> **Status:** Fully implemented. Schema 1.2, `counterpart_path`, `build_offload_manifest`, `checksums` dict, `modtime`, `renames[]`, the `offload` custody block (including `overall_result`, per-destination `verified_files`, and all 6 acceptance tests), and the `reason` field on merge preserve-rename entries (Part 2) are all done. **M13 (landed):** xxh128 is the sole file-integrity algorithm; the `checksum_context.algorithm` field and MHL mapping (Part 4) are updated accordingly.
 
 Target: next implementation session. Goal is to make offload output consumable by Verify and Merge without a re-scan, and to give offload and merge one shared rename contract so a folder that crosses the offload to merge boundary does not trip the rename-divergence path.
 
@@ -9,7 +9,9 @@ Grounded in the current code, not invented:
 - Offload in-memory manifest: `core/offload.py` `prehash_source` and `build_normalized_manifest`.
 - Rename consumer: `core/comparison.py:96` reads top-level `renames[]` keyed `{from, to}` on relative posix paths.
 
-Current algorithm: offload prehash computes sha256 (`offload.py:386`, `algorithm: "sha256"`), overlapping with merge/transfer manifests. **M13 rewrites this to xxh128** — see ROADMAP M13. After M13 the `checksum_context.algorithm` field here and in Part 4's MHL mapping must be updated.
+Hash algorithm (M13, landed): **xxh128 is the sole file-integrity algorithm** for every path where local bytes exist — local transfers, offload prehash (`offload.py`, `algorithm: "xxh128"`), and merge copy-verify. **md5** is carried alongside xxh128 only on local-to-Drive transfers (rclone's transport-verification key) and is the *only* hash on Drive-to-Drive paths (no local bytes exist to compute xxh128). sha256 was removed entirely as a writer key. The `checksum_context.algorithm` field and Part 4's MHL mapping reflect this.
+
+**Activity-log trust model (stated honestly):** the org activity log is **not tamper-evident and not append-only**. There is no record hashing or hash chaining. Its trust rests on the team plus Google Drive access controls plus Drive version history — not a technical guarantee. Drive files are mutable and rclone only guarantees copy-time correctness. Do not describe the log as tamper-evident anywhere.
 
 > **Note (June 14, 2026):** the diff no longer depends on algorithm overlap. `three_way_diff` compares on the strongest **shared** algorithm and, when two sides share none (e.g. a Drive md5-only manifest against a local xxh128 scan after M13), reports `DiffState.INDETERMINATE` ("Unknown") rather than a false change. The indeterminate path is the honest fallback for the genuine no-shared-algorithm runtime case (Drive md5 vs local xxh128). No migration burden: beta ships clean with no sha256 field archives.
 
@@ -48,7 +50,7 @@ Reuse the merge/transfer envelope verbatim so consumers do not branch on produce
   "user": "<username>",
   "file_count": 0,
   "total_size_bytes": 0,
-  "checksum_context": { "algorithm": "sha256", "gdrive_mode": false },
+  "checksum_context": { "algorithm": "xxh128", "gdrive_mode": false },
   "renames": [],
   "filename_normalization": { "applied": false },
   "files": { },
@@ -69,15 +71,15 @@ Current offload in-memory entry is lean: `{size, checksum, algorithm}`. Do not c
   "type": "file",
   "size": 12345,
   "modtime": "<ISO8601 UTC>",
-  "checksums": { "sha256": "<full 64-char>" },
-  "hash_algorithm": "sha256",
+  "checksums": { "xxh128": "<full 32-char>" },
+  "hash_algorithm": "xxh128",
   "original_filename": "IMG_0001.MOV",
   "filename_hash_suffix": "a3f9b2c1",
-  "hash_method": "sha256_prefix8"
+  "hash_method": "xxh128_prefix8"
 }
 ```
 
-- `checksums` is a dict, not the bare `checksum` string. Carries the **full** 64-char sha256, never truncated. The 16-char truncation is presentation only and stays confined to the COC text log (`offload.py:555`).
+- `checksums` is a dict, not the bare `checksum` string. Carries the **full** 32-char xxh128, never truncated. The 16-char truncation is presentation only and stays confined to the COC text log (`offload.py:555`).
 - `original_filename`, `filename_hash_suffix`, `hash_method` appear only on entries that were normalized. `build_normalized_manifest` already sets these (`offload.py:301-303`); the serializer just carries them through.
 - `modtime` is new for offload. Add it in `prehash_source` from `f.stat().st_mtime` as ISO8601 UTC, the same encoding `manifest.py:68` uses. The copy step must preserve mtime (use `shutil.copy2`, verify the current copy call does) so a later `generate_manifest_fast` can reuse hashes via the modtime+size fast path.
 
@@ -101,7 +103,7 @@ This is what makes the COC log consumable. Replace reliance on the prose `.txt` 
       "bytes_verified": 123456,
       "result": "COMPLETE",
       "verified_files": {
-        "DCIM/IMG_0001_a3f9b2c1.MOV": { "verified": true, "sha256": "<full>" }
+        "DCIM/IMG_0001_a3f9b2c1.MOV": { "verified": true, "xxh128": "<full>" }
       },
       "errors": []
     }
@@ -167,7 +169,7 @@ There are two different rename events (normalize at offload, preserve at merge) 
 
 Write these against real fixtures, in `tests/` (these are durable, unlike the overnight temp tests):
 
-1. **Offload manifest is loadable and v1.2.** Run an offload with normalization. Load the persisted `{dest}/{label}/st_manifest.json` via `manifest.load_manifest`. Assert `schema_version == "1.2"`, `operation == "offload"`, every file entry has `checksums.sha256` (full 64 char), `hash_algorithm`, `size`, `modtime`.
+1. **Offload manifest is loadable and v1.2.** Run an offload with normalization. Load the persisted `{dest}/{label}/st_manifest.json` via `manifest.load_manifest`. Assert `schema_version == "1.2"`, `operation == "offload"`, every file entry has `checksums.xxh128` (full 32 char), `hash_algorithm`, `size`, `modtime`.
 
 2. **Verify consumes an offload manifest.** Point the Verify flow at the committed destination using the offload-produced manifest. Assert all files report OK, no MISSING, no MISMATCH.
 
@@ -177,7 +179,7 @@ Write these against real fixtures, in `tests/` (these are durable, unlike the ov
 
 5. **overall_result and per-file verification present.** Force one destination to fail. Assert `offload.overall_result == "PARTIAL_FAILURE"`, the failing destination's `result` reflects it, and `verified_files` carries a per-file boolean for the passing destination.
 
-6. **Full hash in manifest, truncation only in log.** Assert the persisted manifest carries 64-char sha256 while the `.txt` COC log still shows 16-char (log-only truncation is intended).
+6. **Full hash in manifest, truncation only in log.** Assert the persisted manifest carries 32-char xxh128 while the `.txt` COC log still shows 16-char (log-only truncation is intended).
 
 ---
 
@@ -197,8 +199,8 @@ a `media_verify` block onto each file entry that actually ran a format check:
 "DCIM/A001_C001.braw": {
   "type": "file",
   "size": 12345,
-  "checksums": { "sha256": "<full 64-char>" },
-  "hash_algorithm": "sha256",
+  "checksums": { "xxh128": "<full 32-char>" },
+  "hash_algorithm": "xxh128",
   "media_verify": {
     "status": "OK",                       // OK | ADVISORY | FAILED
     "detail": "BRAW structure OK (gen 5)",
@@ -230,7 +232,7 @@ a `media_verify` block onto each file entry that actually ran a format check:
   "summary": { "total": 312, "ok": 310, "missing": 0, "mismatch": 0, "format_fail": 2 },
   "verdict": "FAIL",
   "files": [
-    { "path": "DCIM/A001_C001.braw", "status": "OK", "detail": "sha256: ...",
+    { "path": "DCIM/A001_C001.braw", "status": "OK", "detail": "xxh128: ...",
       "format_status": "OK", "format_detail": "BRAW structure OK (gen 5)" }
   ]
 }
@@ -250,7 +252,7 @@ ST SyncTool can export an ASC Media Hash List sidecar (`.mhl`) next to `st_manif
 
 - **Format:** ASC MHL v2.0, namespace `urn:ASC:MHL:v2.0`, single `<hashlist version="2.0">` with required `<creatorinfo>` (creationdate, hostname, tool[@version]), `<processinfo>` (`<process>transfer</process>`) and a `<hashes>` block of `<hash>` entries. Validated against the published schema `xsd/ASCMHL.xsd` (github.com/ascmitc/mhl), bundled at `tests/fixtures/ASCMHL.xsd`.
 - **Per file:** `<path size=".." lastmodificationdate="..">rel/posix/path</path>` plus hash elements in schema order (c4, md5, sha1, xxh128, xxh3, xxh64), each carrying `action="original"` and `hashdate`.
-- **Hash mapping:** manifest `md5` to `<md5>`, manifest `xxh128` to `<xxh128>`. **sha256 is intentionally not exported** because the ASC MHL v2.0 schema defines no sha256 element. After M13, every local manifest carries xxh128 and every Drive manifest carries md5 (with xxh128 where local bytes were available), so each file gets a verifiable hash; a pre-M13 manifest with only sha256 is written with its path but no hash element and reported in `MhlExportResult.unhashed`. The prior mapping (`xxhash3_64` → `<xxh3>`) is removed by M13 — the MHL export must be updated in the same M13 PR.
+- **Hash mapping:** manifest `md5` to `<md5>`, manifest `xxh128` to `<xxh128>`. The ASC MHL v2.0 schema defines no sha256 element, and M13 removed sha256 as a writer key anyway. Every local manifest carries xxh128 and every Drive manifest carries md5 (with xxh128 where local bytes were available), so each file gets a verifiable hash element. A foreign manifest entry whose only hash has no MHL element is written with its path but no hash element and reported in `MhlExportResult.unhashed`. The old `xxhash3_64` → `<xxh3>` mapping was removed in M13 (the key is no longer written).
 - **Trigger:** off by default. An "Export ASC MHL (.mhl)" checkbox in the Transfer and Offload tabs sets `export_mhl`, threaded through `route_transfer`/`transfer_folder`/`transfer_folder_rclone` and `OffloadConfig`/`save_offload_manifest`. A `.mhl` (named from the manifest label) is written next to each saved manifest; an export failure is logged and swallowed so it never affects the copy.
 
 ## Out of scope for this change, tracked separately

@@ -48,7 +48,7 @@ def _populate(root: Path, files=None):
 
 
 def _hashes_equal(a: Path, b: Path) -> bool:
-    return compute_all(a)["xxhash128"] == compute_all(b)["xxhash128"]
+    return compute_all(a)["xxh128"] == compute_all(b)["xxh128"]
 
 
 def _verify_against_manifest(manifest: dict, folder: Path) -> dict:
@@ -61,13 +61,13 @@ def _verify_against_manifest(manifest: dict, folder: Path) -> dict:
             continue
         cs = (entry.get("dest_checksums") or entry.get("source_checksums")
               or entry.get("checksums", {}))
-        algo = ("xxhash128" if "xxhash128" in cs else
+        algo = ("xxh128" if "xxh128" in cs else
                 "md5" if "md5" in cs else "sha256")
         if algo == "sha256":
             import hashlib as _hl
             actual = {"sha256": _hl.sha256(p.read_bytes()).hexdigest()}
         else:
-            actual = compute_all(p, include_xxh128=(algo == "xxhash128"),
+            actual = compute_all(p, include_xxh128=(algo == "xxh128"),
                                  include_md5=(algo == "md5"))
         expected = (cs.get(algo) or "").lower()
         out[rel] = "OK" if expected and expected == (actual.get(algo) or "").lower() else "MISMATCH"
@@ -269,7 +269,7 @@ class TestMergeRoundTrip:
         rows = {r.path: r for r in _diff(local, server, migrated)}
         assert rows[self.TARGET].state == DiffState.LOCAL_CHANGED
 
-    @pytest.mark.parametrize("keep", ["xxhash128", "md5"])
+    @pytest.mark.parametrize("keep", ["xxh128", "md5"])
     def test_verify_contract_per_checksum_algorithm(self, tmp_path, keep):
         folder = _populate(tmp_path / "data")
         manifest = generate_manifest(folder, label="x")

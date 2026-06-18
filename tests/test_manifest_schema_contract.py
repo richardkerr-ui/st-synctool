@@ -81,7 +81,7 @@ def offload_source_manifest(sample_dir):
             result[rel] = {
                 "size": len(data),
                 "checksum": xxhash.xxh128(data).hexdigest(),
-                "algorithm": "xxhash128",
+                "algorithm": "xxh128",
             }
     return result
 
@@ -149,7 +149,7 @@ class TestRequiredTopLevelFields:
         ctx = manifest["checksum_context"]
         assert isinstance(ctx, dict)
         assert "algorithm" in ctx
-        assert ctx["algorithm"] in ("xxhash128", "md5", "sha256")
+        assert ctx["algorithm"] in ("xxh128", "md5", "sha256")
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ class TestVerifyWorkerCompatibility:
     verify_local does:
         expected_cs = entry.get("dest_checksums") or entry.get("source_checksums")
                       or entry.get("checksums", {})
-        algo = "xxhash128" if "xxhash128" in expected_cs else
+        algo = "xxh128" if "xxh128" in expected_cs else
                "md5" if "md5" in expected_cs else "sha256"
         expected_val = expected_cs.get(algo) or ""
 
@@ -285,7 +285,7 @@ class TestVerifyWorkerCompatibility:
             assert isinstance(cs, dict) and cs, (
                 f"{fixture_name}[{rel_path!r}] has no usable checksum block"
             )
-            algo = ("xxhash128" if "xxhash128" in cs else
+            algo = ("xxh128" if "xxh128" in cs else
                     "md5" if "md5" in cs else "sha256")
             val = (cs.get(algo) or "").lower()
             assert val, (
@@ -297,14 +297,14 @@ class TestVerifyWorkerCompatibility:
         "transfer_manifest", "fast_manifest", "offload_manifest",
     ])
     def test_xxh128_checksums_are_32_hex_chars(self, request, fixture_name):
-        """Full 32-char xxhash128 in manifest (truncation is presentation-only)."""
+        """Full 32-char xxh128 in manifest (truncation is presentation-only)."""
         manifest = request.getfixturevalue(fixture_name)
         for rel_path, entry in manifest["files"].items():
             cs = entry.get("checksums", {})
-            if "xxhash128" in cs:
-                assert len(cs["xxhash128"]) == 32, (
-                    f"{fixture_name}[{rel_path!r}] xxhash128 is truncated: "
-                    f"{cs['xxhash128']!r}"
+            if "xxh128" in cs:
+                assert len(cs["xxh128"]) == 32, (
+                    f"{fixture_name}[{rel_path!r}] xxh128 is truncated: "
+                    f"{cs['xxh128']!r}"
                 )
 
 
@@ -401,16 +401,16 @@ class TestOffloadManifestContract:
         assert offload_manifest["operation"] == "offload"
 
     def test_all_entries_have_full_xxh128(self, offload_manifest):
-        """Acceptance test 6: persisted manifest carries 32-char xxhash128."""
+        """Acceptance test 6: persisted manifest carries 32-char xxh128."""
         for rel_path, entry in offload_manifest["files"].items():
             cs = entry.get("checksums", {})
-            assert "xxhash128" in cs, f"{rel_path!r} missing xxhash128 in checksums"
-            assert len(cs["xxhash128"]) == 32, (
-                f"{rel_path!r} xxhash128 is truncated: {cs['xxhash128']!r}"
+            assert "xxh128" in cs, f"{rel_path!r} missing xxh128 in checksums"
+            assert len(cs["xxh128"]) == 32, (
+                f"{rel_path!r} xxh128 is truncated: {cs['xxh128']!r}"
             )
 
-    def test_checksum_context_algorithm_is_xxhash128(self, offload_manifest):
-        assert offload_manifest["checksum_context"]["algorithm"] == "xxhash128"
+    def test_checksum_context_algorithm_is_xxh128(self, offload_manifest):
+        assert offload_manifest["checksum_context"]["algorithm"] == "xxh128"
 
     def test_all_entries_have_modtime(self, offload_manifest, sample_dir):
         """
@@ -451,16 +451,16 @@ class TestOffloadManifestContract:
             source_manifest[normalized] = {
                 "size": len(data),
                 "checksum": h,
-                "algorithm": "xxhash128",
+                "algorithm": "xxh128",
                 "original_filename": f.name,
                 "filename_hash_suffix": suffix,
-                "hash_method": "sha256_prefix8",
+                "hash_method": "xxh128_prefix8",
             }
             norm_renames.append({"original": f.name, "normalized": normalized})
 
         norm_block = {
             "applied": True,
-            "method": "sha256_prefix8",
+            "method": "xxh128_prefix8",
             "renames": norm_renames,
         }
         source = OffloadSource(label="A001", path=sample_dir)

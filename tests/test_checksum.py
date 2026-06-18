@@ -22,14 +22,14 @@ class TestCorrectness:
         f = tmp_path / "empty.bin"
         f.write_bytes(b"")
         result = compute_all(f)
-        assert result["xxhash128"] == xxhash.xxh128(b"").hexdigest()
+        assert result["xxh128"] == xxhash.xxh128(b"").hexdigest()
 
     def test_xxh128_known_content(self, tmp_path):
         data = b"ST SyncTool test vector"
         f = tmp_path / "known.bin"
         f.write_bytes(data)
         result = compute_all(f)
-        assert result["xxhash128"] == xxhash.xxh128(data).hexdigest()
+        assert result["xxh128"] == xxhash.xxh128(data).hexdigest()
 
     def test_xxh128_matches_library_for_large_file(self, tmp_path):
         # 2 MB — exercises the chunked read path
@@ -37,7 +37,7 @@ class TestCorrectness:
         f = tmp_path / "large.bin"
         f.write_bytes(data)
         result = compute_all(f)
-        assert result["xxhash128"] == xxhash.xxh128(data).hexdigest()
+        assert result["xxh128"] == xxhash.xxh128(data).hexdigest()
 
     def test_different_content_produces_different_hashes(self, tmp_path):
         f1 = tmp_path / "a.bin"
@@ -46,7 +46,7 @@ class TestCorrectness:
         f2.write_bytes(b"file two")
         r1 = compute_all(f1)
         r2 = compute_all(f2)
-        assert r1["xxhash128"] != r2["xxhash128"]
+        assert r1["xxh128"] != r2["xxh128"]
 
     def test_same_content_different_paths_same_hash(self, tmp_path):
         data = b"identical content"
@@ -56,7 +56,7 @@ class TestCorrectness:
         f2.write_bytes(data)
         r1 = compute_all(f1)
         r2 = compute_all(f2)
-        assert r1["xxhash128"] == r2["xxhash128"]
+        assert r1["xxh128"] == r2["xxh128"]
 
     def test_single_bit_flip_changes_hash(self, tmp_path):
         data = bytearray(b"important footage manifest data")
@@ -67,7 +67,7 @@ class TestCorrectness:
         f2.write_bytes(bytes(data))
         r1 = compute_all(f1)
         r2 = compute_all(f2)
-        assert r1["xxhash128"] != r2["xxhash128"]
+        assert r1["xxh128"] != r2["xxh128"]
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ class TestAlgorithmSelection:
         f = tmp_path / "f.bin"
         f.write_bytes(b"data")
         result = compute_all(f)
-        assert "xxhash128" in result
+        assert "xxh128" in result
         assert "md5" not in result
         assert "sha256" not in result
 
@@ -87,7 +87,7 @@ class TestAlgorithmSelection:
         f = tmp_path / "f.bin"
         f.write_bytes(b"data")
         result = compute_all(f, include_xxh128=False, include_md5=True)
-        assert "xxhash128" not in result
+        assert "xxh128" not in result
         assert "md5" in result
 
     def test_include_md5_true_returns_md5(self, tmp_path):
@@ -102,7 +102,7 @@ class TestAlgorithmSelection:
         f = tmp_path / "f.bin"
         f.write_bytes(data)
         result = compute_all(f, include_xxh128=True, include_md5=True)
-        assert result["xxhash128"] == xxhash.xxh128(data).hexdigest()
+        assert result["xxh128"] == xxhash.xxh128(data).hexdigest()
         assert result["md5"] == hashlib.md5(data).hexdigest()
 
 
@@ -147,7 +147,7 @@ class TestVerificationSemantics:
         copy.write_bytes(data)
         h1 = compute_all(original)
         h2 = compute_all(copy)
-        assert h1["xxhash128"] == h2["xxhash128"]
+        assert h1["xxh128"] == h2["xxh128"]
 
     def test_hash_comparison_fails_for_different_files(self, tmp_path):
         f1 = tmp_path / "a.mov"
@@ -156,7 +156,7 @@ class TestVerificationSemantics:
         f2.write_bytes(b"different footage")
         h1 = compute_all(f1)
         h2 = compute_all(f2)
-        assert h1["xxhash128"] != h2["xxhash128"]
+        assert h1["xxh128"] != h2["xxh128"]
 
     def test_single_appended_byte_detected(self, tmp_path):
         data = b"clip data"
@@ -166,7 +166,7 @@ class TestVerificationSemantics:
         f2.write_bytes(data + b"\x00")
         h1 = compute_all(f1)
         h2 = compute_all(f2)
-        assert h1["xxhash128"] != h2["xxhash128"]
+        assert h1["xxh128"] != h2["xxh128"]
 
     def test_truncated_file_detected(self, tmp_path):
         data = b"x" * 1024
@@ -176,7 +176,7 @@ class TestVerificationSemantics:
         f2.write_bytes(data[:512])
         h1 = compute_all(f1)
         h2 = compute_all(f2)
-        assert h1["xxhash128"] != h2["xxhash128"]
+        assert h1["xxh128"] != h2["xxh128"]
 
     def test_stored_hash_matches_recomputed_hash(self, tmp_path):
         """Simulates the offload pre-hash -> post-copy verify flow."""
@@ -184,12 +184,12 @@ class TestVerificationSemantics:
         dst = tmp_path / "dst.mov"
         src.write_bytes(b"camera card footage")
 
-        pre = compute_all(src)["xxhash128"]
+        pre = compute_all(src)["xxh128"]
 
         import shutil
         shutil.copy2(str(src), str(dst))
 
-        post = compute_all(dst)["xxhash128"]
+        post = compute_all(dst)["xxh128"]
 
         assert pre == post
 
@@ -201,8 +201,8 @@ class TestVerificationSemantics:
         import shutil
         shutil.copy2(str(src), str(dst))
 
-        pre = compute_all(src)["xxhash128"]
+        pre = compute_all(src)["xxh128"]
         dst.write_bytes(b"corrupted content")
-        post = compute_all(dst)["xxhash128"]
+        post = compute_all(dst)["xxh128"]
 
         assert pre != post

@@ -3,7 +3,7 @@
 Covers: _app_support_dir, demo_root, demo_source, demo_destination,
 demo_verify_sample, demo_verify_manifest, _build_verify_sample,
 ensure_demo_folder, demo_exists, demo_merge_local, demo_merge_server,
-demo_merge_manifest, _sha256_of, _write_if_missing, ensure_demo_merge_folders
+demo_merge_manifest, _xxh128_of, _write_if_missing, ensure_demo_merge_folders
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import core.demo as demo_mod
 from core.demo import (
     _app_support_dir,
     _build_verify_sample,
-    _sha256_of,
+    _xxh128_of,
     _write_if_missing,
     demo_destination,
     demo_exists,
@@ -120,25 +120,24 @@ class TestMergePaths:
 
 
 # ---------------------------------------------------------------------------
-# _sha256_of
+# _xxh128_of  (M13: was _sha256_of)
 # ---------------------------------------------------------------------------
 
-class TestSha256Of:
+class TestXxh128Of:
     def test_known_hash_of_empty_bytes(self):
-        expected = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        assert _sha256_of(b"") == expected
+        import xxhash
+        assert _xxh128_of(b"") == xxhash.xxh128(b"").hexdigest()
 
     def test_known_hash_of_hello(self):
-        # echo -n "hello" | sha256sum
-        expected = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-        assert _sha256_of(b"hello") == expected
+        import xxhash
+        assert _xxh128_of(b"hello") == xxhash.xxh128(b"hello").hexdigest()
 
     def test_different_data_produces_different_hash(self):
-        assert _sha256_of(b"abc") != _sha256_of(b"xyz")
+        assert _xxh128_of(b"abc") != _xxh128_of(b"xyz")
 
-    def test_returns_64_char_hex_string(self):
-        result = _sha256_of(b"test data")
-        assert len(result) == 64
+    def test_returns_32_char_hex_string(self):
+        result = _xxh128_of(b"test data")
+        assert len(result) == 32
         assert all(c in "0123456789abcdef" for c in result)
 
 
@@ -224,7 +223,7 @@ class TestBuildVerifySample:
         data = json.loads(manifest_path.read_text())
         assert data["label"] == "demo_verify_sample"
 
-    def test_stub_files_use_empty_sha256(self, tmp_path):
+    def test_stub_files_use_empty_xxh128(self, tmp_path):
         patches = self._patch_demo_root(tmp_path)
         with patches[0], patches[1], patches[2]:
             _build_verify_sample(tmp_path / "demo")
@@ -232,8 +231,8 @@ class TestBuildVerifySample:
         data = json.loads(manifest_path.read_text())
         for rel, entry in data["files"].items():
             if entry["size"] == 0:
-                assert entry["checksums"]["sha256"] == demo_mod._EMPTY_SHA256, \
-                    f"Stub {rel} has wrong sha256"
+                assert entry["checksums"]["xxh128"] == demo_mod._EMPTY_XXH128, \
+                    f"Stub {rel} has wrong xxh128"
 
     def test_idempotent_second_call_does_not_raise(self, tmp_path):
         patches = self._patch_demo_root(tmp_path)
@@ -441,11 +440,11 @@ class TestEnsureDemoMergeFolders:
             ensure_demo_merge_folders()
         manifest_path = tmp_path / "demo" / "merge_base_manifest.json"
         data = json.loads(manifest_path.read_text())
-        from core.demo import _MERGE_FILES, _sha256_of as sha
+        from core.demo import _MERGE_FILES, _xxh128_of as xxh
         for rel, base_bytes, _local, _server in _MERGE_FILES:
             assert rel in data["files"]
-            expected = sha(base_bytes)
-            actual = data["files"][rel]["checksums"]["sha256"]
+            expected = xxh(base_bytes)
+            actual = data["files"][rel]["checksums"]["xxh128"]
             assert actual == expected, f"Checksum mismatch for {rel}"
 
     def test_local_changed_file_has_expected_content(self, tmp_path):

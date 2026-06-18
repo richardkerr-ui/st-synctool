@@ -34,8 +34,7 @@ class CompletionBanner(QFrame):
         """Show the banner: green when ok, coral when there's a problem.
 
         subtitle renders below the main line in smaller amber text — use for
-        advisory warnings that don't change the ok/fail verdict (e.g. paranoid
-        fallback count).
+        advisory warnings that don't change the ok/fail verdict.
         """
         bg = theme.VERDICT_GREEN if ok else theme.VERDICT_CORAL
         fg = "#0c1a0f" if ok else "#1a0c0c"

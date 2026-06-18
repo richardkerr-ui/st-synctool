@@ -117,7 +117,7 @@ class TestPrehash:
         for rel, info in manifest.items():
             assert "size" in info
             assert "checksum" in info
-            assert info["algorithm"] == "xxhash128"
+            assert info["algorithm"] == "xxh128"
 
     def test_checksum_is_xxh128_hex(self, tmp_path, log_cb):
         source, _ = _make_source(tmp_path)
@@ -395,7 +395,7 @@ class TestNeverCommitOnFailure:
 class TestFilenameNormalisation:
     def _manifest_from_names(self, names: list[str], cs_prefix: str = "aa") -> dict:
         return {
-            name: {"size": 10, "checksum": f"{cs_prefix}{i:030x}", "algorithm": "xxhash128"}
+            name: {"size": 10, "checksum": f"{cs_prefix}{i:030x}", "algorithm": "xxh128"}
             for i, name in enumerate(names)
         }
 
@@ -1257,7 +1257,7 @@ from core.offload import build_normalized_manifest
 class TestBuildNormalizedManifest:
     def _source_manifest(self, names_and_checksums):
         return {
-            name: {"size": 100, "checksum": cs, "algorithm": "xxhash128"}
+            name: {"size": 100, "checksum": cs, "algorithm": "xxh128"}
             for name, cs in names_and_checksums
         }
 
@@ -1300,7 +1300,7 @@ class TestBuildNormalizedManifest:
         norm_plan = {"IMG_0001.mov": "IMG_0001_abcdef12.mov"}
         _, norm_block, _ = build_normalized_manifest(manifest, norm_plan)
         assert norm_block["applied"] is True
-        assert norm_block["method"] == "sha256_prefix8"
+        assert norm_block["method"] == "xxh128_prefix8"
 
     def test_generated_artifacts_key_passed_through(self):
         checksum = "abcdef12" + "0" * 24
@@ -1351,7 +1351,7 @@ class TestSaveOffloadManifest:
 
     def _source_manifest(self):
         return {
-            "clip.mov": {"size": 10, "checksum": "aa" * 16, "algorithm": "xxhash128"}
+            "clip.mov": {"size": 10, "checksum": "aa" * 16, "algorithm": "xxh128"}
         }
 
     def test_returns_list_of_saved_paths(self, tmp_path):

@@ -80,7 +80,20 @@ def compute_clearance(
     ``results`` may contain cells for several sources; only those whose
     ``source_label`` matches are considered. A destination counts as *clean*
     when it committed (state DONE), its per-file hash verification passed
-    (``verified is True``) and no media-format check hard-failed.
+    (``verified is True``), no media-format check hard-failed, AND the
+    verification was integrity-based — an actual content-hash compare, not a
+    size+modtime pass (``integrity_verified is True``).
+
+    M14.1 — integrity_verified decision (option b): the flag defaults to False.
+    Absence of a confirmed hash compare is NOT a hash compare. Offload's
+    ``verify_staging`` re-hashes every destination file with xxh128 against the
+    source ground truth, so offload-local destinations set it True on a clean
+    pass. rclone/Drive-managed destinations stay False until M15.2 wires the
+    ``--checksum`` result signal — so a Drive destination cannot, on its own,
+    reach the 2-destination gate until M15.2 ships. A destination that passed by
+    size+modtime only does NOT count toward the gate, but it does NOT block it
+    either: two integrity-verified local disks still clear even when a third
+    (e.g. Drive, pre-M15.2) is integrity-unconfirmed.
 
     ``prior_clean_dests`` (M12.2-backed) is an iterable of destination labels
     this same card was verified to in *earlier* offload runs. Redundancy is
@@ -103,14 +116,21 @@ def compute_clearance(
         )
 
     current_clean: set = set()
-    failed = unverified = 0
+    failed = unverified = integrity_unconfirmed = 0
     for r in cells:
         state = _state_value(r.state)
         media_failed = _media_verify_failed(r)
+        integrity = bool(getattr(r, "integrity_verified", False))
         if state == _FAILED or r.verified is False or media_failed:
             failed += 1
         elif r.verified is True and state == _DONE:
-            current_clean.add(r.dest_label)
+            if integrity:
+                current_clean.add(r.dest_label)
+            else:
+                # Committed and "passed", but with no confirmed content-hash
+                # compare (e.g. an rclone size+modtime fall-back). Does not count
+                # toward the gate; does not block it. M14.1 / M15.2.
+                integrity_unconfirmed += 1
         else:
             # verified is None, or the cell never reached DONE (skipped, partial)
             unverified += 1
@@ -139,6 +159,12 @@ def compute_clearance(
             f"only {clean} destination{'s' if clean != 1 else ''} verified clean; "
             f"at least {MIN_CLEAN_DESTS} required before formatting"
         )
+        if integrity_unconfirmed:
+            reason += (
+                f" ({integrity_unconfirmed} destination"
+                f"{'s' if integrity_unconfirmed != 1 else ''} passed without a "
+                f"confirmed integrity check and do not count)"
+            )
         return ClearanceVerdict(source_label, False, clean, total, reason, from_earlier)
 
     return ClearanceVerdict(source_label, True, clean, total, "", from_earlier)

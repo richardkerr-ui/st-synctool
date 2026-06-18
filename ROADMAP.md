@@ -43,9 +43,9 @@ The only checks still needing Richard. The GUI smoke/worker tests that older fin
 **Pre-beta gate (full list — nothing ships until all pass):**
 
 *Code milestones (must land and pass CI):*
-- [ ] M13 complete (xxh128 rewrite, paranoid removed, Merkle root)
-- [ ] M14 complete (card-wipe gate, cold-read verify, atomic ledger writes) — awaiting approval
-- [ ] M15 complete (verified-scope clarification, rclone `--checksum` audit) — awaiting approval
+- [x] M13 complete (xxh128 rewrite, paranoid removed, Merkle root) — done; full suite green, checksum.py + merkle.py 100% covered. Manual checks M5.1 deep-verify + M10.3 MHL round-trip still pending (need real Drive / Silverstack).
+- [x] M14 complete (card-wipe gate, cold-read verify, atomic ledger writes) — done. M14.1: integrity_verified gate (option b — rclone/Drive default False until M15.2; app is advises-only, no destructive control to gate). M14.2: cold_read.py 100% (macOS eviction marked UNVERIFIED; real-device divergence test still in manual checks). M14.3: file_lock.py 100% w/ concurrent no-lost-update + O_APPEND tests; ledger + registry routed through it.
+- [x] M15 complete (verified-scope clarification, rclone `--checksum` audit) — done. M15.1: data-fork-only scope stated in custody log + verify report + Verify tab tooltip; merkle/MHL normalisation pins; MHL true-name round-trip test; docs/filesystem_scope.md. M15.2: every verification verb confirmed to pass --checksum; RCLONE_REQUIRED_VERSION + preflight floor + per-transfer version provenance + build.sh exact-match gate; unconfirmed-backend loud CHECKSUM FALLBACK + integrity_verified=False (feeds M14.1 gate). Manual checks M15.1 metadata audit + M15.2 backend hash audit still pending.
 
 *Signing (Richard — blocked on Apple account):*
 - [ ] **M7.1 sign + notarize + fresh-Mac launch** — build scripts + unsigned DMG done (2026-06-13). Remaining: code-sign/notarize/staple per `docs/release.md`, then fresh-Mac acceptance launch. Also gates beta-tester recruitment.
@@ -354,7 +354,7 @@ A thin Settings dialog (opened from a header button) to set the activity remote 
 **Done when:** dialog reads current settings, persists on save, GUI smoke test; no logic in the Qt layer beyond calling `core.settings`.
 **Findings:** New `gui/settings_dialog.py::SettingsDialog` — an activity-remote-base `QLineEdit` + a "Ship logs" `QCheckBox` + Save/Cancel; `_load` reads `core.settings` accessors, `_save` writes them, nothing else in the Qt layer. A "Settings" header button (`main_window._open_settings`) opens it. To make the accessors monkeypatchable (and keep one source of truth), `core.settings` was switched from `path=SETTINGS_PATH` default args (bound at def time) to `path=None` resolving `SETTINGS_PATH` dynamically at call time. 2 GUI smoke tests (button present; dialog loads + persists to a tmp config). GUI smoke 32 → **34 passed**. Non-GUI suite unchanged at 1425.
 
-### M11.3 Wire the M9 cluster onto Settings
+### M11.3 Wire the M9 cluster onto Settings ✅ DONE 2026-06-13
 With the remote base now configurable, finish the integration that was blocked:
 - M9.1: fire `log_sync.ship_logs(activity_remote_base())` on launch + after each operation when `activity_log_configured()`, surface `pending_status` (status line + 7-day banner). One manual e2e against a junk Drive folder.
 - M9.2: wire `append_activity(record_for(...))` into the completion path of offload/transfer/merge/verify.

@@ -5,10 +5,70 @@ from utils.resources import find_binary
 
 RCLONE_BIN = "rclone"
 
+# M15.2: pinned rclone version. rclone flag semantics and backend hash behaviour
+# drift between releases, so the version is pinned and bumped DELIBERATELY (a code
+# change), never silently picked up from the next build machine's rclone. This is
+# the version build.sh must bundle and the floor preflight enforces at runtime.
+RCLONE_REQUIRED_VERSION = "1.74.3"
+
 
 def _rclone() -> str:
     """Resolve the rclone executable: bundled copy when frozen, else PATH."""
     return find_binary(RCLONE_BIN) or RCLONE_BIN
+
+
+def _version_tuple(s):
+    """('1.74.3') -> (1, 74, 3); None if unparseable."""
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", s or "")
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def rclone_version() -> "str|None":
+    """Return the running rclone's version string (e.g. '1.74.3'), or None if
+    rclone is absent/unparseable. Recorded per transfer in the custody log so a
+    future dispute traces to the exact binary that ran the job (M15.2)."""
+    try:
+        out = subprocess.run([_rclone(), "version"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"rclone v(\d+\.\d+\.\d+)", out or "")
+    return m.group(1) if m else None
+
+
+def meets_required_version(version_str, required=RCLONE_REQUIRED_VERSION) -> bool:
+    """True if ``version_str`` is >= the pinned floor. The pin is treated as a
+    minimum at runtime (lenient for users who brew-upgrade); build.sh enforces an
+    exact-match bundle for determinism."""
+    have = _version_tuple(version_str)
+    need = _version_tuple(required)
+    return bool(have and need and have >= need)
+
+
+# M15.2: backends whose `--checksum` produces a real content-hash comparison.
+# Google Drive exposes md5 natively; the local backend lets rclone compute a hash
+# on both sides. For these, `--checksum` hash-compares (not size+modtime). Other
+# backends (NAS via SMB/NFS, exFAT remotes) must be confirmed by the M15.2 manual
+# backend audit before they can be trusted as integrity-verified — until then a
+# transfer touching them surfaces a loud custody-log error and does NOT count
+# toward the M14.1 clearance gate.
+def backend_supports_checksum(remote: str) -> bool:
+    """Conservative: True only for backends known to hash-compare under
+    --checksum (Google Drive, and local filesystem paths). Unknown/unconfirmed
+    backends return False so the caller can warn loudly."""
+    from utils.gdrive_utils import is_gdrive_url
+    s = str(remote)
+    if is_gdrive_url(s):
+        return True
+    # A connection-string Drive remote ("gdrive,root_folder_id=…:") or named
+    # "gdrive:" remote also hash-compares on md5.
+    if s.startswith("gdrive") and ":" in s.split("/", 1)[0]:
+        return True
+    # A bare local path (no "remote:" prefix) is the local backend — rclone
+    # computes a hash on both sides.
+    if "://" not in s and not re.match(r"^[A-Za-z0-9_-]+:", s):
+        return True
+    return False
 
 _current_proc = None
 _current_proc_lock = threading.Lock()
@@ -180,10 +240,19 @@ def cancel_current() -> bool:
         return False
 
 
+def _new_hasher(algo):
+    """Build a streaming hasher for `algo`. xxh128 comes from the xxhash lib
+    (M13: content-identity algorithm); md5 stays available via hashlib for the
+    Drive-to-Drive deep-verify fallback (Drive's native algorithm)."""
+    if algo == "xxh128":
+        import xxhash
+        return xxhash.xxh128()
+    import hashlib
+    return hashlib.new(algo)
+
+
 def _cat_file(remote_path, algo, extra_flags=None, timeout=3600, chunk_size=1 << 20):
     """Stream a remote file via `rclone cat` and return its hex digest for `algo`."""
-    import hashlib
-
     global _current_proc
     args = ["cat"]
     if extra_flags:
@@ -197,7 +266,7 @@ def _cat_file(remote_path, algo, extra_flags=None, timeout=3600, chunk_size=1 <<
     with _current_proc_lock:
         _current_proc = proc
 
-    h = hashlib.new(algo)
+    h = _new_hasher(algo)
     try:
         while True:
             chunk = proc.stdout.read(chunk_size)
@@ -224,9 +293,13 @@ def _cat_file(remote_path, algo, extra_flags=None, timeout=3600, chunk_size=1 <<
             _current_proc = None
 
 
-def cat_sha256(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
-    """Stream a remote file and return its SHA-256 hex digest (M5.1 deep verify)."""
-    return _cat_file(remote_path, "sha256", extra_flags=extra_flags,
+def cat_xxh128(remote_path, extra_flags=None, timeout=3600, chunk_size=1 << 20):
+    """Stream a remote file and return its xxh128 hex digest (M13 deep verify).
+
+    Downloads the bytes via `rclone cat` (nothing retained) and hashes them with
+    the same content-identity algorithm local manifests use, so a deep verify
+    compares like-for-like against the manifest's `xxh128` key."""
+    return _cat_file(remote_path, "xxh128", extra_flags=extra_flags,
                      timeout=timeout, chunk_size=chunk_size)
 
 
@@ -291,22 +364,18 @@ def lsjson_to_manifest(remote_path, extra_flags=None, label="server"):
         cs = {}
         if "Hashes" in item:
             h = {k.lower(): v for k, v in item["Hashes"].items()}
-            if "sha256" in h: cs["sha256"]     = h["sha256"].lower()
-            if "sha1"   in h: cs["sha1"]       = h["sha1"].lower()
-            if "md5"    in h: cs["md5"]        = h["md5"].lower()
-            if "xxhash" in h: cs["xxhash3_64"] = h["xxhash"].lower()
+            # M13: Drive's universal native hash is md5; that is the only key a
+            # Drive-listing manifest carries (Drive-to-Drive entries stay md5-only
+            # by design). rclone's "xxhash" is XXH3-64, a different algorithm and
+            # width from our xxh128 content key, so it is deliberately not mapped
+            # in — claiming xxh128 from a 64-bit digest would be a false identity.
+            if "md5" in h: cs["md5"] = h["md5"].lower()
         drive_id = item.get("ID", "")
         gdrive_url = f"https://drive.google.com/file/d/{drive_id}/view" if drive_id else ""
         # MANIFEST-FIX: record hash_algorithm per entry so a manifest produced from
         # lsjson is complete on load (no reliance on backfill inference).
-        if "sha256" in cs:
-            hash_algo = "sha256"
-        elif "md5" in cs:
+        if "md5" in cs:
             hash_algo = "md5"
-        elif "xxhash3_64" in cs:
-            hash_algo = "xxhash3_64"
-        elif "sha1" in cs:
-            hash_algo = "sha1"
         else:
             hash_algo = "rclone-lsjson"
         files[item["Path"]] = {
@@ -329,14 +398,13 @@ def lsjson_to_manifest(remote_path, extra_flags=None, label="server"):
         "user": getpass.getuser(),
         "file_count": len(files),
         "renames": [],
-        # MANIFEST-FIX: standardise checksum_context shape (method + gdrive_mode +
-        # paranoid_fallback_count) for cross-module interoperability.
+        # MANIFEST-FIX: standardise checksum_context shape (method + gdrive_mode)
+        # for cross-module interoperability.
         "checksum_context": {
             "algorithm": "rclone-lsjson",
             "method": "rclone",
             "gdrive_mode": True,
             "source": "lsjson --hash",
-            "paranoid_fallback_count": 0,
         },
         "files": files,
         "total_size_bytes": sum(v["size"] for v in files.values()),

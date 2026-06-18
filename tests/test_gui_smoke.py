@@ -297,6 +297,8 @@ class TestOffloadTabSmoke:
         r = CellResult(source_label=src, dest_label=dst)
         r.state = CellState.DONE if done else CellState.FAILED
         r.verified = True if done else False
+        # M14.1: a done+verified offload cell is integrity-verified (xxh128 compare).
+        r.integrity_verified = done
         return r
 
     def test_completion_banner_safe_when_cleared(self, tab, monkeypatch):
@@ -848,8 +850,11 @@ class TestSummaryDialogEjectGate:
     def _make_results(self, src_label, dest_labels, state, verified=None):
         from core.offload import CellResult, CellState
         s = getattr(CellState, state)
+        # M14.1: a verified offload pass is integrity-verified (xxh128 compare).
+        integrity = verified is True
         return [CellResult(source_label=src_label, dest_label=d, state=s,
-                           files_copied=1, verified=verified)
+                           files_copied=1, verified=verified,
+                           integrity_verified=integrity)
                 for d in dest_labels]
 
     def test_green_when_all_done_and_cleared(self, qtbot):
