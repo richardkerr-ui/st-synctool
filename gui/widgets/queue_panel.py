@@ -173,7 +173,7 @@ class QueuePanel(QWidget):
         self._run_btn.setEnabled(False)
         self._run_btn.setStyleSheet(
             f"QPushButton {{ background:{theme.ACCENT_INFO}; color:#000;"
-            " border-radius:4px; padding:4px 14px; font-weight:bold; font-size:12px; }}"
+            " border-radius:4px; padding:4px 14px; font-weight:bold; font-size:12px; }"
             "QPushButton:hover { background:#4ab0e8; }"
             "QPushButton:pressed { background:#2a90c8; }"
             "QPushButton:disabled { background:#1a2030; color:#555; }"
@@ -187,7 +187,7 @@ class QueuePanel(QWidget):
         self._clear_btn.setStyleSheet(
             f"QPushButton {{ background:transparent; color:{theme.TEXT_MUTED};"
             f"  border:1px solid {theme.BORDER}; border-radius:4px;"
-            "  padding:4px 14px; font-size:12px; }}"
+            "  padding:4px 14px; font-size:12px; }"
             "QPushButton:hover { color:#fff; border-color:#888; }"
         )
         self._clear_btn.clicked.connect(self.clear_requested)

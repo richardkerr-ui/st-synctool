@@ -1147,6 +1147,9 @@ class MergeTab(QWidget):
         local  = self.local_input.text()
         server = self.server_input.text()
         if not local or not server:
+            if self._job_queue:
+                self._run_next()
+                return
             QMessageBox.warning(self, "Missing Input",
                                 "Enter both Local and Server paths.")
             return

@@ -71,7 +71,6 @@ class TransferWorker(QObject):
                 self.src, self.dst,
                 gdrive_mode=self.gdrive_mode,
                 mirror_mode=self.mirror_mode,
-                paranoid_verify=self.paranoid_mode,
                 log_cb=lambda m, l: self.log.emit(m, l),
                 progress_cb=lambda p, f: self.progress.emit(p, f),
                 conflict_handler=self.conflict_handler,
@@ -611,6 +610,9 @@ class TransferTab(QWidget):
         src = self.src_input.text()
         dst = self.dst_input.text()
         if not src or not dst:
+            if self._job_queue:
+                self._run_next()
+                return
             QMessageBox.warning(self, "Missing Input",
                                 "Please enter both source and destination.")
             return
