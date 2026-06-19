@@ -28,6 +28,7 @@ _FILTER_LABELS = {"operation": "Operation", "workstation": "Workstation",
 _LOG_ROLE       = Qt.ItemDataRole.UserRole        # stores a row's custody-log filename
 _TIMESTAMP_ROLE = Qt.ItemDataRole.UserRole + 1   # stores the ISO timestamp for fuzzy lookup
 _OPERATION_ROLE = Qt.ItemDataRole.UserRole + 2   # stores the operation string
+_RECORD_ROLE    = Qt.ItemDataRole.UserRole + 3   # stores the raw activity record dict
 
 
 class _SortItem(QTableWidgetItem):
@@ -187,22 +188,23 @@ class HistoryTab(QWidget):
         return out
 
     def _apply_filters(self):
-        rows = history.rows_for(self._records, **self._active_filters())
+        raw_records = history.query_history(self._records, **self._active_filters())
+        rows = [history.format_row(r) for r in raw_records]
         self._rows = rows
         # Populate with sorting off, then restore it — inserting into a live
         # sorted table reshuffles rows mid-loop and corrupts the mapping.
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
+        for r, (row, raw) in enumerate(zip(rows, raw_records)):
             when = _SortItem(history.relative_date_label(row.timestamp),
                              sort_key=row.timestamp)
             when.setToolTip(history.full_timestamp_label(row.timestamp))
-            # Store log filename, timestamp, and operation so double-click still
-            # works after re-sort and can fall back to timestamp matching for
-            # older rows that predate log_filename storage.
+            # Store log filename, timestamp, operation, and raw record so
+            # double-click works after re-sort and can show data for any op type.
             when.setData(_LOG_ROLE, row.log_filename)
             when.setData(_TIMESTAMP_ROLE, row.timestamp)
             when.setData(_OPERATION_ROLE, row.operation_label.lower())
+            when.setData(_RECORD_ROLE, raw)
             self.table.setItem(r, 0, when)
             self.table.setItem(r, 1, _SortItem(row.workstation))
             self.table.setItem(r, 2, _SortItem(row.operation_label))
@@ -242,27 +244,21 @@ class HistoryTab(QWidget):
 
     # ── per-row actions ───────────────────────────────────────────────────────
     def _open_row_log(self, row: int, _col: int):
-        """M9.3: open the selected job's custody log if it exists locally."""
-        from PyQt6.QtGui import QDesktopServices
-        from PyQt6.QtCore import QUrl
+        """Open the selected job's log in an in-app viewer window."""
+        from gui.job_log_dialog import JobLogDialog
         when_item = self.table.item(row, 0)
         if when_item is None:
             return
         name = when_item.data(_LOG_ROLE)
         path = activity_index.find_local_log(name) if name else None
         if path is None:
-            # Fallback for rows written before log_filename was stored: match by
-            # the job's UTC timestamp against report filenames on disk.
             ts = when_item.data(_TIMESTAMP_ROLE)
             op = when_item.data(_OPERATION_ROLE)
             if ts:
                 path = activity_index.find_local_log_by_timestamp(ts, op)
-        if path:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-        else:
-            self.status_label.setText(
-                "Custody log not available locally for this job"
-                + (f" ({name})" if name else "") + ".")
+        record = when_item.data(_RECORD_ROLE)
+        dlg = JobLogDialog(path, record, parent=self)
+        dlg.show()
 
     # ── refresh ─────────────────────────────────────────────────────────────
     def _refresh_org(self):

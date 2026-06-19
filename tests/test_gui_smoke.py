@@ -644,20 +644,23 @@ class TestHistoryTabSmoke:
 
     def test_double_click_opens_local_log(self, tab, monkeypatch, tmp_path):
         import gui.history_tab as ht
-        from PyQt6.QtGui import QDesktopServices
+        import gui.job_log_dialog as jld
         log = tmp_path / "custody.txt"; log.write_text("x")
         monkeypatch.setattr(ht.activity_index, "find_local_log", lambda n: log)
-        opened = []
-        monkeypatch.setattr(QDesktopServices, "openUrl",
-                            staticmethod(lambda url: opened.append(url) or True))
-        tab._open_row_log(0, 0)  # first row has log_filename "c.txt"
-        assert opened, "should open the custody log"
-
-    def test_double_click_missing_log_sets_status(self, tab, monkeypatch):
-        import gui.history_tab as ht
-        monkeypatch.setattr(ht.activity_index, "find_local_log", lambda n: None)
+        shown = []
+        monkeypatch.setattr(jld.JobLogDialog, "show", lambda self: shown.append(self))
         tab._open_row_log(0, 0)
-        assert "not available" in tab.status_label.text()
+        assert shown, "should open the job log dialog"
+
+    def test_double_click_missing_log_shows_dialog(self, tab, monkeypatch):
+        import gui.history_tab as ht
+        import gui.job_log_dialog as jld
+        monkeypatch.setattr(ht.activity_index, "find_local_log", lambda n: None)
+        monkeypatch.setattr(ht.activity_index, "find_local_log_by_timestamp", lambda *a, **k: None)
+        shown = []
+        monkeypatch.setattr(jld.JobLogDialog, "show", lambda self: shown.append(self))
+        tab._open_row_log(0, 0)
+        assert shown, "should still open a dialog (showing record data)"
 
     def test_staleness_label_hidden_when_fresh(self, tab, monkeypatch):
         import gui.history_tab as ht
