@@ -224,6 +224,7 @@ def transfer_folder(src, dst, gdrive_mode=False, log_cb=None, progress_cb=None,
         record_from_manifest(
             _manifest_for_log, operation="transfer", source=src.name,
             dests=[actual_dest.name], verdict="COMPLETE" if not errors else "PARTIAL",
+            log_filename=saved[0].name if saved else "",
         ), log_cb=log_cb)
 
     return {
@@ -479,6 +480,7 @@ def transfer_folder_rclone(src, dst, mirror_mode=False, conflict_handler="overwr
             record_from_manifest(
                 _manifest_for_log, operation="transfer",
                 source=_src_label, dests=[_dst_label], verdict=_verdict,
+                log_filename=saved_paths[0].name if saved_paths else "",
             ), log_cb=log_cb)
     except Exception:
         pass

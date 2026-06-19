@@ -29,7 +29,48 @@ def _fmt_json(path: Path) -> str:
     lines = []
     schema = data.get("schema", "")
 
-    if data.get("operation") in ("post-merge", "merge") or data.get("label") == "post-merge":
+    if data.get("operation") == "transfer":
+        ctx = data.get("checksum_context", {}) or {}
+        vmethod = ctx.get("method") or data.get("verification_method", "")
+        files = data.get("files") or {}
+        all_files = {k: v for k, v in files.items()
+                     if not k.rsplit("/", 1)[-1].startswith("._")}
+        vfailures = data.get("verify_failures") or []
+        errors = data.get("errors") or []
+        lines += [
+            f"Operation  : Transfer",
+            f"Date/Time  : {data.get('created_at', '')}",
+            f"Workstation: {data.get('workstation', '')}",
+            f"User       : {data.get('user', '')}",
+            f"Source     : {data.get('source_root', data.get('root', ''))}",
+            f"Destination: {data.get('dest_root', data.get('destination', ''))}",
+            f"Files      : {data.get('file_count', len(all_files))}",
+            f"Verify     : {vmethod or ctx.get('algorithm', '').upper() or '—'}",
+            f"Errors     : {data.get('error_count', len(errors))}",
+            f"Failures   : {len(vfailures)}",
+        ]
+        if all_files:
+            lines += ["", f"FILES ({len(all_files)}):"]
+            for rel, fdata in all_files.items():
+                src_block = (fdata or {}).get("source_checksums", {}) or {}
+                dst_block = (fdata or {}).get("dest_checksums",   {}) or {}
+                cs_block  = (fdata or {}).get("checksums",        {}) or {}
+                for algo_key, algo_label in (("xxh128", "XXH128"), ("xxhash128", "XXH128"),
+                                             ("md5", "MD5"), ("sha256", "SHA-256")):
+                    src_cs = src_block.get(algo_key) or cs_block.get(algo_key)
+                    dst_cs = dst_block.get(algo_key) or cs_block.get(algo_key)
+                    if src_cs or dst_cs:
+                        break
+                else:
+                    algo_label, src_cs, dst_cs = "XXH128", "—", "—"
+                status = (fdata or {}).get("status", "verified")
+                lines.append(f"  {rel}  [{status.upper()}]")
+                lines.append(f"    {algo_label} src: {src_cs or '—'}  dst: {dst_cs or '—'}")
+        if errors:
+            lines += ["", "ERRORS:"]
+            for e in errors:
+                lines.append(f"  {e.get('file', '')} -- {e.get('error', '')}")
+    elif data.get("operation") in ("post-merge", "merge") or data.get("label") == "post-merge":
         ctx = data.get("checksum_context", {}) or {}
         stats = data.get("scan_stats", {}) or {}
         renames = data.get("renames") or []

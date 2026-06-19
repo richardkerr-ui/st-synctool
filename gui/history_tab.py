@@ -250,10 +250,13 @@ class HistoryTab(QWidget):
         if when_item is None:
             return
         name = when_item.data(_LOG_ROLE)
+        op = when_item.data(_OPERATION_ROLE)
+        # Transfer jobs use the manifest JSON; never open a .txt for them.
+        if op == "transfer" and name and not name.endswith(".json"):
+            name = ""
         path = activity_index.find_local_log(name) if name else None
         if path is None:
             ts = when_item.data(_TIMESTAMP_ROLE)
-            op = when_item.data(_OPERATION_ROLE)
             if ts:
                 path = activity_index.find_local_log_by_timestamp(ts, op)
         record = when_item.data(_RECORD_ROLE)
