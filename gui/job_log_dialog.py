@@ -46,6 +46,7 @@ def _fmt_json(path: Path) -> str:
             f"Size       : {data.get('total_size_bytes', 0):,} bytes",
             f"Algorithm  : {ctx.get('algorithm', 'xxh128').upper()}",
             f"Reused     : {stats.get('reused_from_base', 0)}  Rehashed: {stats.get('rehashed', 0)}",
+            f"Unchanged  : {data.get('unchanged_count', '—')}",
         ]
         if renames:
             lines += ["", f"RENAMES ({len(renames)}):"]

@@ -315,6 +315,7 @@ class ApplyWorker(QObject):
             new_manifest["renames"] = renames
 
             # Embed per-file action log so the history viewer can show what happened.
+            yours_files = (self.yours or {}).get("files", {}) or {}
             new_manifest["operations"] = {}
             for rel, act in self.actions.items():
                 if act in (ACT_SKIP, ""):
@@ -326,6 +327,7 @@ class ApplyWorker(QObject):
                 else:
                     status = "skipped"
                 new_manifest["operations"][rel] = {"action": act, "status": status}
+            new_manifest["unchanged_count"] = max(0, len(yours_files) - len(self.actions))
 
             # MANIFEST-FIX (item 08): enrich regenerated entries with the verified
             # hashes captured during apply so they are persisted, not recomputed.
