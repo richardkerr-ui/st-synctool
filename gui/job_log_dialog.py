@@ -51,7 +51,18 @@ def _fmt_json(path: Path) -> str:
             lines += ["", f"RENAMES ({len(renames)}):"]
             for r in renames:
                 lines.append(f"  {r.get('from', '')}  →  {r.get('to', '')}  [{r.get('reason', '')}]")
-        if files:
+        operations = data.get("operations") or {}
+        if operations:
+            by_action: dict = {}
+            for rel, op in operations.items():
+                key = f"{op.get('action', '?')} [{op.get('status', '?').upper()}]"
+                by_action.setdefault(key, []).append(rel)
+            lines += ["", f"OPERATIONS ({len(operations)}):"]
+            for label in sorted(by_action):
+                lines.append(f"  {label}  ({len(by_action[label])} file(s))")
+                for rel in by_action[label]:
+                    lines.append(f"    {rel}")
+        elif files:
             lines += ["", f"FILES ({len(files)}):"]
             for rel, fdata in files.items():
                 cs = (fdata or {}).get("checksums", {}) or {}

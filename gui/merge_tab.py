@@ -313,6 +313,20 @@ class ApplyWorker(QObject):
                 counterpart_path=self.server_path, operation="post-merge",
             )
             new_manifest["renames"] = renames
+
+            # Embed per-file action log so the history viewer can show what happened.
+            new_manifest["operations"] = {}
+            for rel, act in self.actions.items():
+                if act in (ACT_SKIP, ""):
+                    status = "skipped"
+                elif rel in results["success"]:
+                    status = "success"
+                elif rel in results["failed"]:
+                    status = "failed"
+                else:
+                    status = "skipped"
+                new_manifest["operations"][rel] = {"action": act, "status": status}
+
             # MANIFEST-FIX (item 08): enrich regenerated entries with the verified
             # hashes captured during apply so they are persisted, not recomputed.
             for rel, extra in verified_entries.items():
