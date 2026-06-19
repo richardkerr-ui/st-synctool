@@ -255,10 +255,14 @@ class HistoryTab(QWidget):
         if op == "transfer" and name and not name.endswith(".json"):
             name = ""
         path = activity_index.find_local_log(name) if name else None
+        if path is not None and op == "transfer" and path.suffix != ".json":
+            path = None
         if path is None:
             ts = when_item.data(_TIMESTAMP_ROLE)
             if ts:
                 path = activity_index.find_local_log_by_timestamp(ts, op)
+                if path is not None and op == "transfer" and path.suffix != ".json":
+                    path = None
         record = when_item.data(_RECORD_ROLE)
         dlg = JobLogDialog(path, record, parent=self)
         dlg.show()
