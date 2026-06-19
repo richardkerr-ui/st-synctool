@@ -348,6 +348,45 @@ def find_local_log_by_timestamp(
     return best
 
 
+def find_manifest_log(timestamp_iso: str, base_dir=STSYNC_DIR,
+                      window_seconds: int = 120) -> Optional[Path]:
+    """Like find_local_log_by_timestamp but restricted to JSON files under
+    the Manifests directory. Used for transfer jobs where .txt reports are
+    ignored in favour of the manifest."""
+    import re
+    TS_RE = re.compile(r"(\d{8}_\d{6})")
+
+    try:
+        rec_utc = datetime.fromisoformat(timestamp_iso)
+        if rec_utc.tzinfo is None:
+            rec_utc = rec_utc.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+    base = Path(base_dir) / _paths.MANIFESTS
+    if not base.is_dir():
+        return None
+
+    best: Optional[Path] = None
+    best_delta: float = float("inf")
+
+    for f in base.rglob("*.json"):
+        m = TS_RE.search(f.name)
+        if not m:
+            continue
+        try:
+            file_local = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S")
+            file_utc = file_local.astimezone(timezone.utc)
+        except ValueError:
+            continue
+        delta = abs((rec_utc - file_utc).total_seconds())
+        if delta <= window_seconds and delta < best_delta:
+            best_delta = delta
+            best = f
+
+    return best
+
+
 def load_org_records(*, local_dir=ACTIVITY_DIR, cache_dir=ORG_CACHE_DIR,
                      log_cb=None) -> list:
     """Merge this machine's shards with the cached org shards into one
