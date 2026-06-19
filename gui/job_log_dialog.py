@@ -29,7 +29,36 @@ def _fmt_json(path: Path) -> str:
     lines = []
     schema = data.get("schema", "")
 
-    if schema == "verify_report":
+    if data.get("operation") in ("post-merge", "merge") or data.get("label") == "post-merge":
+        ctx = data.get("checksum_context", {}) or {}
+        stats = data.get("scan_stats", {}) or {}
+        renames = data.get("renames") or []
+        files = data.get("files") or {}
+        lines += [
+            f"Operation  : Merge",
+            f"Date/Time  : {data.get('created_at', '')}",
+            f"Workstation: {data.get('workstation', '')}",
+            f"User       : {data.get('user', '')}",
+            f"Project    : {data.get('project_id', '')}",
+            f"Local      : {data.get('root', '')}",
+            f"Server     : {data.get('counterpart_path', '')}",
+            f"Files      : {data.get('file_count', len(files))}",
+            f"Size       : {data.get('total_size_bytes', 0):,} bytes",
+            f"Algorithm  : {ctx.get('algorithm', 'xxh128').upper()}",
+            f"Reused     : {stats.get('reused_from_base', 0)}  Rehashed: {stats.get('rehashed', 0)}",
+        ]
+        if renames:
+            lines += ["", f"RENAMES ({len(renames)}):"]
+            for r in renames:
+                lines.append(f"  {r.get('from', '')}  →  {r.get('to', '')}  [{r.get('reason', '')}]")
+        if files:
+            lines += ["", f"FILES ({len(files)}):"]
+            for rel, fdata in files.items():
+                cs = (fdata or {}).get("checksums", {}) or {}
+                h = cs.get("xxh128") or cs.get("xxhash128") or cs.get("md5") or "—"
+                status = (fdata or {}).get("verification_method", "")
+                lines.append(f"  {rel}  [{status.upper() if status else '—'}]  {h}")
+    elif schema == "verify_report":
         summary = data.get("summary", {})
         lines += [
             f"Operation  : Verify",

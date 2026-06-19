@@ -281,7 +281,7 @@ def find_local_log(filename: str, base_dir=STSYNC_DIR) -> Optional[Path]:
     base = Path(base_dir)
     # New human-readable report dirs, plus legacy names so pre-restructure logs
     # still open.
-    subs = list(_paths.FEEDBACK_SUBDIRS) + ["logs", "offload_logs"]
+    subs = list(_paths.FEEDBACK_SUBDIRS) + [_paths.MANIFESTS, "logs", "offload_logs"]
     for sub in subs:
         cand = base / sub / filename
         if cand.is_file():
@@ -319,7 +319,7 @@ def find_local_log_by_timestamp(
         return None
 
     base = Path(base_dir)
-    subs = list(_paths.FEEDBACK_SUBDIRS) + ["logs", "offload_logs"]
+    subs = list(_paths.FEEDBACK_SUBDIRS) + [_paths.MANIFESTS, "logs", "offload_logs"]
 
     best: Optional[Path] = None
     best_delta: float = float("inf")

@@ -380,10 +380,11 @@ class ApplyWorker(QObject):
                 verdict = "COMPLETE" if not results["failed"] else "PARTIAL"
                 _srv_label = (self.server_path if is_gdrive_url(self.server_path)
                               else Path(self.server_path).name)
+                _merge_log_name = saved[0].name if saved else ""
                 safe_append_activity(record_from_manifest(
                     new_manifest, operation="merge",
                     source=self.local_path.name, dests=[_srv_label],
-                    verdict=verdict))
+                    verdict=verdict, log_filename=_merge_log_name))
             except Exception:
                 pass
 
