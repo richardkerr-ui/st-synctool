@@ -930,7 +930,7 @@ class TransferTab(QWidget):
             cs_block  = fdata.get("checksums",        {}) or {}
             # Prefer xxh128, fall back to md5 then sha256 (Drive manifests may
             # only carry md5; paranoid mode carries sha256).
-            for algo_key, algo_label in (("xxh128", "XXH128"), ("md5", "MD5"), ("sha256", "SHA-256")):
+            for algo_key, algo_label in (("xxh128", "XXH128"), ("xxhash128", "XXH128"), ("md5", "MD5"), ("sha256", "SHA-256")):
                 src_cs = src_block.get(algo_key) or cs_block.get(algo_key)
                 dst_cs = dst_block.get(algo_key) or cs_block.get(algo_key)
                 if src_cs or dst_cs:
