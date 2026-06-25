@@ -382,11 +382,13 @@ def r3d_clip_metadata(rdc_path: Path) -> dict:
     Gather metadata for one .RDC clip unit (item 65).
 
     Reads the first .RMD sidecar found inside the clip folder.
+    Falls back to probing the .mov proxy with ffprobe when no .RMD is present
+    (RED cameras write .rtn files, not .RMD, so the fallback is the common path).
     Returns probe-compatible dict (same keys as probe_clip) so tile functions
     can accept it without modification.
     """
     r3d_files = sorted(rdc_path.glob("*.R3D"))
-    rmd_files = sorted(rdc_path.glob("*.RMD"))
+    rmd_files = sorted(rdc_path.glob("*.RMD")) or sorted(rdc_path.glob("*.rmd"))
 
     meta: dict = {}
     if rmd_files:
@@ -410,6 +412,28 @@ def r3d_clip_metadata(rdc_path: Path) -> dict:
                 meta["duration"] = fc_val / fps_val
         except (ValueError, ZeroDivisionError):
             pass
+
+    # Fall back to probing via ffmpeg — works on both .mov proxies and .R3D files directly.
+    # Covers cameras that write .rtn instead of .RMD (common case), and R3D-only shoots.
+    if not meta.get("duration") and ffmpeg_available():
+        # Prefer .mov proxy if present; otherwise fall back to the first .R3D segment.
+        mov_files = sorted(rdc_path.glob("*.mov")) or sorted(rdc_path.glob("*.MOV"))
+        probe_target = mov_files[0] if mov_files else (r3d_files[0] if r3d_files else None)
+        if probe_target:
+            probe = probe_clip(probe_target)
+            if probe.get("duration"):
+                meta["duration"] = probe["duration"]
+            if not meta.get("frame_rate"):
+                meta["frame_rate"] = probe.get("frame_rate")
+            if not meta.get("resolution"):
+                meta["resolution"] = probe.get("resolution")
+            if not meta.get("camera_model"):
+                meta["camera_model"] = probe.get("camera_model")
+            if not meta.get("timecode_start"):
+                meta["timecode_start"] = probe.get("timecode_start")
+            meta.setdefault("codec", "R3D")
+            # Store the best available source for frame extraction
+            meta["_ffmpeg_source"] = probe_target
 
     meta["segment_count"] = len(r3d_files)
     meta["clip_path"]     = rdc_path  # caller may need this
@@ -941,6 +965,19 @@ def build_contact_sheet(
                     frames = extract_frames_r3d(
                         item, thumbnails_dir, dur, n, redline_exe, fps=fps_val, log_cb=log_cb
                     )
+                elif dur and ffmpeg_available():
+                    # REDline not available — use ffmpeg on the best available source.
+                    # _ffmpeg_source is the .mov proxy if present, otherwise the first .R3D segment.
+                    # ffmpeg's native redcode decoder handles .R3D directly.
+                    ffmpeg_src = meta.get("_ffmpeg_source")
+                    if ffmpeg_src is None:
+                        mov_files = sorted(item.glob("*.mov")) or sorted(item.glob("*.MOV"))
+                        r3d_files = sorted(item.glob("*.R3D"))
+                        ffmpeg_src = mov_files[0] if mov_files else (r3d_files[0] if r3d_files else None)
+                    if ffmpeg_src:
+                        frames = extract_frames(ffmpeg_src, thumbnails_dir, dur, n, log_cb)
+                    else:
+                        frames = []
                 else:
                     frames = []
                 tiles.append(make_r3d_tile(item, frames, meta, redline_present=bool(redline_exe)))
